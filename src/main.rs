@@ -1,3 +1,41 @@
+use statrs::function::gamma::ln_gamma;
+use statrs::function::beta::ln_beta;
+
+fn ln_binom(n: usize, k: usize) -> f64 {
+    assert!(k <= n); // Otherwise would be minus infinity
+    let n = n as f64;
+    let k = k as f64;
+    ln_gamma(n+1.0) - ln_gamma(k+1.0) - ln_gamma(n-k+1.0)
+}
+
+fn ln_beta_binom(k: usize, n: usize, alpha: f64, beta: f64) -> f64 {
+    ln_binom(n,k) + ln_beta(k as f64 + alpha, (n - k) as f64 + beta) - ln_beta(alpha, beta)
+}
+
+fn pstar_normalization_factor(n: usize, alpha: f64, beta: f64) -> f64 {
+    let sum: f64 = (0..=n).map(|k| ln_pstar_unnormalized(k,n,alpha,beta)).map(|x| x.exp()).sum();
+    return 1.0 / sum;
+}
+
+// p^* in Eq. 2.7 in Tommi's thesis
+fn ln_pstar_unnormalized(k: usize, n: usize, alpha: f64, beta: f64) -> f64 {
+    ln_binom(n,k) + ln_beta(k as f64 + alpha, (n - k) as f64 + beta) - ln_beta(n as f64 + alpha, beta)
+}
+
+fn ln_pstar(k: usize, n: usize, alpha: f64, beta: f64) -> f64 {
+    ln_pstar_unnormalized(k, n, alpha, beta) + pstar_normalization_factor(n, alpha, beta).ln()
+}
+
+fn ln_pstar_normalized_thesis_formula(k: usize, n: usize, alpha: f64, beta: f64) -> f64 {
+    let mut ans = ln_pstar_unnormalized(k, n, alpha, beta);
+    for j in 1..=n {
+        let n = n as f64;
+        let k = k as f64;
+        ans += (alpha + n + k - j as f64).ln() - (alpha + beta + 2.0*n - j as f64).ln();
+    } 
+    ans
+}
+
 // The input is a weighted compatibility matrix where cell (i,j) has the number of
 // compatible genomes in cluster j for read i.
 // have size 1, the hit counts are 0 or 1.
@@ -41,5 +79,37 @@ fn evalulate_model(hit_counts: &Vec<Vec<usize>>, latent_variables: &Vec<usize>, 
 }
 
 fn main() {
-    println!("Hello, world!");
+    let n = 10;
+    let pi = 0.65;
+    let phi = 1.0 - pi + 0.01 / 10.0;
+    let alpha = pi / phi;
+    let beta = (1.0 - pi) / phi;
+    dbg!(alpha, beta);
+
+    //let alpha = 3_f64;
+    //let beta = 2_f64;
+    assert!(alpha / (alpha + beta) >= 0.5);
+    let mut sum = 0_f64;
+    let mut sum2 = 0_f64;
+    for k in 0..=n {
+        eprintln!("{} {} {}", k, ln_beta_binom(k, n, alpha, beta).exp(), ln_pstar_normalized_thesis_formula(k, n, alpha, beta).exp());
+        sum += ln_beta_binom(k, n, alpha, beta).exp();
+        sum2 += ln_pstar_normalized_thesis_formula(k, n, alpha, beta).exp();
+    }
+    eprintln!("{} {}", sum, sum2);
+}
+
+#[cfg(test)]
+mod tests {
+    use statrs::assert_almost_eq;
+
+    use crate::ln_binom;
+    #[test]
+    fn test_ln_binom(){
+        let n = 10;
+        let k = 4;
+        let correct = 210; // n choose k
+        let computed = ln_binom(n,k).exp();
+        assert!((correct as f64 - computed).abs() < 1e-6);
+    }
 }
