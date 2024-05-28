@@ -1,3 +1,5 @@
+use std::thread::LocalKey;
+
 use statrs::function::gamma::ln_gamma;
 use statrs::function::beta::ln_beta;
 
@@ -78,7 +80,52 @@ fn evalulate_model(hit_counts: &Vec<Vec<usize>>, latent_variables: &Vec<usize>, 
     ans
 }
 
+// Likelihood_matrix[i][j] is the likelihood of read i vs cluster j
+// Flat prior on theta
+fn theta_posterior(likelihood_matrix: &Vec<Vec<f64>>, theta: &Vec<f64>) -> f64 {
+    let k = likelihood_matrix.len();
+    let n = likelihood_matrix.first().unwrap().len();
+    let mut ans = 0_f64;
+    for read in 0..n {
+        let likelihood = (0..k).map(|k| likelihood_matrix[k][read] * theta[k]).sum::<f64>();
+        ans += likelihood.ln(); // Log-likelihood
+    }
+    ans
+}
+
+// Likelihood_matrix[i][j] is the likelihood of read i vs cluster j
+// Flat prior on theta
+fn theta_posterior_with_indicator_variables(likelihood_matrix: &Vec<Vec<f64>>, theta: &Vec<f64>) -> f64 {
+    let k = likelihood_matrix.len();
+    let n = likelihood_matrix.first().unwrap().len();
+    let mut ans = 0_f64;
+    
+    // Iterate all tuples of length n with values in [0..k).
+    for x in 0..k.pow(n as u32) { // Interpreting x as a base-k number
+        let mut I = Vec::<usize>::new();
+        let mut x_copy = x;
+        for _ in 0..n {
+            I.push(x_copy % k);
+            x_copy /= k;
+        }
+        let mut I_likelihood = 1_f64;
+        for (read, &k) in I.iter().enumerate() {
+            I_likelihood *= likelihood_matrix[k][read] * theta[k];
+        }
+        ans += I_likelihood;
+    }
+
+    ans.ln()
+}
+
 fn main() {
+
+    let likelihood_matrix = vec![vec![0.1, 0.1], vec![0.6, 0.7], vec![0.5, 0.5]];
+    let theta = vec![0.0, 0.5, 0.5];
+    eprintln!("{}", theta_posterior(&likelihood_matrix, &theta));
+    eprintln!("{}", theta_posterior_with_indicator_variables(&likelihood_matrix, &theta));
+
+    /*
     let n = 10;
     let pi = 0.65;
     let phi = 1.0 - pi + 0.01 / 10.0;
@@ -97,6 +144,7 @@ fn main() {
         sum2 += ln_pstar_normalized_thesis_formula(k, n, alpha, beta).exp();
     }
     eprintln!("{} {}", sum, sum2);
+    */
 }
 
 #[cfg(test)]
