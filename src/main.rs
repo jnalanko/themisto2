@@ -1,5 +1,7 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
+mod EM;
+
 use std::thread::LocalKey;
 
 use statrs::function::gamma::ln_gamma;
