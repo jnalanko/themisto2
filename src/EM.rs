@@ -37,16 +37,23 @@ fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, 
             next_theta[k] = (0..n).fold(0.0, |acc, i| acc + Z_posteriors[i][k]) / n as f64;
         }
 
-        eprintln!("{:?}", next_theta);
+        // Compute the current log-likelihood (just FYI for the user, does not affect the algorithm)
+        let mut total_log_likelihood: f64 = 0.0;
+        for i in 0..n {
+            let prob = (0..K).fold(0.0, |acc, k| acc + next_theta[k] * likelihood.likelihood(&observations[i], k));
+            total_log_likelihood += prob.ln();
+        }
+
+        eprintln!("{}, {:?}", total_log_likelihood, next_theta);
 
         // change = |prev_theta - next_theta|
         let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
-
         if change < 1e-9 {
-            return next_theta;
+            return next_theta; // Converged
         }
 
         prev_theta = next_theta;
+
 
     }
 }
