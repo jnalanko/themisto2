@@ -115,7 +115,7 @@ mod tests {
         // and the others a low likelihood.
 
         let mut rng = rand::thread_rng();
-        let n = 1000;
+        let n = 10000;
         let K = 5;
         let mut L: Vec<Vec<f64>> = vec![vec![0.0; K]; n]; // Likelihood matrix
         let initial_theta: Vec<f64> = vec![0.2, 0.2, 0.2, 0.2, 0.2];
