@@ -76,6 +76,9 @@ mod tests {
         let observations = vec![0,0,1,2,3,1,2,3,3,2,1,1,2,3,3,1,3,3,3,3,3,1,1,1,1,1,1,1];
         let likelihood = MyLikelihood{true_origins: observations.clone()};
         let initial_theta: Vec<f64> = vec![0.25, 0.25, 0.25, 0.25];
+
+        eprintln!("{:?}", (0..=3).map(|k| observations.iter().filter(|x| **x == k).count()));
+
         fit_model(&likelihood, &observations, &initial_theta);
     }
 }
