@@ -55,9 +55,10 @@ fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{rngs::ThreadRng, Rng};
+    use rand_distr::{Dirichlet, Distribution};
 
-    struct MyLikelihood {
-    }
+    struct MyLikelihood {}
 
     impl Likelihood for MyLikelihood {
         type Observation = usize;
@@ -70,6 +71,19 @@ mod tests {
         }
     }
 
+    struct LikelihoodMatrix{
+        likelihoods: Vec<Vec<f64>>
+    }
+
+    impl Likelihood for LikelihoodMatrix {
+
+        type Observation = usize; // Index of read
+
+        fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
+            self.likelihoods[*x_i][k]
+        }
+    }
+
     #[test]
     fn test_EM_algo(){
         let observations = vec![0,0,1,2,3,1,2,3,3,2,1,1,2,3,3,1,3,3,3,3,3,1,1,1,1,1,1,1];
@@ -79,5 +93,49 @@ mod tests {
         eprintln!("{:?}", (0..=3).map(|k| observations.iter().filter(|x| **x == k).count()));
 
         fit_model(&likelihood, &observations, &initial_theta);
+    }
+
+    fn draw_sample(cumul: &[f64], rng: &mut ThreadRng) -> usize {
+        assert!(cumul.len() > 0);
+        let p = rng.gen::<f64>();
+        for i in 0..cumul.len() {
+            if p <= cumul[i] && (i == 0 || p > cumul[i-1]) {
+                return i;
+            }
+        }
+
+        // Should not happen unless there is floating point inaccuracy (which there can be), because the last element of cumul should be 1.0
+        return cumul.len() - 1; 
+    }
+
+    #[test]
+    fn simulation_test(){
+        // Start with some ground truth mixing ratios. Generate observations and a likelihood
+        // matrix for them so that the first mixing component tends to have a high likelihood
+        // and the others a low likelihood.
+
+        let mut rng = rand::thread_rng();
+        let n = 1000;
+        let K = 5;
+        let mut L: Vec<Vec<f64>> = vec![vec![0.0; K]; n]; // Likelihood matrix
+        let initial_theta: Vec<f64> = vec![0.2, 0.2, 0.2, 0.2, 0.2];
+        let true_theta: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.0];
+        let true_theta_cumul: Vec<f64> = vec![0.1, 0.3, 0.6, 1.0, 1.0];
+        let dirichlets = vec![ // The log likelihoods will be samples from one of these
+            Dirichlet::new(&[10.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
+            Dirichlet::new(&[1.0, 10.0, 1.0, 1.0, 1.0]).unwrap(),
+            Dirichlet::new(&[1.0, 1.0, 10.0, 1.0, 1.0]).unwrap(),
+            Dirichlet::new(&[1.0, 1.0, 1.0, 10.0, 1.0]).unwrap(),
+            Dirichlet::new(&[1.0, 1.0, 1.0, 1.0, 10.0]).unwrap(),
+        ];
+        for i in 0..n {
+            let k = draw_sample(&true_theta_cumul, &mut rng);
+            let likelihoods = dirichlets[k].sample(&mut rng);
+            L[i] = likelihoods;
+        }
+
+        let M = LikelihoodMatrix{likelihoods: L};
+        let observations = (0..n).collect::<Vec::<usize>>();
+        fit_model(&M, &observations, &initial_theta);
     }
 }
