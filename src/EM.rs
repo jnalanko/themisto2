@@ -95,19 +95,6 @@ mod tests {
         fit_model(&likelihood, &observations, &initial_theta);
     }
 
-    fn draw_sample(cumul: &[f64], rng: &mut ThreadRng) -> usize {
-        assert!(cumul.len() > 0);
-        let p = rng.gen::<f64>();
-        for i in 0..cumul.len() {
-            if p <= cumul[i] && (i == 0 || p > cumul[i-1]) {
-                return i;
-            }
-        }
-
-        // Should not happen unless there is floating point inaccuracy (which there can be), because the last element of cumul should be 1.0
-        return cumul.len() - 1; 
-    }
-
     #[test]
     fn simulation_test(){
         // Start with some ground truth mixing ratios. Generate observations and a likelihood
@@ -120,7 +107,7 @@ mod tests {
         let mut L: Vec<Vec<f64>> = vec![vec![0.0; K]; n]; // Likelihood matrix
         let initial_theta: Vec<f64> = vec![0.2, 0.2, 0.2, 0.2, 0.2];
         let true_theta: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.0];
-        let true_theta_cumul: Vec<f64> = vec![0.1, 0.3, 0.6, 1.0, 1.0];
+        let cat_theta = rand_distr::WeightedIndex::new(&true_theta).unwrap(); // Categorical distribution with weights theta
         let dirichlets = vec![ // The log likelihoods will be samples from one of these
             Dirichlet::new(&[10.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
             Dirichlet::new(&[1.0, 10.0, 1.0, 1.0, 1.0]).unwrap(),
@@ -129,7 +116,7 @@ mod tests {
             Dirichlet::new(&[1.0, 1.0, 1.0, 1.0, 10.0]).unwrap(),
         ];
         for i in 0..n {
-            let k = draw_sample(&true_theta_cumul, &mut rng);
+            let k = cat_theta.sample(&mut rng);
             let likelihoods = dirichlets[k].sample(&mut rng);
             L[i] = likelihoods;
         }
