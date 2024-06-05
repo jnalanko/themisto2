@@ -5,14 +5,14 @@ use sbwt::{self, SbwtIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
 #[derive(Debug)]
-struct ColoredKmers {
+pub struct ColoredKmers {
     kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
     color_matrix: BitVec, // Concatenated rows
     n_colors: usize,
 }
 
 impl ColoredKmers {
-    fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
+    pub fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
         let mut color_matrix: BitVec = bitvec![0; kmers.n_sets() * n_colors]; // Concatenated rows
         let mut line = String::new();
 
@@ -49,19 +49,19 @@ impl ColoredKmers {
         ColoredKmers{kmers, color_matrix, n_colors}
     }
 
-    fn get_color_set(&self, kmer: &[u8]) -> Option<&BitSlice> {
+    pub fn get_color_set(&self, kmer: &[u8]) -> Option<&BitSlice> {
         let row = self.kmers.search(kmer)?.start;        
         Some(&self.color_matrix[row*self.n_colors..(row+1)*self.n_colors])
     }
 
-    fn serialize<W: std::io::Write>(&self, out: &mut W) {
+    pub fn serialize<W: std::io::Write>(&self, out: &mut W) {
         self.kmers.serialize(out).unwrap();
 
         out.write(&(self.n_colors as u64).to_le_bytes()).unwrap();
         bincode::serialize_into(out, &self.color_matrix).unwrap();
     }
 
-    fn load<R: std::io::Read>(input: &mut R) -> Self {
+    pub fn load<R: std::io::Read>(input: &mut R) -> Self {
         let kmers = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
 
         let mut buf = [0_u8; 8];

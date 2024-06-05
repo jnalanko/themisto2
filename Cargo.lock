@@ -643,6 +643,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "bitvec",
+ "clap",
  "rand 0.8.5",
  "rand_distr",
  "sbwt",
