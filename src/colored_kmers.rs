@@ -63,7 +63,7 @@ impl ColoredKmers {
     pub fn serialize<W: std::io::Write>(&self, out: &mut W) {
         self.kmers.serialize(out).unwrap();
 
-        out.write(&(self.n_colors as u64).to_le_bytes()).unwrap();
+        out.write_all(&(self.n_colors as u64).to_le_bytes()).unwrap();
         bincode::serialize_into(out, &self.color_matrix).unwrap();
     }
 
