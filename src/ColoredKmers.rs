@@ -1,15 +1,18 @@
+use std::io::Read;
+
 use sbwt;
 use bitvec::prelude::*;
 
 #[derive(Debug)]
 struct ColoredKmers {
     kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
-    color_matrix: Vec<BitVec>,
+    color_matrix: BitVec, // Concatenated rows
+    n_colors: usize,
 }
 
 impl ColoredKmers {
-    fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, mut themisto_color_dump_stream: impl std::io::BufRead) -> Self {
-        let mut color_matrix: Vec<BitVec> = vec![bitvec![]; kmers.n_sets()];
+    fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
+        let mut color_matrix: BitVec = bitvec![0; kmers.n_sets() * n_colors]; // Concatenated rows
         let mut line = String::new();
 
         // Todo: this operates with unicode strings even though the input is just ASCII and there is no reason to ever
@@ -37,17 +40,24 @@ impl ColoredKmers {
                 None => panic!("Kmer {} not found in sbwt", String::from_utf8(kmer.to_vec()).unwrap()),
             };
 
-            color_matrix[row] = bitvec;
+            color_matrix[row*n_colors..(row+1)*n_colors].copy_from_bitslice(&bitvec);
             
             line.clear();
         }
 
-        ColoredKmers{kmers, color_matrix}
+        ColoredKmers{kmers, color_matrix, n_colors}
     }
 
-    fn get_color_set(&self, kmer: &[u8]) -> Option<&BitVec> {
+    fn get_color_set(&self, kmer: &[u8]) -> Option<&BitSlice> {
         let row = self.kmers.search(kmer)?.start;        
-        Some(&self.color_matrix[row])
+        Some(&self.color_matrix[row*self.n_colors..(row+1)*self.n_colors])
+    }
+
+    fn serialize<W: std::io::Write>(&self, out: &mut W) {
+        self.kmers.serialize(out).unwrap();
+        for bv in self.color_matrix.iter() {
+            todo!();            
+        }
     }
 }
 
@@ -80,7 +90,7 @@ TCAGTTTTTTACCATGGCTTTTTGCGAGTAG 100000000000000000000000000000000000000000000000
         let kmers_slices = kmers_data.map(|x| x.as_slice());
 
         let (sbwt, _) = sbwt::SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(kmers_slices.first().unwrap().len()).run_from_slices(&kmers_slices);
-        let colored_kmers = ColoredKmers::new_from_themisto_color_dump(sbwt, dump.as_bytes());
+        let colored_kmers = ColoredKmers::new_from_themisto_color_dump(sbwt, dump.as_bytes(), bitvec_strings.first().unwrap().len());
 
         for (i, kmer) in kmers_slices.iter().enumerate() {
             let color_set = colored_kmers.get_color_set(kmer).unwrap();
@@ -91,7 +101,12 @@ TCAGTTTTTTACCATGGCTTTTTGCGAGTAG 100000000000000000000000000000000000000000000000
             }
             assert_eq!(color_set_string, bitvec_strings[i]);
         }
+    }
 
-
+    #[test]
+    fn bitvec_serialization() {
+        let bv = bitvec![0; 0];
+        let bytes = bincode::serialize(&bv).unwrap(); 
+        eprintln!("{}", bytes.len());
     }
 }
