@@ -93,12 +93,14 @@ fn main() {
     let mut sbwt_reader = BufReader::new(File::open(sbwt_path).unwrap());
 
     // Read header
-    let _ = SbwtFileHeader::read(&mut sbwt_reader).unwrap();
+    let header = SbwtFileHeader::read(&mut sbwt_reader).unwrap();
+    assert!(header.has_lcs);
 
     // Read sbwt
     let sbwt = sbwt::SbwtIndex::<SubsetMatrix>::load(&mut sbwt_reader).unwrap();
+    let lcs = sbwt::LcsArray::load(&mut sbwt_reader).unwrap();
     eprintln!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
 
-    let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
+    let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, lcs, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
     index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
 }
