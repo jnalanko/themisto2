@@ -217,7 +217,7 @@ fn main() {
 
         log::info!("Reducing to equivalence classes");
         let counts = reduce_to_classes(&mut compatibility_matrix);
-        log::info!("Reduced to ‚{} equivalence classes", counts.len());
+        log::info!("Reduced to {} equivalence classes", counts.len());
 
         log::info!("Running EM");
         let likelihood = SimpleLikelihood{};
