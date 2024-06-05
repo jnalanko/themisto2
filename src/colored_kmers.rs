@@ -14,6 +14,11 @@ pub struct ColoredKmers {
 }
 
 impl ColoredKmers {
+
+    pub fn n_colors(&self) -> usize {
+        self.n_colors
+    }
+
     pub fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: sbwt::LcsArray, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
         let mut color_matrix: BitVec = bitvec![0; kmers.n_sets() * n_colors]; // Concatenated rows
         let mut line = String::new();

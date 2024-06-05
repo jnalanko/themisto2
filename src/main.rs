@@ -1,8 +1,11 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
 use std::{fs::File, io::{BufReader, BufWriter, Read}};
+use bitvec::prelude::*;
 
 use sbwt::SubsetMatrix;
+
+use crate::EM::fit_model;
 
 mod EM;
 mod colored_kmers;
@@ -20,6 +23,19 @@ impl SbwtFileHeader {
         Ok(Self{has_lcs})
     }
 
+}
+
+struct SimpleLikelihood {} // Based on compatibility vectors
+
+impl EM::Likelihood for SimpleLikelihood {
+    type Observation = BitVec; // Compatibility vector
+    fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
+        if *x_i.get(k).unwrap() {
+            0.99
+        }  else {
+            0.01
+        }
+    }
 }
 
 // Read a byte string in this format: first a little-endian usize giving the length,
@@ -96,6 +112,21 @@ fn main() {
             .value_parser(clap::value_parser!(std::path::PathBuf))
             .required(true)
         )
+    )
+    .subcommand(clap::Command::new("pseudoalign-into-EM")
+        .arg_required_else_help(true)
+        .arg(clap::Arg::new("index")
+            .long("index")
+            .short('i')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("query")
+            .long("query")
+            .short('q')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
     );
 
     let matches = cli.get_matches();
@@ -114,7 +145,7 @@ fn main() {
         // Read sbwt
         let sbwt = sbwt::SbwtIndex::<SubsetMatrix>::load(&mut sbwt_reader).unwrap();
         let lcs = sbwt::LcsArray::load(&mut sbwt_reader).unwrap();
-        eprintln!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
+        log::info!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
 
         let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, lcs, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
         index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
@@ -127,5 +158,20 @@ fn main() {
             let intersection = index.intersection_pseudoalignment(rec.seq);
             println!("{}", intersection);
         }
+    } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign-into-EM"){
+        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
+        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+        log::info!("Computing compatibility vectors...");
+        let mut compatibility_matrix = Vec::<BitVec>::new();
+        while let Some(rec) = reader.read_next().unwrap(){
+            compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq));
+        }
+        log::info!("Running EM");
+        let likelihood = SimpleLikelihood{};
+        let n_colors = index.n_colors();
+        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &vec![1.0 / n_colors as f64; n_colors]);
+        println!("{:?}", &mixing_fractions);
     }
 }

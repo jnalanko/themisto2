@@ -1,4 +1,4 @@
-trait Likelihood {
+pub trait Likelihood {
 
     type Observation;
 
@@ -11,7 +11,7 @@ trait Likelihood {
 
 // initial_theta is the initial guess for the mixing fractions.
 // \theta_1 + ... + \theta_k = 1.
-fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, initital_theta: &Vec<f64>) -> Vec<f64>{
+pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, initital_theta: &Vec<f64>) -> Vec<f64>{
     let n = observations.len();
     let K = initital_theta.len();
 
@@ -44,7 +44,7 @@ fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, 
             total_log_likelihood += prob.ln();
         }
 
-        eprintln!("{}, {:?}", total_log_likelihood, next_theta);
+        log::info!("{}, {:?}", total_log_likelihood, next_theta);
 
         // change = |prev_theta - next_theta|
         let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
