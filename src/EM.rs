@@ -43,11 +43,11 @@ pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observatio
             let prob = (0..K).fold(0.0, |acc, k| acc + next_theta[k] * likelihood.likelihood(&observations[i], k));
             total_log_likelihood += prob.ln();
         }
+        let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
 
-        log::info!("{}", total_log_likelihood);
+        log::info!("{} {}", total_log_likelihood, change);
 
         // change = |prev_theta - next_theta|
-        let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
         if change < 1e-9 {
             return next_theta; // Converged
         }
