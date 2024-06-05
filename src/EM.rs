@@ -44,7 +44,7 @@ pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observatio
             total_log_likelihood += prob.ln();
         }
 
-        log::info!("{}, {:?}", total_log_likelihood, next_theta);
+        log::info!("{}", total_log_likelihood);
 
         // change = |prev_theta - next_theta|
         let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
@@ -53,7 +53,6 @@ pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observatio
         }
 
         prev_theta = next_theta;
-
 
     }
 }
