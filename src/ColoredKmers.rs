@@ -1,6 +1,7 @@
 use std::io::Read;
 
-use sbwt;
+use rand_distr::num_traits::ToBytes;
+use sbwt::{self, SbwtIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
 #[derive(Debug)]
@@ -55,9 +56,21 @@ impl ColoredKmers {
 
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
         self.kmers.serialize(out).unwrap();
-        for bv in self.color_matrix.iter() {
-            todo!();            
-        }
+
+        out.write(&(self.n_colors as u64).to_le_bytes()).unwrap();
+        bincode::serialize_into(out, &self.color_matrix).unwrap();
+    }
+
+    fn load<R: std::io::Read>(input: &mut R) -> Self {
+        let kmers = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
+
+        let mut buf = [0_u8; 8];
+        input.read_exact(&mut buf).unwrap();
+        let n_colors = u64::from_le_bytes(buf);
+
+        let color_matrix: BitVec = bincode::deserialize_from(input).unwrap();
+
+        ColoredKmers{kmers, n_colors: n_colors as usize, color_matrix}
     }
 }
 
@@ -90,7 +103,15 @@ TCAGTTTTTTACCATGGCTTTTTGCGAGTAG 100000000000000000000000000000000000000000000000
         let kmers_slices = kmers_data.map(|x| x.as_slice());
 
         let (sbwt, _) = sbwt::SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(kmers_slices.first().unwrap().len()).run_from_slices(&kmers_slices);
-        let colored_kmers = ColoredKmers::new_from_themisto_color_dump(sbwt, dump.as_bytes(), bitvec_strings.first().unwrap().len());
+
+        let serialized_bytes = { // Build index and serialize to also test serialization
+            let colored_kmers = ColoredKmers::new_from_themisto_color_dump(sbwt, dump.as_bytes(), bitvec_strings.first().unwrap().len());
+            let mut serialized_bytes = Vec::<u8>::new();
+            colored_kmers.serialize(&mut std::io::Cursor::new(&mut serialized_bytes));
+            serialized_bytes
+        };
+
+        let colored_kmers = ColoredKmers::load(&mut std::io::Cursor::new(serialized_bytes)); // Load back
 
         for (i, kmer) in kmers_slices.iter().enumerate() {
             let color_set = colored_kmers.get_color_set(kmer).unwrap();
