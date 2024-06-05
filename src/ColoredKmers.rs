@@ -105,6 +105,7 @@ TCAGTTTTTTACCATGGCTTTTTGCGAGTAG 100000000000000000000000000000000000000000000000
 
     #[test]
     fn bitvec_serialization() {
+        // Just checking how much overhead there is
         let bv = bitvec![0; 0];
         let bytes = bincode::serialize(&bv).unwrap(); 
         eprintln!("{}", bytes.len());
