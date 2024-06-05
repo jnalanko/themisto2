@@ -69,6 +69,11 @@ fn read_and_check_string<R: std::io::Read>(input: &mut R, should_be_this: &[u8],
 
 
 fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
     let cli = clap::Command::new("themisto2")
     .arg_required_else_help(true) 
     .subcommand(clap::Command::new("build")
@@ -136,6 +141,7 @@ fn main() {
         let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();
         let n_colors = *sub_matches.get_one::<usize>("n-colors").unwrap();
 
+        log::info!("Loading sbwt");
         let mut sbwt_reader = BufReader::new(File::open(sbwt_path).unwrap());
 
         // Read header
@@ -152,8 +158,12 @@ fn main() {
     } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        
+        log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+
+        log::info!("Pseudoaligning");
         while let Some(rec) = reader.read_next().unwrap(){
             let intersection = index.intersection_pseudoalignment(rec.seq);
             println!("{}", intersection);
@@ -161,9 +171,10 @@ fn main() {
     } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign-into-EM"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
-        log::info!("Computing compatibility vectors...");
+        log::info!("Computing compatibility vectors");
         let mut compatibility_matrix = Vec::<BitVec>::new();
         while let Some(rec) = reader.read_next().unwrap(){
             compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq));
