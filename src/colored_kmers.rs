@@ -18,7 +18,9 @@ impl ColoredKmers {
 
         // Todo: this operates with unicode strings even though the input is just ASCII and there is no reason to ever
         // have unicode characters in it.
+        let bar = indicatif::ProgressBar::new(kmers.n_sets() as u64);
         while themisto_color_dump_stream.read_line(&mut line).unwrap() > 0 {
+            bar.inc(1);
             assert!(line.ends_with('\n'));
             line.pop(); // Trim newline at the end
 
@@ -45,6 +47,7 @@ impl ColoredKmers {
             
             line.clear();
         }
+        bar.finish();
 
         ColoredKmers{kmers, color_matrix, n_colors}
     }
