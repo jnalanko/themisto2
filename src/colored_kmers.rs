@@ -19,6 +19,9 @@ impl ColoredKmers {
         // Todo: this operates with unicode strings even though the input is just ASCII and there is no reason to ever
         // have unicode characters in it.
         let bar = indicatif::ProgressBar::new(kmers.n_sets() as u64);
+        bar.set_style(indicatif::ProgressStyle::with_template("[ETA: {eta_precise}] {wide_bar} {pos:>7}/{len:7} {msg}")
+        .unwrap());
+
         while themisto_color_dump_stream.read_line(&mut line).unwrap() > 0 {
             bar.inc(1);
             assert!(line.ends_with('\n'));
