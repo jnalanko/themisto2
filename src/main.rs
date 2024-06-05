@@ -213,11 +213,17 @@ fn main() {
         while let Some(rec) = reader.read_next().unwrap(){
             compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq));
         }
+        log::info!("Constructed {} compatibility vectors", compatibility_matrix.len());
+
+        log::info!("Reducing to equivalence classes");
+        let counts = reduce_to_classes(&mut compatibility_matrix);
+        log::info!("Reduced to ‚{} equivalence classes", counts.len());
+
         log::info!("Running EM");
         let likelihood = SimpleLikelihood{};
         let n_colors = index.n_colors();
-        //let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &vec![1.0 / n_colors as f64; n_colors]);
-        //println!("{:?}", &mixing_fractions);
+        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors]);
+        println!("{:?}", &mixing_fractions);
     }
 }
 
@@ -243,7 +249,5 @@ mod tests {
             bitvec![1, 0, 1],
             bitvec![1, 1, 1]]);
         assert_eq!(counts, vec![3, 1, 3, 1]);
-        eprintln!("{:?}", vec);
-        eprintln!("{:?}", counts);
     }
 }
