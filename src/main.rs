@@ -67,6 +67,40 @@ fn read_and_check_string<R: std::io::Read>(input: &mut R, should_be_this: &[u8],
 
 }
 
+// Removes duplicates and returns the count of each distinct element remaining
+// in the vector.
+fn reduce_to_classes(compatibility_vectors: &mut Vec<BitVec>) -> Vec<usize> {
+    compatibility_vectors.sort_unstable();
+    
+    let n = compatibility_vectors.len();
+    let mut counts = Vec::<usize>::new();
+    let mut i = 0_usize;
+    let mut j = 0_usize;
+    let mut insert_pos = 0_usize;
+
+    let mut borrow_checker_workaround = bitvec![0; compatibility_vectors[0].len()];
+    while i < n {
+        while j + 1 < n && compatibility_vectors[j+1] == compatibility_vectors[i] {
+            j += 1;
+        }
+        j += 1;
+        // vectors [i, j) are the same
+        counts.push(j-i);
+
+        borrow_checker_workaround.copy_from_bitslice(compatibility_vectors[i].as_bitslice());
+        compatibility_vectors[insert_pos].copy_from_bitslice(&borrow_checker_workaround);
+        i = j;
+        insert_pos += 1;
+    }
+
+    compatibility_vectors.resize(insert_pos, bitvec![]);
+    compatibility_vectors.shrink_to_fit();
+
+    counts
+
+}
+
+
 
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
@@ -182,7 +216,34 @@ fn main() {
         log::info!("Running EM");
         let likelihood = SimpleLikelihood{};
         let n_colors = index.n_colors();
-        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &vec![1.0 / n_colors as f64; n_colors]);
-        println!("{:?}", &mixing_fractions);
+        //let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &vec![1.0 / n_colors as f64; n_colors]);
+        //println!("{:?}", &mixing_fractions);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reduce_to_classes(){
+        let mut vec = vec![
+            bitvec![1, 1, 1],
+            bitvec![1, 0, 1],
+            bitvec![0, 1, 0],
+            bitvec![1, 0, 1],
+            bitvec![1, 0, 0],
+            bitvec![0, 1, 0],
+            bitvec![0, 1, 0],
+            bitvec![1, 0, 1]];
+        let counts = reduce_to_classes(&mut vec);
+        assert_eq!(vec, vec![
+            bitvec![0, 1, 0],
+            bitvec![1, 0, 0],
+            bitvec![1, 0, 1],
+            bitvec![1, 1, 1]]);
+        assert_eq!(counts, vec![3, 1, 3, 1]);
+        eprintln!("{:?}", vec);
+        eprintln!("{:?}", counts);
     }
 }
