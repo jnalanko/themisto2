@@ -81,26 +81,51 @@ fn main() {
             .value_parser(clap::value_parser!(std::path::PathBuf))
             .required(true)
         )
+    )
+    .subcommand(clap::Command::new("pseudoalign")
+        .arg_required_else_help(true)
+        .arg(clap::Arg::new("index")
+            .long("index")
+            .short('i')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("query")
+            .long("query")
+            .short('q')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
     );
 
     let matches = cli.get_matches();
-    let matches = matches.subcommand_matches("build").unwrap();
-    let sbwt_path = matches.get_one::<std::path::PathBuf>("sbwt").unwrap();
-    let color_dump_path = matches.get_one::<std::path::PathBuf>("color-dump").unwrap();
-    let out_path = matches.get_one::<std::path::PathBuf>("out").unwrap();
-    let n_colors = *matches.get_one::<usize>("n-colors").unwrap();
+    if let Some(sub_matches) = matches.subcommand_matches("build"){
+        let sbwt_path = sub_matches.get_one::<std::path::PathBuf>("sbwt").unwrap();
+        let color_dump_path = sub_matches.get_one::<std::path::PathBuf>("color-dump").unwrap();
+        let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();
+        let n_colors = *sub_matches.get_one::<usize>("n-colors").unwrap();
 
-    let mut sbwt_reader = BufReader::new(File::open(sbwt_path).unwrap());
+        let mut sbwt_reader = BufReader::new(File::open(sbwt_path).unwrap());
 
-    // Read header
-    let header = SbwtFileHeader::read(&mut sbwt_reader).unwrap();
-    assert!(header.has_lcs);
+        // Read header
+        let header = SbwtFileHeader::read(&mut sbwt_reader).unwrap();
+        assert!(header.has_lcs);
 
-    // Read sbwt
-    let sbwt = sbwt::SbwtIndex::<SubsetMatrix>::load(&mut sbwt_reader).unwrap();
-    let lcs = sbwt::LcsArray::load(&mut sbwt_reader).unwrap();
-    eprintln!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
+        // Read sbwt
+        let sbwt = sbwt::SbwtIndex::<SubsetMatrix>::load(&mut sbwt_reader).unwrap();
+        let lcs = sbwt::LcsArray::load(&mut sbwt_reader).unwrap();
+        eprintln!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
 
-    let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, lcs, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
-    index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
+        let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, lcs, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
+        index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
+    } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign"){
+        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
+        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+        while let Some(rec) = reader.read_next().unwrap(){
+            let intersection = index.intersection_pseudoalignment(rec.seq);
+            println!("{}", intersection);
+        }
+    }
 }

@@ -92,7 +92,7 @@ impl ColoredKmers {
         ColoredKmers{kmers, lcs, n_colors: n_colors as usize, color_matrix, empty_set: bitvec![0; n_colors as usize]}
     }
 
-    pub fn intersection_pseudoalignment(self, query: &[u8]) -> BitVec {
+    pub fn intersection_pseudoalignment(&self, query: &[u8]) -> BitVec {
         let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
         let mut intersection = bitvec![1; self.n_colors]; // Set with all elements (identity element of intersection).
         let mut at_least_one = false;
