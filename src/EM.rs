@@ -31,11 +31,12 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
     next_theta
 }
 
+// likelihood: see the comments in the trait for an explanation for what it is.
 // initial_theta is the initial guess for the mixing fractions.
 // \theta_1 + ... + \theta_K = 1.
 // observation_counts[i] = number of times observation i was observed
+// It should hold that observations.len() == observation_counts.len().
 pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &[L::Observation], observation_counts: &[usize], initital_theta: &[f64], n_threads: usize) -> Vec<f64>{
-
 
     // There is one latent variable per observation. Let's denote the i-th latent variable with Z_i. Each latent variable
     // is assigned a value from the set {0..K-1}, where K is the number of mixture components. The interpretation is that
@@ -51,8 +52,8 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     // In the M-step, we find the theta that maximizes the likelihood of the data, given that the latent variables
     // are distributed according to the posteriors computed in the E-step. There is a closed-form formula for this,
     // which can be derived using lagrange multipliers. The formula just boils down to this: the k-th component of the
-    // optimal theta is the expected number of observations assigned to component k. That is, the sum of
-    // p(Z_i = k) over all i.
+    // optimal theta is the expected fraction of all observations assigned to component k. That is, the sum of
+    // p(Z_i = k) over all observations i, divided by the number of observations.
     //
     // Since the model is this simple, we can merge the E-step and M-step and do them at the same time.
     // We also compute the contributions to the next theta in parallel by dividing the work into blocks
