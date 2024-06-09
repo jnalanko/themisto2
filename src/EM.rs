@@ -34,7 +34,7 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
 // initial_theta is the initial guess for the mixing fractions.
 // \theta_1 + ... + \theta_K = 1.
 // observation_counts[i] = number of times observation i was observed
-pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &Vec<L::Observation>, observation_counts: &Vec<usize>, initital_theta: &Vec<f64>, n_threads: usize) -> Vec<f64>{
+pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &[L::Observation], observation_counts: &[usize], initital_theta: &[f64], n_threads: usize) -> Vec<f64>{
 
 
     // There is one latent variable per observation. Let's denote the i-th latent variable with Z_i. Each latent variable
@@ -63,7 +63,7 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     let n_total_observations: usize = observation_counts.iter().sum();
     let K = initital_theta.len();
 
-    let mut prev_theta = initital_theta.clone();
+    let mut prev_theta = initital_theta.to_owned();
     let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil n_distinct_observations / n_threads
 
     loop {
