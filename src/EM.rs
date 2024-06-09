@@ -42,11 +42,11 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     // if Z_i = j, then the i-th observation comes from the j-th mixture component.
     //
     // E-step computes the posterior distributions for each latent variable, given the previous estimate for theta.
-    // That is, we compute p(Z_{i,k} | theta, observations), where Z_{i,k} is the probability that observation i
-    // is from component k. This is K numbers for each latent variable. Assuming a flat prior on theta, The formula is:
-    // p(Z_{i,k} | theta, observations) = theta_k * p(observation i | Z_i = k) / N(i)
+    // That is, for each Z_i, we compute p(Z_i = k | theta, observations) for all k = 0..K-1.
+    // Assuming a flat prior on theta, The formula is:
+    // p(Z_i = k | theta, observations) = theta_k * p(observation i | Z_i = k) / N(i)
     // where the likelihood p(observation i | Z_i = k) is queried from the given likelihood model, and N(i)
-    // is the normalization factor for observation i to make Z_{i,k} sum to 1 over k = 0..K-1.
+    // is the normalization factor for observation i to make p(Z_i = k) sum to 1 over k = 0..K-1.
     //
     // In the M-step, we find the theta that maximizes the likelihood of the data, given that the latent variables
     // are distributed according to the posteriors computed in the E-step. There is a closed-form formula for this,
