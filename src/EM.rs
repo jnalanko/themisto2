@@ -16,17 +16,15 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
     // Compute latent variable posteriors for each distinct observation given previous theta estimate
     let mut next_theta: Vec<f64> = vec![0.0; K];
     for i in 0..observations.len() {
-        let mut denominator: f64 = 0.0;
+        let mut denominator: f64 = 0.0; // Normalization factor
         for w in 0..K {
             denominator += prev_theta[w] * likelihood.likelihood(&observations[i], w);
         }
         for k in 0..K {
             let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
 
-            // For clearer code we would store the posteriors in a matrix and run the M-step afterwards
-            // to find the new theta. But those posteriors take a lot of space, so here we already add the contribution
-            // of Z_i_k to the estimate of the text theta. This contribution should be divided by n_total_observations,
-            // but we'll do it in the end for better numerical stability.
+            // This contribution should be divided by n_total_observations,
+            // but we'll do it in the end for numerical reasons.
             next_theta[k] += observation_counts[i] as f64 * Z_i_k_posterior;
         }
     }
@@ -34,9 +32,33 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
 }
 
 // initial_theta is the initial guess for the mixing fractions.
-// \theta_1 + ... + \theta_k = 1.
+// \theta_1 + ... + \theta_K = 1.
 // observation_counts[i] = number of times observation i was observed
 pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &Vec<L::Observation>, observation_counts: &Vec<usize>, initital_theta: &Vec<f64>, n_threads: usize) -> Vec<f64>{
+
+
+    // There is one latent variable per observation. Let's denote the i-th latent variable with Z_i. Each latent variable
+    // is assigned a value from the set {0..K-1}, where K is the number of mixture components. The interpretation is that
+    // if Z_i = j, then the i-th observation comes from the j-th mixture component.
+    //
+    // E-step computes the posterior distributions for each latent variable, given the previous estimate for theta.
+    // That is, we compute p(Z_{i,k} | theta, observations), where Z_{i,k} is the probability that observation i
+    // is from component k. This is K numbers for each latent variable. Assuming a flat prior on theta, The formula is:
+    // p(Z_{i,k} | theta, observations) = theta_k * p(observation i | Z_i = k) / N(i)
+    // where the likelihood p(observation i | Z_i = k) is queried from the given likelihood model, and N(i)
+    // is the normalization factor for observation i to make Z_{i,k} sum to 1 over k = 0..K-1.
+    //
+    // In the M-step, we find the theta that maximizes the likelihood of the data, given that the latent variables
+    // are distributed according to the posteriors computed in the E-step. There is a closed-form formula for this,
+    // which can be derived using lagrange multipliers. The formula just boils down to this: the k-th component of the
+    // optimal theta is the expected number of observations assigned to component k. That is, the sum of
+    // p(Z_i = k) over all i.
+    //
+    // Since the model is this simple, we can merge the E-step and M-step and do them at the same time.
+    // We also compute the contributions to the next theta in parallel by dividing the work into blocks
+    // and deferring a division that applies to all contributions until the very end for numerical reasons.
+    // The code becomes less readable (sorry about that), but it's fast and parallelized very well.
+
     let n_distinct_observations = observations.len();
     let n_total_observations: usize = observation_counts.iter().sum();
     let K = initital_theta.len();
@@ -46,7 +68,7 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
 
     loop {
 
-        // Compute latent variable posteriors for each distinct observation given previous theta estimate.
+        // Compute the contributions to the next theta for each distinct observation given previous theta estimate.
         // The work is split evenly to n_threads threads.
         let mut next_theta = std::thread::scope(|s| {
             let mut join_handles = Vec::<_>::new();
@@ -71,6 +93,8 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
         });
 
         for k in 0..K {
+            // This divisions should have been done to all contributions, but we do all those divisions
+            // here at once for numerical reasons.
             next_theta[k] /= n_total_observations as f64;
         }
 
