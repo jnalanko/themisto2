@@ -94,7 +94,7 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
         });
 
         for k in 0..K {
-            // This divisions should have been done to all contributions, but we do all those divisions
+            // These divisions should have been done to all contributions, but we do all those divisions
             // here at once for numerical reasons.
             next_theta[k] /= n_total_observations as f64;
         }
