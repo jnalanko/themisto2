@@ -4,7 +4,7 @@ pub trait Likelihood {
 
     // Returns p(x_i | z_i = k, theta)
     // x_i is the i-th observation.
-    // z_i is the i-th latent variable. z_i \in {0,...,k-1}
+    // z_i is the i-th latent variable. z_i \in {0,...,K-1}
     fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64;
 
 }
