@@ -172,6 +172,12 @@ fn main() {
             .value_parser(clap::value_parser!(usize))
             .required(true)
         )
+        .arg(clap::Arg::new("n-threads")
+            .long("n-threads")
+            .short('t')
+            .value_parser(clap::value_parser!(usize))
+            .default_value("1")
+        )
     );
 
     let matches = cli.get_matches();
@@ -212,6 +218,7 @@ fn main() {
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
+        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -230,7 +237,7 @@ fn main() {
         log::info!("Running EM");
         let likelihood = SimpleLikelihood{};
         let n_colors = index.n_colors();
-        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors]);
+        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors], n_threads);
         println!("{:?}", &mixing_fractions);
     }
 }

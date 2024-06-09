@@ -9,33 +9,66 @@ pub trait Likelihood {
 
 }
 
+fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &[L::Observation], observation_counts: &[usize], prev_theta: &[f64]) -> Vec<f64> {
+    assert_eq!(observations.len(), observation_counts.len());
+    let K = prev_theta.len();
+
+    // Compute latent variable posteriors for each distinct observation given previous theta estimate
+    let mut next_theta: Vec<f64> = vec![0.0; K];
+    for i in 0..observations.len() {
+        let mut denominator: f64 = 0.0;
+        for w in 0..K {
+            denominator += prev_theta[w] * likelihood.likelihood(&observations[i], w);
+        }
+        for k in 0..K {
+            let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
+
+            // For clearer code we would store the posteriors in a matrix and run the M-step afterwards
+            // to find the new theta. But those posteriors take a lot of space, so here we already add the contribution
+            // of Z_i_k to the estimate of the text theta. This contribution should be divided by n_total_observations,
+            // but we'll do it in the end for better numerical stability.
+            next_theta[k] += observation_counts[i] as f64 * Z_i_k_posterior;
+        }
+    }
+    next_theta
+}
+
 // initial_theta is the initial guess for the mixing fractions.
 // \theta_1 + ... + \theta_k = 1.
 // observation_counts[i] = number of times observation i was observed
-pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observation>, observation_counts: &Vec<usize>, initital_theta: &Vec<f64>) -> Vec<f64>{
+pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &Vec<L::Observation>, observation_counts: &Vec<usize>, initital_theta: &Vec<f64>, n_threads: usize) -> Vec<f64>{
     let n_distinct_observations = observations.len();
     let n_total_observations: usize = observation_counts.iter().sum();
     let K = initital_theta.len();
 
     let mut prev_theta = initital_theta.clone();
-    loop {
-        // Compute latent variable posteriors for each distinct observation given previous theta estimate
-        let mut next_theta: Vec<f64> = vec![0.0; K];
-        for i in 0..n_distinct_observations {
-            let mut denominator: f64 = 0.0;
-            for w in 0..K {
-                denominator += prev_theta[w] * likelihood.likelihood(&observations[i], w);
-            }
-            for k in 0..K {
-                let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
+    let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil n_distinct_observations / n_threads
 
-                // For clearer code we would store the posteriors in a matrix and run the M-step afterwards
-                // to find the new theta. But those posteriors take a lot of space, so here we already add the contribution
-                // of Z_i_k to the estimate of the text theta. This contribution should be divided by n_total_observations,
-                // but we'll do it in the end for better numerical stability.
-                next_theta[k] += observation_counts[i] as f64 * Z_i_k_posterior;
+    loop {
+
+        // Compute latent variable posteriors for each distinct observation given previous theta estimate.
+        // The work is split evenly to n_threads threads.
+        let mut next_theta = std::thread::scope(|s| {
+            let mut join_handles = Vec::<_>::new();
+            for t in 0..n_threads {
+                let start = t*slice_len;
+                let end = std::cmp::min((t+1)*slice_len, observations.len());
+                let ob_slice = &observations[start..end];
+                let ob_count_slice = &observation_counts[start..end];
+                join_handles.push(s.spawn(|| {
+                    compute_theta_contributions(likelihood, ob_slice, ob_count_slice, &prev_theta)
+                }));
             }
-        }
+
+            // Add up contributions from all threads
+            let mut next_theta: Vec<f64> = vec![0.0; K];
+            for h in join_handles {
+                for (i, theta_i) in h.join().unwrap().iter().enumerate() {
+                    next_theta[i] += theta_i;
+                }
+            }
+            next_theta
+        });
 
         for k in 0..K {
             next_theta[k] /= n_total_observations as f64;
@@ -106,7 +139,7 @@ mod tests {
 
         eprintln!("{:?}", (0..=3).map(|k| observations.iter().filter(|x| **x == k).count()));
 
-        fit_model(&likelihood, &observations, &observation_counts, &initial_theta);
+        fit_model(&likelihood, &observations, &observation_counts, &initial_theta, 2);
     }
 
     #[test]
@@ -138,7 +171,7 @@ mod tests {
         let M = LikelihoodMatrix{likelihoods: L};
         let observations = (0..n).collect::<Vec::<usize>>();
         let observation_counts = vec![1; observations.len()];
-        let estimated_theta = fit_model(&M, &observations, &observation_counts, &initial_theta);
+        let estimated_theta = fit_model(&M, &observations, &observation_counts, &initial_theta, 2);
         eprintln!("{:?}", estimated_theta);
     }
 }
