@@ -65,7 +65,7 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     let K = initital_theta.len();
 
     let mut prev_theta = initital_theta.to_owned();
-    let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil n_distinct_observations / n_threads
+    let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
 
     loop {
 
