@@ -97,13 +97,13 @@ impl ColoredKmers {
         ColoredKmers{kmers, lcs, n_colors: n_colors as usize, color_matrix, empty_set: bitvec![0; n_colors as usize]}
     }
 
-    pub fn intersection_pseudoalignment(&self, query: &[u8]) -> BitVec {
+    pub fn intersection_pseudoalignment(&self, query: &[u8], minimum_hits: usize) -> BitVec {
         let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
         let mut intersection = bitvec![1; self.n_colors]; // Set with all elements (identity element of intersection).
-        let mut at_least_one = false;
+        let mut hit_count = 0_usize;
         for (match_len, colex_range) in index.matching_statistics(query) {
             if match_len == self.kmers.k() {
-                at_least_one = true;
+                hit_count += 1;
                 assert_eq!(colex_range.len(), 1);
                 intersection &= self.get_color_set_by_row(colex_range.start);
             }
@@ -111,7 +111,7 @@ impl ColoredKmers {
         }
         
         // Return the intersection if there was at least one match of length k
-        if at_least_one {
+        if hit_count >= minimum_hits {
             intersection
         } else {
             self.empty_set.clone()

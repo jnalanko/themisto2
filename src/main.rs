@@ -166,6 +166,12 @@ fn main() {
             .value_parser(clap::value_parser!(std::path::PathBuf))
             .required(true)
         )
+        .arg(clap::Arg::new("min-hits")
+            .long("min-hits")
+            .short('m')
+            .value_parser(clap::value_parser!(usize))
+            .required(true)
+        )
     );
 
     let matches = cli.get_matches();
@@ -199,19 +205,21 @@ fn main() {
 
         log::info!("Pseudoaligning");
         while let Some(rec) = reader.read_next().unwrap(){
-            let intersection = index.intersection_pseudoalignment(rec.seq);
+            let intersection = index.intersection_pseudoalignment(rec.seq, 1);
             println!("{}", intersection);
         }
     } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign-into-EM"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
+
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
         log::info!("Computing compatibility vectors");
         let mut compatibility_matrix = Vec::<BitVec>::new();
         while let Some(rec) = reader.read_next().unwrap(){
-            compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq));
+            compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq, min_hits));
         }
         log::info!("Constructed {} compatibility vectors", compatibility_matrix.len());
 

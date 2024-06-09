@@ -20,34 +20,39 @@ pub fn fit_model<L: Likelihood>(likelihood: &L, observations: &Vec<L::Observatio
     let mut prev_theta = initital_theta.clone();
     loop {
         // Compute latent variable posteriors for each distinct observation given previous theta estimate
-        let mut Z_posteriors: Vec<Vec<f64>> = vec![vec![0.0; K]; n_distinct_observations];
+        let mut next_theta: Vec<f64> = vec![0.0; K];
         for i in 0..n_distinct_observations {
             let mut denominator: f64 = 0.0;
             for w in 0..K {
                 denominator += prev_theta[w] * likelihood.likelihood(&observations[i], w);
             }
             for k in 0..K {
-                Z_posteriors[i][k] = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
+                let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
+
+                // For clearer code we would store the posteriors in a matrix and run the M-step afterwards
+                // to find the new theta. But those posteriors take a lot of space, so here we already add the contribution
+                // of Z_i_k to the estimate of the text theta. This contribution should be divided by n_total_observations,
+                // but we'll do it in the end for better numerical stability.
+                next_theta[k] += observation_counts[i] as f64 * Z_i_k_posterior;
             }
         }
 
-        // Estimate a new theta that maximizes the expected likelihood assuming the latent variables are distributed
-        // according to their posteriors that were just computed.
-
-        let mut next_theta: Vec<f64> = vec![0.0; K];
         for k in 0..K {
-            next_theta[k] = (0..n_distinct_observations).fold(0.0, |acc, i| acc + (observation_counts[i] as f64)*Z_posteriors[i][k]) / n_total_observations as f64;
+            next_theta[k] /= n_total_observations as f64;
         }
 
         // Compute the current log-likelihood (just FYI for the user, does not affect the algorithm)
+        /*
         let mut total_log_likelihood: f64 = 0.0;
         for i in 0..n_distinct_observations {
             let prob = (0..K).fold(0.0, |acc, k| acc + next_theta[k] * likelihood.likelihood(&observations[i], k));
             total_log_likelihood += prob.ln() * observation_counts[i] as f64;
         }
+        */
+
         let change = (0..K).fold(0.0, |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
 
-        log::info!("{} {}", total_log_likelihood, change);
+        log::info!("{}", change);
 
         // change = |prev_theta - next_theta|
         if change < 1e-5 {
@@ -133,6 +138,7 @@ mod tests {
         let M = LikelihoodMatrix{likelihoods: L};
         let observations = (0..n).collect::<Vec::<usize>>();
         let observation_counts = vec![1; observations.len()];
-        fit_model(&M, &observations, &observation_counts, &initial_theta);
+        let estimated_theta = fit_model(&M, &observations, &observation_counts, &initial_theta);
+        eprintln!("{:?}", estimated_theta);
     }
 }
