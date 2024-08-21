@@ -1,8 +1,9 @@
 use std::io::Read;
 
 use rand_distr::num_traits::ToBytes;
-use sbwt::{self, SbwtIndex, SubsetMatrix};
+use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
+use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
 #[derive(Debug)]
 pub struct ColoredKmers {
@@ -13,14 +14,99 @@ pub struct ColoredKmers {
     n_colors: usize,
 }
 
+fn build_sbwt_from_ascii_dump(sbwt_ascii_dump: impl std::io::BufRead){
+
+}
+
 impl ColoredKmers {
 
     pub fn n_colors(&self) -> usize {
         self.n_colors
     }
 
-    pub fn new_from_new_themisto_index_dump(sbwt_ascii_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead, themisto_color_dump: impl std::io::BufRead) {
+    pub fn new_from_new_themisto_index_dump(mut sbwt_ascii_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead, themisto_color_dump: impl std::io::BufRead) {
+        let mut buf = String::new();
+
+        let parse_key_value_from_buf = |buf: &mut String| {
+            let tokens = buf.split(' ').collect::<Vec<&str>>();
+            assert_eq!(tokens.len(), 2);
+            (tokens[0].to_owned(), tokens[1].to_owned())
+        };
+
+        if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+            let (key, value) = parse_key_value_from_buf(&mut buf);
+            assert_eq!(key, "version: ");
+            assert_eq!(value, "v0.1");
+        } else {
+            panic!("Error reading SBWT ascii dump");
+        }
+
+        let k: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+            let (key, value) = parse_key_value_from_buf(&mut buf);
+            assert_eq!(key, "k: ");
+            value.parse().unwrap()
+        } else {
+            panic!("Error reading SBWT ascii dump");
+        };
+
+        let n_sets: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+            let (key, value) = parse_key_value_from_buf(&mut buf);
+            assert_eq!(key, "number_of_sets: ");
+            value.parse().unwrap()
+        } else {
+            panic!("Error reading SBWT ascii dump");
+        };
+
+        let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+            let (key, value) = parse_key_value_from_buf(&mut buf);
+            assert_eq!(key, "number_of_sets: ");
+            value.parse().unwrap()
+        } else {
+            panic!("Error reading SBWT ascii dump");
+        };
+
+        let mut rows: Vec<simple_sds_sbwt::raw_vector::RawVector> = vec![simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false); 4];
+
+        // Read from sbwt_ascii_dump byte by byte
+        let mut one_byte = [0_u8; 1];
+        let mut colex = 0_usize;
+        while sbwt_ascii_dump.read(&mut one_byte).unwrap() > 0 {
+            let mut c = one_byte[0];
+            if c == b'$' {
+                colex += 1;
+                // Empty set
+            } else {
+                let end_of_set = c.is_ascii_lowercase();
+                c.make_ascii_uppercase();
+                match c {
+                    b'A' => {
+                        rows[0].set_bit(colex, true);
+                    },
+                    b'C' => {
+                        rows[1].set_bit(colex, true);
+                    },
+                    b'G' => {
+                        rows[2].set_bit(colex, true);
+                    },
+                    b'T' => {
+                        rows[3].set_bit(colex, true);
+                    },
+                    _ => panic!("Invalid character in SBWT ascii dump"),
+                }
+                if end_of_set {
+                    colex += 1;
+                }
+            }
+        }
+
+        assert_eq!(colex, n_sets); // There should be one set for each colex position
+
+        let mut subsetseq = sbwt::SubsetMatrix::new_from_bit_vectors(rows.into_iter().map(simple_sds_sbwt::bit_vector::BitVector::from).collect());
+        subsetseq.build_rank();
+
         todo!();
+
+        
     }
 
     pub fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: sbwt::LcsArray, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
