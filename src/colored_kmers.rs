@@ -119,7 +119,9 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
     let mut colex = 0_usize;
     while sbwt_ascii_dump.read(&mut one_byte).unwrap() > 0 {
         let mut c = one_byte[0];
-        if c == b'$' {
+        if c == b'\n' {
+            break
+        } else if c == b'$' {
             colex += 1;
             // Empty set
         } else {
