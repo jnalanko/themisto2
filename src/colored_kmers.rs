@@ -105,7 +105,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
 
     let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
-        assert_eq!(key, "number_of_sets:");
+        assert_eq!(key, "number_of_kmers:");
         value.parse().unwrap()
     } else {
         panic!("Error reading SBWT ascii dump");
