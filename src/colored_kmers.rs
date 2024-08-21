@@ -36,7 +36,7 @@ fn read_color_sets(mut reader: impl BufRead, num_color_sets: usize, num_colors: 
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 
-    let mut color_sets = bitvec![num_color_sets * num_colors; 0]; // Concatenation of distinct color sets
+    let mut color_sets = bitvec![0; num_color_sets * num_colors]; // Concatenation of distinct color sets
 
     let mut line = String::new();
 
