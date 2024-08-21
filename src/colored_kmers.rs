@@ -83,6 +83,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
     } else {
         panic!("Error reading SBWT ascii dump");
     }
+    buf.clear();
 
     let k: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
@@ -91,6 +92,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
     } else {
         panic!("Error reading SBWT ascii dump");
     };
+    buf.clear();
 
     let n_sets: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
@@ -98,6 +100,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
         value.parse().unwrap()
     } else {
         panic!("Error reading SBWT ascii dump");
+    buf.clear();
     };
 
     let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
@@ -107,6 +110,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
     } else {
         panic!("Error reading SBWT ascii dump");
     };
+    buf.clear();
 
     let mut rows: Vec<simple_sds_sbwt::raw_vector::RawVector> = vec![simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false); 4];
 
