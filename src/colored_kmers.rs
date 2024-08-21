@@ -78,7 +78,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
 
     if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
-        assert_eq!(key, "version: ");
+        assert_eq!(key, "version:");
         assert_eq!(value, "v0.1");
     } else {
         panic!("Error reading SBWT ascii dump");
@@ -86,7 +86,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
 
     let k: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
-        assert_eq!(key, "k: ");
+        assert_eq!(key, "k:");
         value.parse().unwrap()
     } else {
         panic!("Error reading SBWT ascii dump");
@@ -94,7 +94,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
 
     let n_sets: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
-        assert_eq!(key, "number_of_sets: ");
+        assert_eq!(key, "number_of_sets:");
         value.parse().unwrap()
     } else {
         panic!("Error reading SBWT ascii dump");
@@ -102,7 +102,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
 
     let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
         let (key, value) = parse_key_value_from_buf(&mut buf);
-        assert_eq!(key, "number_of_sets: ");
+        assert_eq!(key, "number_of_sets:");
         value.parse().unwrap()
     } else {
         panic!("Error reading SBWT ascii dump");
