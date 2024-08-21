@@ -73,7 +73,7 @@ fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, pre
     let parse_key_value_from_buf = |buf: &mut String| {
         let tokens = buf.split(' ').collect::<Vec<&str>>();
         assert_eq!(tokens.len(), 2);
-        (tokens[0].to_owned(), tokens[1].to_owned())
+        (tokens[0].to_owned(), tokens[1].strip_suffix('\n').unwrap().to_owned())
     };
 
     if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
