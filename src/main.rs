@@ -181,26 +181,24 @@ fn main() {
     );
 
     let matches = cli.get_matches();
-    if let Some(sub_matches) = matches.subcommand_matches("build"){
-        let sbwt_path = sub_matches.get_one::<std::path::PathBuf>("sbwt").unwrap();
-        let color_dump_path = sub_matches.get_one::<std::path::PathBuf>("color-dump").unwrap();
+    if let Some(sub_matches) = matches.subcommand_matches("import"){
+        let sbwt_ascii_dump = sub_matches.get_one::<std::path::PathBuf>("sbwt").unwrap();
+        let themisto_dump_prefix = sub_matches.get_one::<std::path::PathBuf>("color-dump-prefix").unwrap();
         let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();
-        let n_colors = *sub_matches.get_one::<usize>("n-colors").unwrap();
 
-        log::info!("Loading sbwt");
-        let mut sbwt_reader = BufReader::new(File::open(sbwt_path).unwrap());
+        let unitig_filename = format!("{}.unitigs.fa", themisto_dump_prefix.to_str().unwrap());
+        let color_sets_filename = format!("{}.color_sets.txt", themisto_dump_prefix.to_str().unwrap());
+        let metadata_filename = format!("{}.metadata.txt", themisto_dump_prefix.to_str().unwrap());
 
-        // Read header
-        let header = SbwtFileHeader::read(&mut sbwt_reader).unwrap();
-        assert!(header.has_lcs);
+        let sbwt_in = BufReader::new(File::open(sbwt_ascii_dump).unwrap());
+        let unitigs_in = BufReader::new(File::open(unitig_filename).unwrap());
+        let color_sets_in = BufReader::new(File::open(color_sets_filename).unwrap());
+        let metadata_in = BufReader::new(File::open(metadata_filename).unwrap());
 
-        // Read sbwt
-        let sbwt = sbwt::SbwtIndex::<SubsetMatrix>::load(&mut sbwt_reader).unwrap();
-        let lcs = sbwt::LcsArray::load(&mut sbwt_reader).unwrap();
-        log::info!("Loaded index with k = {}, precalc length = {}, # kmers = {}, # sbwt sets = {}", sbwt.k(), sbwt.get_lookup_table().prefix_length, sbwt.n_kmers(), sbwt.n_sets());
+        let mut out = BufWriter::new(File::create(out_path).unwrap());
 
-        let index = colored_kmers::ColoredKmers::new_from_themisto_color_dump(sbwt, lcs, &mut BufReader::new(File::open(color_dump_path).unwrap()), n_colors);
-        index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
+        let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
+        index.serialize(&mut out);
     } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();

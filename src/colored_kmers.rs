@@ -1,6 +1,5 @@
-use std::{fs::File, io::{BufRead, BufReader, Read}, path::Path};
+use std::io::BufRead;
 
-use rand_distr::num_traits::ToBytes;
 use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
@@ -201,8 +200,8 @@ fn read_themisto_dump_metadata(mut reader: impl BufRead) -> ThemistoDumpMetadata
 
 }
 
-fn build_colex_to_color_set_mapping(mut unitig_input: impl BufRead + Send, sbwt: &sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: &sbwt::LcsArray) -> Vec<usize> {
-    let mut reader = jseqio::reader::DynamicFastXReader::new(&mut unitig_input).unwrap();
+fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static, sbwt: &sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: &sbwt::LcsArray) -> Vec<usize> {
+    let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_input).unwrap();
     let index = sbwt::StreamingIndex::new(sbwt, lcs);
     let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
     while let Some(rec) = reader.read_next().unwrap() {
@@ -225,7 +224,7 @@ impl ColoredKmers {
         self.n_colors
     }
 
-    pub fn new_from_new_themisto_index_dump(mut sbwt_ascii_dump: impl std::io::BufRead, themisto_metadata_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead + Send, themisto_color_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> Self {
+    pub fn new_from_new_themisto_index_dump(sbwt_ascii_dump: impl std::io::BufRead, themisto_metadata_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead + Send + 'static, themisto_color_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> Self {
         log::info!("Reading metadata");
         let metadata = read_themisto_dump_metadata(themisto_metadata_dump);
         log::info!("Reading SBWT dump");
@@ -254,18 +253,18 @@ impl ColoredKmers {
         &self.distinct_color_sets[id*self.n_colors..(id+1)*self.n_colors]
     }
 
-    pub fn serialize<W: std::io::Write>(&self, out: &mut W) {
+    pub fn serialize<W: std::io::Write>(&self, mut out: &mut W) {
         self.kmers.serialize(out).unwrap();
         self.lcs.serialize(out).unwrap();
 
         out.write_all(&(self.n_colors as u64).to_le_bytes()).unwrap();
         out.write_all(&(self.distinct_color_sets.len() as u64).to_le_bytes()).unwrap();
 
-        bincode::serialize_into(out, &self.distinct_color_sets).unwrap();
-        bincode::serialize_into(out, &self.colex_to_color_set_id).unwrap();
+        bincode::serialize_into(&mut out, &self.distinct_color_sets).unwrap();
+        bincode::serialize_into(&mut out, &self.colex_to_color_set_id).unwrap();
     }
 
-    pub fn load<R: std::io::Read>(input: &mut R) -> Self {
+    pub fn load<R: std::io::Read>(mut input: &mut R) -> Self {
         let kmers = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
         let lcs = sbwt::LcsArray::load(input).unwrap();
 
@@ -274,10 +273,10 @@ impl ColoredKmers {
         let n_colors = u64::from_le_bytes(buf);
 
         input.read_exact(&mut buf).unwrap();
-        let total_color_set_length = u64::from_le_bytes(buf);
+        let _ = u64::from_le_bytes(buf); // Total length of distinct color sets
 
-        let distinct_color_sets: BitVec = bincode::deserialize_from(input).unwrap();
-        let colex_to_color_set_id: Vec<usize> = bincode::deserialize_from(input).unwrap(); // Todo: u64 instead of usize
+        let distinct_color_sets: BitVec = bincode::deserialize_from(&mut input).unwrap();
+        let colex_to_color_set_id: Vec<usize> = bincode::deserialize_from(&mut input).unwrap(); // Todo: u64 instead of usize
 
         ColoredKmers{kmers, lcs, colex_to_color_set_id, n_colors: n_colors as usize, distinct_color_sets, empty_set: bitvec![0; n_colors as usize]}
     }
