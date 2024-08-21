@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{fs::File, io::{BufRead, BufReader, Read}, path::Path};
 
 use rand_distr::num_traits::ToBytes;
 use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
@@ -9,14 +9,215 @@ use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 pub struct ColoredKmers {
     kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
     lcs: sbwt::LcsArray,
-    color_matrix: BitVec, // Concatenated rows
+    distinct_color_sets: BitVec, // Concatenation of distinct color sets
+    colex_to_color_set_id: Vec<usize>,
     empty_set: BitVec, // So that we can return a bitslice to an empty set
     n_colors: usize,
 }
 
-fn build_sbwt_from_ascii_dump(sbwt_ascii_dump: impl std::io::BufRead){
+fn ascii_to_int(ascii: &[u8]) -> usize {
+    std::str::from_utf8(ascii)
+    .expect("Unitig id is not valid utf-8").parse()
+    .expect("Could not convert unitig id string to unsigned integer")
+}
+
+fn get_color_set_id_from_fasta_header(fasta_header: &[u8]) -> usize {
+    // The fasta header should look like this " unitig_id=0 color_set_id=0".
+    // Note the space at the start.
+
+    let part = fasta_header[1..].split(|c| *c == b' ').nth(1).expect("Color set id missing");
+    let mut tokens = part.split(|c| *c == b'=');
+    assert_eq!(tokens.next().expect("Color set id missing"), b"color_set_id");
+    ascii_to_int(tokens.next().expect("Color set id missing"))
+}
+
+// Returns the concatenation of distinct color sets
+fn read_color_sets(mut reader: impl BufRead, num_color_sets: usize, num_colors: usize) -> BitVec {
+
+    // Lines should look like this:
+    // color_set_id=9 size=7 3 4 9 12 14 15 16
+
+    let mut color_sets = bitvec![num_color_sets * num_colors; 0]; // Concatenation of distinct color sets
+
+    let mut line = String::new();
+
+    let bar = indicatif::ProgressBar::new(num_color_sets as u64);
+    while reader.read_line(&mut line).unwrap() > 0 {
+        let line_bytes = line.trim_end().as_bytes();
+        let mut tokens = line_bytes.split(|c| *c == b' ');
+
+        let first_token = tokens.next().unwrap();
+        assert_eq!(&first_token[0..13], b"color_set_id=");
+        let color_set_id: usize = ascii_to_int(&first_token[13..]);
+        assert!(color_set_id < num_color_sets);
+
+        let second_token = tokens.next().unwrap();
+        assert_eq!(&second_token[0..5], b"size=");
+        let _ = ascii_to_int(&second_token[5..]); // Length of the color set
+
+        for color in tokens.map(ascii_to_int) {
+            color_sets.set(color_set_id*num_colors + color, true);
+        }
+
+        line.clear();
+        bar.inc(1);
+    }
+    bar.finish();
+
+    color_sets
+}
+
+fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> sbwt::SbwtIndex<sbwt::SubsetMatrix> {
+
+    let mut buf = String::new();
+
+    let parse_key_value_from_buf = |buf: &mut String| {
+        let tokens = buf.split(' ').collect::<Vec<&str>>();
+        assert_eq!(tokens.len(), 2);
+        (tokens[0].to_owned(), tokens[1].to_owned())
+    };
+
+    if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+        let (key, value) = parse_key_value_from_buf(&mut buf);
+        assert_eq!(key, "version: ");
+        assert_eq!(value, "v0.1");
+    } else {
+        panic!("Error reading SBWT ascii dump");
+    }
+
+    let k: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+        let (key, value) = parse_key_value_from_buf(&mut buf);
+        assert_eq!(key, "k: ");
+        value.parse().unwrap()
+    } else {
+        panic!("Error reading SBWT ascii dump");
+    };
+
+    let n_sets: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+        let (key, value) = parse_key_value_from_buf(&mut buf);
+        assert_eq!(key, "number_of_sets: ");
+        value.parse().unwrap()
+    } else {
+        panic!("Error reading SBWT ascii dump");
+    };
+
+    let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
+        let (key, value) = parse_key_value_from_buf(&mut buf);
+        assert_eq!(key, "number_of_sets: ");
+        value.parse().unwrap()
+    } else {
+        panic!("Error reading SBWT ascii dump");
+    };
+
+    let mut rows: Vec<simple_sds_sbwt::raw_vector::RawVector> = vec![simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false); 4];
+
+    // Read from sbwt_ascii_dump byte by byte
+    let mut one_byte = [0_u8; 1];
+    let mut colex = 0_usize;
+    while sbwt_ascii_dump.read(&mut one_byte).unwrap() > 0 {
+        let mut c = one_byte[0];
+        if c == b'$' {
+            colex += 1;
+            // Empty set
+        } else {
+            let end_of_set = c.is_ascii_lowercase();
+            c.make_ascii_uppercase();
+            match c {
+                b'A' => {
+                    rows[0].set_bit(colex, true);
+                },
+                b'C' => {
+                    rows[1].set_bit(colex, true);
+                },
+                b'G' => {
+                    rows[2].set_bit(colex, true);
+                },
+                b'T' => {
+                    rows[3].set_bit(colex, true);
+                },
+                _ => panic!("Invalid character in SBWT ascii dump"),
+            }
+            if end_of_set {
+                colex += 1;
+            }
+        }
+    }
+
+    assert_eq!(colex, n_sets); // There should be one set for each colex position
+
+    let mut subsetseq = sbwt::SubsetMatrix::new_from_bit_vectors(rows.into_iter().map(simple_sds_sbwt::bit_vector::BitVector::from).collect());
+    subsetseq.build_rank();
+
+    sbwt::SbwtIndex::from_subset_seq(subsetseq, n_kmers, k, precalc_prefix_length)
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+struct ThemistoDumpMetadata {
+    num_unitigs: usize,
+    num_colors: usize,
+    num_color_sets: usize,
+    k: usize
+}
+
+fn read_themisto_dump_metadata(mut reader: impl BufRead) -> ThemistoDumpMetadata {
+
+    // File should look like this:
+    // num_colors=3682
+    // num_unitigs=9314735
+    // num_color_sets=5591009
+    // k=31
+
+    let mut line = String::new();
+
+    let mut num_unitigs = None;
+    let mut num_colors = None;
+    let mut num_color_sets = None;
+    let mut k = None;
+
+    while reader.read_line(&mut line).unwrap() > 0 {
+        let line_bytes = line.trim_end().as_bytes();
+        let mut tokens = line_bytes.split(|c| *c == b'=');
+
+        let first_token = tokens.next().unwrap();
+        let second_token = tokens.next().unwrap();
+
+        match first_token {
+            b"num_colors" => num_colors = Some(ascii_to_int(second_token)),
+            b"num_unitigs" => num_unitigs = Some(ascii_to_int(second_token)),
+            b"num_color_sets" => num_color_sets = Some(ascii_to_int(second_token)),
+            b"k" => k = Some(ascii_to_int(second_token)),
+            _ => panic!("Unknown metadata field: {}", line)
+        }
+
+        line.clear();
+    }
+
+    ThemistoDumpMetadata {
+        num_unitigs: num_unitigs.expect("num_unitigs missing from metadata"),
+        num_colors: num_colors.expect("num_colors missing from metadata"),
+        num_color_sets: num_color_sets.expect("num_color_sets missing from metadata"),
+        k: k.expect("k missing from metadata")
+    }
 
 }
+
+fn build_colex_to_color_set_mapping(mut unitig_input: impl BufRead + Send, sbwt: &sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: &sbwt::LcsArray) -> Vec<usize> {
+    let mut reader = jseqio::reader::DynamicFastXReader::new(&mut unitig_input).unwrap();
+    let index = sbwt::StreamingIndex::new(sbwt, lcs);
+    let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+    while let Some(rec) = reader.read_next().unwrap() {
+        let color_set_id = get_color_set_id_from_fasta_header(rec.head);
+        for (match_len, colex_range) in index.matching_statistics(rec.seq) {
+            if match_len == sbwt.k() {
+                assert_eq!(colex_range.len(), 1);
+                colex_to_color_set_id[colex_range.start] = color_set_id;
+            }
+        }
+    }
+    colex_to_color_set_id
+}
+
+
 
 impl ColoredKmers {
 
@@ -24,146 +225,33 @@ impl ColoredKmers {
         self.n_colors
     }
 
-    pub fn new_from_new_themisto_index_dump(mut sbwt_ascii_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead, themisto_color_dump: impl std::io::BufRead) {
-        let mut buf = String::new();
-
-        let parse_key_value_from_buf = |buf: &mut String| {
-            let tokens = buf.split(' ').collect::<Vec<&str>>();
-            assert_eq!(tokens.len(), 2);
-            (tokens[0].to_owned(), tokens[1].to_owned())
-        };
-
-        if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
-            let (key, value) = parse_key_value_from_buf(&mut buf);
-            assert_eq!(key, "version: ");
-            assert_eq!(value, "v0.1");
-        } else {
-            panic!("Error reading SBWT ascii dump");
-        }
-
-        let k: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
-            let (key, value) = parse_key_value_from_buf(&mut buf);
-            assert_eq!(key, "k: ");
-            value.parse().unwrap()
-        } else {
-            panic!("Error reading SBWT ascii dump");
-        };
-
-        let n_sets: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
-            let (key, value) = parse_key_value_from_buf(&mut buf);
-            assert_eq!(key, "number_of_sets: ");
-            value.parse().unwrap()
-        } else {
-            panic!("Error reading SBWT ascii dump");
-        };
-
-        let n_kmers: usize = if sbwt_ascii_dump.read_line(&mut buf).unwrap() > 0 {
-            let (key, value) = parse_key_value_from_buf(&mut buf);
-            assert_eq!(key, "number_of_sets: ");
-            value.parse().unwrap()
-        } else {
-            panic!("Error reading SBWT ascii dump");
-        };
-
-        let mut rows: Vec<simple_sds_sbwt::raw_vector::RawVector> = vec![simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false); 4];
-
-        // Read from sbwt_ascii_dump byte by byte
-        let mut one_byte = [0_u8; 1];
-        let mut colex = 0_usize;
-        while sbwt_ascii_dump.read(&mut one_byte).unwrap() > 0 {
-            let mut c = one_byte[0];
-            if c == b'$' {
-                colex += 1;
-                // Empty set
-            } else {
-                let end_of_set = c.is_ascii_lowercase();
-                c.make_ascii_uppercase();
-                match c {
-                    b'A' => {
-                        rows[0].set_bit(colex, true);
-                    },
-                    b'C' => {
-                        rows[1].set_bit(colex, true);
-                    },
-                    b'G' => {
-                        rows[2].set_bit(colex, true);
-                    },
-                    b'T' => {
-                        rows[3].set_bit(colex, true);
-                    },
-                    _ => panic!("Invalid character in SBWT ascii dump"),
-                }
-                if end_of_set {
-                    colex += 1;
-                }
-            }
-        }
-
-        assert_eq!(colex, n_sets); // There should be one set for each colex position
-
-        let mut subsetseq = sbwt::SubsetMatrix::new_from_bit_vectors(rows.into_iter().map(simple_sds_sbwt::bit_vector::BitVector::from).collect());
-        subsetseq.build_rank();
-
-        todo!();
-
-        
+    pub fn new_from_new_themisto_index_dump(mut sbwt_ascii_dump: impl std::io::BufRead, themisto_metadata_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead + Send, themisto_color_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> Self {
+        log::info!("Reading metadata");
+        let metadata = read_themisto_dump_metadata(themisto_metadata_dump);
+        log::info!("Reading SBWT dump");
+        let sbwt_index = sbwt_ascii_dump_to_sbwt_index(sbwt_ascii_dump, precalc_prefix_length);
+        log::info!("Reading Distinct color sets");
+        let distinct_color_sets = read_color_sets(themisto_color_dump, metadata.num_color_sets, metadata.num_colors); 
+        log::info!("Reading Building LCS array");
+        let lcs = sbwt::LcsArray::from_sbwt(&sbwt_index);
+        log::info!("Building colex to color set id mapping");
+        let colex_to_color_set_id = build_colex_to_color_set_mapping(themisto_unitig_dump, &sbwt_index, &lcs);
+        Self { kmers: sbwt_index, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0; metadata.num_colors], n_colors: metadata.num_colors}
     }
 
-    pub fn new_from_themisto_color_dump(kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: sbwt::LcsArray, mut themisto_color_dump_stream: impl std::io::BufRead, n_colors: usize) -> Self {
-        let mut color_matrix: BitVec = bitvec![0; kmers.n_sets() * n_colors]; // Concatenated rows
-        let mut line = String::new();
-
-        // Todo: this operates with unicode strings even though the input is just ASCII and there is no reason to ever
-        // have unicode characters in it.
-        let bar = indicatif::ProgressBar::new(kmers.n_sets() as u64);
-        bar.set_style(indicatif::ProgressStyle::with_template("[ETA: {eta_precise}] {wide_bar} {pos:>7}/{len:7} {msg}")
-        .unwrap());
-
-        while themisto_color_dump_stream.read_line(&mut line).unwrap() > 0 {
-            bar.inc(1);
-            assert!(line.ends_with('\n'));
-            line.pop(); // Trim newline at the end
-
-            let line_bytes = line.as_bytes();
-            let mut tokens = line_bytes.split(|c| *c == b' ');
-            
-            let kmer = tokens.next().unwrap();
-            let bits = tokens.next().unwrap();
-            assert!(tokens.next() == None);
-            assert_eq!(kmer.len(), kmers.k());
-
-            let mut bitvec = bitvec![0; bits.len()];
-            for (i, &b) in bits.iter().enumerate() {
-                assert!(b == b'0' || b == b'1');
-                bitvec.set(i, b == b'1');
-            }
-
-            let row = match kmers.search(kmer) {
-                Some(range) => range.start,
-                None => panic!("Kmer {} not found in sbwt", String::from_utf8(kmer.to_vec()).unwrap()),
-            };
-
-            color_matrix[row*n_colors..(row+1)*n_colors].copy_from_bitslice(&bitvec);
-            
-            line.clear();
-        }
-        bar.finish();
-
-        ColoredKmers{kmers, lcs, color_matrix, n_colors, empty_set: bitvec![0; n_colors]}
-    }
 
     pub fn get_color_set(&self, kmer: &[u8]) -> &BitSlice {
         match self.kmers.search(kmer){
             Some(range) => {
                 let row = range.start;
-                &self.color_matrix[row*self.n_colors..(row+1)*self.n_colors]
+                &self.distinct_color_sets[row*self.n_colors..(row+1)*self.n_colors]
             }
             None => &self.empty_set,
         }
     }
 
-    fn get_color_set_by_row(&self, row: usize) -> &BitSlice {
-        &self.color_matrix[row*self.n_colors..(row+1)*self.n_colors]
+    fn get_color_set_by_id(&self, id: usize) -> &BitSlice {
+        &self.distinct_color_sets[id*self.n_colors..(id+1)*self.n_colors]
     }
 
     pub fn serialize<W: std::io::Write>(&self, out: &mut W) {
@@ -171,7 +259,10 @@ impl ColoredKmers {
         self.lcs.serialize(out).unwrap();
 
         out.write_all(&(self.n_colors as u64).to_le_bytes()).unwrap();
-        bincode::serialize_into(out, &self.color_matrix).unwrap();
+        out.write_all(&(self.distinct_color_sets.len() as u64).to_le_bytes()).unwrap();
+
+        bincode::serialize_into(out, &self.distinct_color_sets).unwrap();
+        bincode::serialize_into(out, &self.colex_to_color_set_id).unwrap();
     }
 
     pub fn load<R: std::io::Read>(input: &mut R) -> Self {
@@ -182,9 +273,13 @@ impl ColoredKmers {
         input.read_exact(&mut buf).unwrap();
         let n_colors = u64::from_le_bytes(buf);
 
-        let color_matrix: BitVec = bincode::deserialize_from(input).unwrap();
+        input.read_exact(&mut buf).unwrap();
+        let total_color_set_length = u64::from_le_bytes(buf);
 
-        ColoredKmers{kmers, lcs, n_colors: n_colors as usize, color_matrix, empty_set: bitvec![0; n_colors as usize]}
+        let distinct_color_sets: BitVec = bincode::deserialize_from(input).unwrap();
+        let colex_to_color_set_id: Vec<usize> = bincode::deserialize_from(input).unwrap(); // Todo: u64 instead of usize
+
+        ColoredKmers{kmers, lcs, colex_to_color_set_id, n_colors: n_colors as usize, distinct_color_sets, empty_set: bitvec![0; n_colors as usize]}
     }
 
     pub fn intersection_pseudoalignment(&self, query: &[u8], minimum_hits: usize) -> BitVec {
@@ -195,7 +290,8 @@ impl ColoredKmers {
             if match_len == self.kmers.k() {
                 hit_count += 1;
                 assert_eq!(colex_range.len(), 1);
-                intersection &= self.get_color_set_by_row(colex_range.start);
+                let id = self.colex_to_color_set_id[colex_range.start];
+                intersection &= self.get_color_set_by_id(id);
             }
 
         }
@@ -215,6 +311,7 @@ mod tests {
 
     use super::*;
 
+    /*
     #[test]
     fn from_themisto_color_dump(){
         let dump = 
@@ -258,6 +355,7 @@ TCAGTTTTTTACCATGGCTTTTTGCGAGTAG 100000000000000000000000000000000000000000000000
             assert_eq!(color_set_string, bitvec_strings[i]);
         }
     }
+*/
 
     #[test]
     fn bitvec_serialization() {
