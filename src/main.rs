@@ -110,24 +110,18 @@ fn main() {
 
     let cli = clap::Command::new("themisto2")
     .arg_required_else_help(true) 
-    .subcommand(clap::Command::new("build")
+    .subcommand(clap::Command::new("import")
         .arg_required_else_help(true)
-        .arg(clap::Arg::new("sbwt")
-            .long("sbwt")
+        .arg(clap::Arg::new("sbwt-ascii-dump")
+            .long("sbwt-ascii-dump")
             .short('s')
             .value_parser(clap::value_parser!(std::path::PathBuf))
             .required(true)
         )
-        .arg(clap::Arg::new("color-dump")
-            .long("color-dump")
+        .arg(clap::Arg::new("color-dump-prefix")
+            .long("color-dump-prefix")
             .short('c')
             .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("n-colors")
-            .long("n-colors")
-            .short('n')
-            .value_parser(clap::value_parser!(usize))
             .required(true)
         )
         .arg(clap::Arg::new("out")
@@ -182,7 +176,7 @@ fn main() {
 
     let matches = cli.get_matches();
     if let Some(sub_matches) = matches.subcommand_matches("import"){
-        let sbwt_ascii_dump = sub_matches.get_one::<std::path::PathBuf>("sbwt").unwrap();
+        let sbwt_ascii_dump = sub_matches.get_one::<std::path::PathBuf>("sbwt-ascii-dump").unwrap();
         let themisto_dump_prefix = sub_matches.get_one::<std::path::PathBuf>("color-dump-prefix").unwrap();
         let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();
 
