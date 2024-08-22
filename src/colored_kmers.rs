@@ -335,14 +335,11 @@ impl ColoredKmers {
 
         let mut union = bitvec!(0; self.n_colors); // All colors with at least one hit
 
-        // Take the union of the found color sets
-        color_sets.iter().for_each(|x| match x {
-            Some(color_set) => union |= *color_set,
-            None => ()
-        });
+        // Take the union of the found color sets. flatten() filters out None values.
+        color_sets.iter().flatten().for_each(|x| { union |= *x; });
 
         let mut distinguishing_hit_counts: Vec<usize> = vec![0; self.n_colors];
-        for color_set in color_sets.iter().filter_map(|x| *x).filter(|&x| x != union && x != self.empty_set) {
+        for color_set in color_sets.iter().flatten().filter(|&&x| x != union) {
             for (i, x) in color_set.iter().enumerate() {
                 if *x {
                     distinguishing_hit_counts[i] += 1;
