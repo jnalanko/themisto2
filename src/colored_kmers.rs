@@ -298,7 +298,6 @@ impl ColoredKmers {
                 let id = self.colex_to_color_set_id[colex_range.start];
                 intersection &= self.get_color_set_by_id(id);
             }
-
         }
         
         // Return the intersection if there was at least one match of length k
@@ -307,6 +306,53 @@ impl ColoredKmers {
         } else {
             self.empty_set.clone()
         }
+    }
+
+    // Returns pairs (color id, score). Not all colors are necessarily present in the output.
+    pub fn compute_distinguishing_scores(&self, query: &[u8]) -> Vec<(usize, f64)> {
+        if query.len() < self.kmers.k() {
+            return vec![];
+        }
+
+        //let mut hit_counts: Vec<usize> = vec![0; self.n_colors];
+        let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
+        let mut color_sets: Vec<Option<&BitSlice>> = vec![None; query.len() - self.kmers.k() + 1];
+        let mut n_relevant_kmers = 0_usize;
+
+        // Retrieve color sets
+        for (i, (match_len, colex_range)) in index.matching_statistics(query).iter().enumerate() {
+            if *match_len == self.kmers.k() {
+                assert_eq!(colex_range.len(), 1);
+                let id = self.colex_to_color_set_id[colex_range.start];
+                color_sets[i + 1 - self.kmers.k()] = Some(self.get_color_set_by_id(id));
+                n_relevant_kmers += 1;
+            }
+        }
+
+        if n_relevant_kmers == 0 {
+            return vec![];
+        }
+
+        let mut union = bitvec!(0; self.n_colors); // All colors with at least one hit
+
+        // Take the union of the found color sets
+        color_sets.iter().for_each(|x| match x {
+            Some(color_set) => union |= *color_set,
+            None => ()
+        });
+
+        let mut distinguishing_hit_counts: Vec<usize> = vec![0; self.n_colors];
+        for color_set in color_sets.iter().filter_map(|x| *x).filter(|&x| x != union && x != self.empty_set) {
+            for (i, x) in color_set.iter().enumerate() {
+                if *x {
+                    distinguishing_hit_counts[i] += 1;
+                }
+            }
+        }
+
+        let max_distinguishing_hits = distinguishing_hit_counts.iter().max().unwrap();
+        distinguishing_hit_counts.iter().enumerate().filter(|(_, hits)| **hits > 0).map(|(color, hits)| (color, *hits as f64 / *max_distinguishing_hits as f64)).collect()
+
     }
 }
 
