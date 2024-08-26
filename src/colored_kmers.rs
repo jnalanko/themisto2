@@ -374,9 +374,9 @@ mod tests {
         let blue_seq: &[u8] = b"CACTCTATCGCGTTATCTTACGATCATGCTAGC";
         let green_seq: &[u8] = b"ACATCGGCGTATCTATCTACGATCGTACGTCA";
         let uncolored_seq: &[u8] = b"GGATTCGGATCTATCGTAGCTGTACGTGCTGAC";
-        let red_and_blue_seq: &[u8] = b"TTAGCTATCGTATCGATCACGTACGTAGTCAA";
+        let red_and_blue_seq: &[u8] = b"TTAGCTATCGTATCCGATCACGTACGTAGTCAA";
         let red_and_blue_and_green_seq: &[u8] = b"CCGTTATCGGCCTATACTATCGACTACGTAGC";
-        let k = 7; // Let's hope I didn't accidentally repeat any kmers
+        let k = 12; // Let's hope I didn't accidentally repeat any kmers
 
         let all_seqs: &[&[u8]] = &[&red_seq, &blue_seq, &green_seq, &uncolored_seq, &red_and_blue_seq, &red_and_blue_and_green_seq];
         let distinct_color_sets = bitvec![0,0,0, 1,0,0, 0,1,0, 0,0,1, 1,1,0, 1,1,1];
@@ -410,6 +410,9 @@ mod tests {
         let true_scores = [n_red_distinguishing_hits as f64 / max_distinguishing_hits as f64, n_blue_distinguishing_hits as f64 / max_distinguishing_hits as f64, n_green_distinguishing_hits as f64 / max_distinguishing_hits as f64];
 
         let scores = index.compute_distinguishing_scores(&all_seqs_concatenated);
+
+        eprintln!("{:?}", scores);
+        eprintln!("{:?}", true_scores);
         
         let epsilon = 1e-6;
         assert_eq!(true_scores.len(), scores.len());
