@@ -360,6 +360,48 @@ mod tests {
     use super::*;
 
     /*
+        kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
+        lcs: sbwt::LcsArray,
+        distinct_color_sets: BitVec, // Concatenation of distinct color sets
+        colex_to_color_set_id: Vec<usize>,
+        empty_set: BitVec, // So that we can return a bitslice to an empty set
+        n_colors: usize,
+    */
+
+    #[test]
+    fn test_distinguishing_scores(){
+        let red_seq: &[u8] = b"AAACATCGATCGTACGTACGTCAGCTACTGCA";
+        let blue_seq: &[u8] = b"CACTCTATCGCGTTATCTTACGATCATGCTAGC";
+        let green_seqs: &[u8] = b"ACATCGGCGTATCTATCTACGATCGTACGTCA";
+        let uncolored_seq: &[u8] = b"GGATTCGGATCTATCGTAGCTGTACGTGCTGAC";
+        let red_and_blue_seq: &[u8] = b"TTAGCTATCGTATCGATCACGTACGTAGTCAA";
+        let red_and_blue_and_green_seq: &[u8] = b"CCGTTATCGGCCTATACTATCGACTACGTAGC";
+        let k = 7; // Let's hope I didn't accidentally repeat any kmers
+
+        let all_seqs: &[&[u8]] = &[&red_seq, &blue_seq, &green_seqs, &uncolored_seq, &red_and_blue_seq, &red_and_blue_and_green_seq];
+        let distinct_color_sets = bitvec![0,0,0, 1,0,0, 0,1,0, 0,0,1, 1,1,0, 1,1,1];
+        let seq_color_set_ids: Vec<usize> = vec![1, 2, 3, 0, 4, 5];
+
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).build_lcs(true).run_from_slices(all_seqs);
+        let lcs = lcs.unwrap();
+
+        // Build colex to color id mapping
+        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+        for (seq_id, seq) in all_seqs.iter().enumerate() {
+            for (match_len, colex_range) in sbwt::StreamingIndex::new(&sbwt, &lcs).matching_statistics(seq).iter() {
+                if *match_len == k {
+                    assert_eq!(colex_range.len(), 1);
+                    colex_to_color_set_id[colex_range.start] = seq_color_set_ids[seq_id];
+                }
+            }
+        }
+
+        let index = ColoredKmers{kmers: sbwt, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0,0,0], n_colors: 3};
+        todo!();
+
+    }
+
+    /*
     #[test]
     fn from_themisto_color_dump(){
         let dump = 
