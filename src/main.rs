@@ -3,27 +3,14 @@
 use std::{fs::File, io::{BufReader, BufWriter, Read}};
 use bitvec::prelude::*;
 
+use clap::ArgAction;
 use sbwt::SubsetMatrix;
+use EM::Likelihood;
 
 use crate::EM::fit_model;
 
 mod EM;
 mod colored_kmers;
-
-const FILE_FORMAT_STRING: &[u8] = b"sbwtfile-v1";
-
-struct SbwtFileHeader {
-    has_lcs: bool,
-}
-
-impl SbwtFileHeader {
-    fn read<R: Read>(input: &mut R) -> std::io::Result<SbwtFileHeader> {
-        read_and_check_string(input, FILE_FORMAT_STRING, "Invalid or incompatible file format").unwrap();
-        let has_lcs: bool = byteorder::ReadBytesExt::read_u8(input).unwrap() != 0;
-        Ok(Self{has_lcs})
-    }
-
-}
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 
@@ -38,33 +25,15 @@ impl EM::Likelihood for SimpleLikelihood {
     }
 }
 
-// Read a byte string in this format: first a little-endian usize giving the length,
-// then the bytes. Check that the bytes match the given slice. Returns an IO error with
-// the given error message if the strings do not match.
-fn read_and_check_string<R: std::io::Read>(input: &mut R, should_be_this: &[u8], error_message: &str) -> std::io::Result<()> {
-    let mut len_buf = [0_u8; 8]; 
-    input.read_exact(&mut len_buf)?;
+struct LikelihoodMatrix {
+    matrix: Vec<Vec<f64>>,
+}
 
-    let len = usize::from_le_bytes(len_buf);
-    if len != should_be_this.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            error_message
-        ));
+impl EM::Likelihood for LikelihoodMatrix {
+    type Observation = usize; // Index of the read
+    fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
+        self.matrix[*x_i][k]
     }
-
-    let mut string_buf = vec![0u8; len];
-    input.read_exact(&mut string_buf)?;
-
-    if string_buf != should_be_this {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            error_message
-        ));
-    }
-
-    Ok(())
-
 }
 
 // Removes duplicates and returns the count of each distinct element remaining
@@ -172,6 +141,11 @@ fn main() {
             .value_parser(clap::value_parser!(usize))
             .default_value("1")
         )
+        .arg(clap::Arg::new("model")
+            .long("model")
+            .value_parser(clap::builder::PossibleValuesParser::new(vec!["simple", "distinguishing"]))
+            .default_value("simple")
+        )
     );
 
     let matches = cli.get_matches();
@@ -211,26 +185,55 @@ fn main() {
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
+        let model = sub_matches.get_one::<String>("model").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
-        log::info!("Computing compatibility vectors");
-        let mut compatibility_matrix = Vec::<BitVec>::new();
-        while let Some(rec) = reader.read_next().unwrap(){
-            compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq, min_hits));
+
+        if model == "simple" {
+            log::info!("Computing compatibility vectors");
+            let mut compatibility_matrix = Vec::<BitVec>::new();
+            while let Some(rec) = reader.read_next().unwrap(){
+                compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq, min_hits));
+            }
+            log::info!("Constructed {} compatibility vectors", compatibility_matrix.len());
+
+            log::info!("Reducing to equivalence classes");
+            let counts = reduce_to_classes(&mut compatibility_matrix);
+            log::info!("Reduced to {} equivalence classes", counts.len());
+
+            log::info!("Running EM");
+            let likelihood = SimpleLikelihood{};
+            let n_colors = index.n_colors();
+            let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors], n_threads);
+            println!("{:?}", &mixing_fractions);
+        } else if model == "distinguishing" {
+            let mut likelihood_matrix = Vec::<Vec<f64>>::new();
+            while let Some(rec) = reader.read_next().unwrap(){
+                let mut row: Vec<f64> = vec![0.01; index.n_colors()]; // Zero inflation: 0.01 instead of 0
+                for (color, score) in index.compute_distinguishing_scores(rec.seq) {
+                    row[color] = score; 
+                }
+
+                // Normalize
+                let rowsum = row.iter().sum::<f64>();
+                row.iter_mut().for_each(|x| *x /= rowsum);
+
+                likelihood_matrix.push(row);
+            }
+
+            // Observation is now a likelihood matrix row
+            let n_rows = likelihood_matrix.len();
+            let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
+            let observations: Vec<usize> = (0..n_rows).collect();
+            let observation_counts: Vec<usize> = vec![1; n_rows];
+
+            let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads);
+            println!("{:?}", &mixing_fractions);
+
         }
-        log::info!("Constructed {} compatibility vectors", compatibility_matrix.len());
 
-        log::info!("Reducing to equivalence classes");
-        let counts = reduce_to_classes(&mut compatibility_matrix);
-        log::info!("Reduced to {} equivalence classes", counts.len());
-
-        log::info!("Running EM");
-        let likelihood = SimpleLikelihood{};
-        let n_colors = index.n_colors();
-        let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors], n_threads);
-        println!("{:?}", &mixing_fractions);
     }
 }
 
