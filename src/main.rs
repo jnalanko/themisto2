@@ -63,6 +63,11 @@ fn reduce_to_classes(compatibility_vectors: &mut Vec<BitVec>) -> Vec<usize> {
 
 }
 
+fn softmax(values: &[f64]) -> Vec<f64> {
+    let exp_values: Vec<f64> = values.iter().map(|&x| x.exp()).collect();
+    let sum_exp_values: f64 = exp_values.iter().sum();
+    exp_values.iter().map(|&x| x / sum_exp_values).collect()
+}
 
 
 fn main() {
@@ -147,7 +152,7 @@ fn main() {
         )
         .arg(clap::Arg::new("likelihood")
             .long("likelihood")
-            .value_parser(clap::builder::PossibleValuesParser::new(vec!["linear", "softmax", "99p", "beta-binomial"]))
+            .value_parser(clap::builder::PossibleValuesParser::new(vec!["linear", "softmax", "99p"]))
             .default_value("linear")
         )
     );
@@ -191,6 +196,7 @@ fn main() {
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
         let numerator = sub_matches.get_one::<String>("numerator").unwrap();
         let denominator = sub_matches.get_one::<String>("denominator").unwrap();
+        let likelihood_type = sub_matches.get_one::<String>("likelihood").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -198,6 +204,20 @@ fn main() {
 
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
 
+        let likelihood_function: Box<dyn Fn(&[f64]) -> Vec<f64>> = match likelihood_type.as_str() { // Takes a row of scores, returns a row of likelihoods. That is, f: R^n -> R^n, where n is the number of colors
+            "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
+            "99p" => Box::new(|v: &[f64]| {
+                let (argmax, _max) = v.iter().enumerate().max_by(|(_, a),(_, b)| a.total_cmp(b)).unwrap();
+                let mut answer: Vec<f64> = vec![0.01];
+                answer[argmax] = 0.99;
+                answer
+            }),
+            //"betabinomial" => Box::new(|_: &[f64]| {
+            //    todo!(); // Issue: Beta binomial takes in an integer, not a float. But it's almost linear with our hyperparameters, so linear works as a good substitute for this.
+            //}),
+            "softmax" => Box::new(|v: &[f64]| softmax(v)),
+            _ => panic!("Invalid likelihood type: {}", likelihood_type)
+        };
         let mut likelihood_matrix = Vec::<Vec<f64>>::new();
         while let Some(rec) = reader.read_next().unwrap(){
             let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
@@ -207,14 +227,14 @@ fn main() {
                 let numerator_value = match numerator.as_str() {
                     "hits" => data.hit_counts[color],
                     "distinguishing" => data.distinguishing_hit_counts[color],
-                    _ => panic!("Invalid numerator {}", numerator)
+                    _ => panic!("Invalid numerator type: {}", numerator)
                 };
                 let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
                 let mut denominator_value = match denominator.as_str() {
                     "all" => n_kmers,
                     "relevant" => data.n_relevant_kmers,
                     "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
-                    _ => panic!("Invalid denominator {}", denominator)
+                    _ => panic!("Invalid denominator type: {}", denominator)
                 };
                 denominator_value = std::cmp::max(1, denominator_value); // Avoid division by zero
 
@@ -224,12 +244,17 @@ fn main() {
             // Add zero inflation
             row.iter_mut().for_each(|x| *x = x.max(0.01));
 
+            // Apply the likelihood function
+            row = likelihood_function(&row);
+
             // Normalize
             let rowsum = row.iter().sum::<f64>();
             row.iter_mut().for_each(|x| *x /= rowsum);
 
             likelihood_matrix.push(row);
         }
+
+        likelihood_matrix.shrink_to_fit(); // Saving some memory
 
         // Observation is now a likelihood matrix row
         let n_rows = likelihood_matrix.len();
