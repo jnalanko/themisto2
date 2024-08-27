@@ -244,6 +244,10 @@ impl ColoredKmers {
         self.n_colors
     }
 
+    pub fn n_kmers(&self) -> usize {
+        self.kmers.n_kmers()
+    }
+
     pub fn get_k(&self) -> usize {
         self.kmers.k()
     }

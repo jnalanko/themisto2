@@ -194,6 +194,8 @@ fn main() {
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+        log::info!("Loaded index with {} distinct k-mers and {} colors", index.n_kmers(), index.n_colors());
+
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
 
         let mut likelihood_matrix = Vec::<Vec<f64>>::new();
