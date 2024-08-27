@@ -189,8 +189,8 @@ fn main() {
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
-        let numerator = sub_matches.get_one::<&str>("numerator").unwrap();
-        let denominator = sub_matches.get_one::<&str>("denominator").unwrap();
+        let numerator = sub_matches.get_one::<String>("numerator").unwrap();
+        let denominator = sub_matches.get_one::<String>("denominator").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -202,13 +202,13 @@ fn main() {
             
             let mut row: Vec<f64> = vec![0.0; index.n_colors()];
             for color in 0..index.n_colors() {
-                let numerator_value = match *numerator {
+                let numerator_value = match numerator.as_str() {
                     "hits" => data.hit_counts[color],
                     "distinguishing" => data.distinguishing_hit_counts[color],
                     _ => panic!("Invalid numerator {}", numerator)
                 };
                 let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
-                let mut denominator_value = match *denominator {
+                let mut denominator_value = match denominator.as_str() {
                     "all" => n_kmers,
                     "relevant" => data.n_relevant_kmers,
                     "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
