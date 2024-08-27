@@ -222,7 +222,23 @@ fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static,
     colex_to_color_set_id
 }
 
+struct PseudoalignmentData {
+    reported_colors: Vec<usize>,
+    hit_counts: Vec<usize>,
+    distinguishing_hit_counts: Vec<usize>,
+    n_relevant_kmers: usize,
+}
 
+impl PseudoalignmentData {
+    pub fn new_empty() -> Self {
+        Self {
+            reported_colors: Vec::new(),
+            hit_counts: Vec::new(),
+            distinguishing_hit_counts: Vec::new(),
+            n_relevant_kmers: 0
+        }
+    }
+}
 
 impl ColoredKmers {
 
@@ -306,6 +322,57 @@ impl ColoredKmers {
         } else {
             self.empty_set.clone()
         }
+    }
+
+    pub fn get_pseudoalignment_data(&self, query: &[u8]) -> PseudoalignmentData {
+        if query.len() < self.kmers.k() {
+            return PseudoalignmentData::new_empty();
+        }
+
+        let mut hit_counts: Vec<usize> = vec![0; self.n_colors];
+        let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
+        let mut color_sets: Vec<Option<&BitSlice>> = vec![None; query.len() - self.kmers.k() + 1];
+        let mut n_relevant_kmers = 0_usize;
+
+        // Retrieve color sets
+        for (i, (match_len, colex_range)) in index.matching_statistics(query).iter().enumerate() {
+            if *match_len == self.kmers.k() {
+                assert_eq!(colex_range.len(), 1);
+                let id = self.colex_to_color_set_id[colex_range.start];
+                color_sets[i + 1 - self.kmers.k()] = Some(self.get_color_set_by_id(id));
+                n_relevant_kmers += 1;
+            }
+        }
+
+        if n_relevant_kmers == 0 {
+            return PseudoalignmentData::new_empty(); 
+        }
+
+        // Count hits (flatten removes nones).
+        color_sets.iter().flatten().for_each(|bitmap| {
+            for (color, bit) in bitmap.iter().enumerate() {
+                if *bit {
+                    hit_counts[color] += 1;
+                }
+            }
+        });
+
+        let mut union = bitvec!(0; self.n_colors); // All colors with at least one hit
+
+        // Take the union of the found color sets. flatten() filters out None values.
+        color_sets.iter().flatten().for_each(|x| { union |= *x; });
+
+        let mut distinguishing_hit_counts: Vec<usize> = vec![0; self.n_colors];
+        for color_set in color_sets.iter().flatten().filter(|&&x| x != union) {
+            for (i, x) in color_set.iter().enumerate() {
+                if *x {
+                    distinguishing_hit_counts[i] += 1;
+                }
+            }
+        }
+
+        let reported_colors = union.iter().enumerate().filter(|(_, x)| **x).map(|(i, _)| i).collect();
+        PseudoalignmentData{reported_colors, hit_counts, distinguishing_hit_counts, n_relevant_kmers}
     }
 
     // Returns pairs (color id, score). Not all colors are necessarily present in the output.
