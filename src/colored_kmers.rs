@@ -1,4 +1,4 @@
-use std::io::BufRead;
+use std::{arch::x86_64, io::BufRead};
 
 use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
@@ -223,7 +223,6 @@ fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static,
 }
 
 struct PseudoalignmentData {
-    reported_colors: Vec<usize>,
     hit_counts: Vec<usize>,
     distinguishing_hit_counts: Vec<usize>,
     n_relevant_kmers: usize,
@@ -232,7 +231,6 @@ struct PseudoalignmentData {
 impl PseudoalignmentData {
     pub fn new_empty() -> Self {
         Self {
-            reported_colors: Vec::new(),
             hit_counts: Vec::new(),
             distinguishing_hit_counts: Vec::new(),
             n_relevant_kmers: 0
@@ -324,7 +322,9 @@ impl ColoredKmers {
         }
     }
 
-    pub fn get_pseudoalignment_data(&self, query: &[u8]) -> PseudoalignmentData {
+    // All counts smaller than the compatibility threshold are set to zero.
+    // Distinguishing k-mers are determined among colors whose hits exceed the compatibility threshold. 
+    pub fn get_pseudoalignment_data(&self, query: &[u8], compatibility_threshold: usize) -> PseudoalignmentData {
         if query.len() < self.kmers.k() {
             return PseudoalignmentData::new_empty();
         }
@@ -357,22 +357,30 @@ impl ColoredKmers {
             }
         });
 
-        let mut union = bitvec!(0; self.n_colors); // All colors with at least one hit
+        hit_counts.iter_mut().for_each(|n| *n = std::cmp::min(*n, compatibility_threshold));
 
-        // Take the union of the found color sets. flatten() filters out None values.
-        color_sets.iter().flatten().for_each(|x| { union |= *x; });
+        let mut candidate_set = bitvec!(0; self.n_colors); // All colors with at least one hit
+        for (color, count) in hit_counts.iter().enumerate() {
+            if *count >= compatibility_threshold {
+                candidate_set.set(color, true);
+            }
+        }
+
+        let is_distinguishing_color_set = |x: &BitSlice| {
+            let y = x.to_bitvec() & (&candidate_set); // Set intersection
+            y.count_ones() > 0 && (y & (&candidate_set)) != candidate_set // Proper non-empty subset of the candidate set
+        };
 
         let mut distinguishing_hit_counts: Vec<usize> = vec![0; self.n_colors];
-        for color_set in color_sets.iter().flatten().filter(|&&x| x != union) {
+        for color_set in color_sets.iter().flatten().filter(|x| is_distinguishing_color_set(x)) {
             for (i, x) in color_set.iter().enumerate() {
-                if *x {
+                if hit_counts[i] >= compatibility_threshold && *x {
                     distinguishing_hit_counts[i] += 1;
                 }
             }
         }
 
-        let reported_colors = union.iter().enumerate().filter(|(_, x)| **x).map(|(i, _)| i).collect();
-        PseudoalignmentData{reported_colors, hit_counts, distinguishing_hit_counts, n_relevant_kmers}
+        PseudoalignmentData{hit_counts, distinguishing_hit_counts, n_relevant_kmers}
     }
 
     // Returns pairs (color id, score). Not all colors are necessarily present in the output.
