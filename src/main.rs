@@ -208,7 +208,7 @@ fn main() {
             "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
             "99p" => Box::new(|v: &[f64]| {
                 let (argmax, _max) = v.iter().enumerate().max_by(|(_, a),(_, b)| a.total_cmp(b)).unwrap();
-                let mut answer: Vec<f64> = vec![0.01];
+                let mut answer: Vec<f64> = vec![0.01; index.n_colors()];
                 answer[argmax] = 0.99;
                 answer
             }),
