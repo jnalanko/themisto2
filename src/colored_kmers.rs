@@ -229,10 +229,10 @@ pub struct PseudoalignmentData {
 }
 
 impl PseudoalignmentData {
-    pub fn new_empty() -> Self {
+    pub fn new_empty(n_colors: usize) -> Self {
         Self {
-            hit_counts: Vec::new(),
-            distinguishing_hit_counts: Vec::new(),
+            hit_counts: vec![0; n_colors],
+            distinguishing_hit_counts: vec![0; n_colors],
             n_relevant_kmers: 0
         }
     }
@@ -334,7 +334,7 @@ impl ColoredKmers {
     // Distinguishing k-mers are determined among colors whose hits exceed the compatibility threshold. 
     pub fn compute_pseudoalignment_data(&self, query: &[u8], compatibility_threshold: usize) -> PseudoalignmentData {
         if query.len() < self.kmers.k() {
-            return PseudoalignmentData::new_empty();
+            return PseudoalignmentData::new_empty(self.n_colors);
         }
 
         let mut hit_counts: Vec<usize> = vec![0; self.n_colors];
@@ -353,7 +353,7 @@ impl ColoredKmers {
         }
 
         if n_relevant_kmers == 0 {
-            return PseudoalignmentData::new_empty(); 
+            return PseudoalignmentData::new_empty(self.n_colors); 
         }
 
         // Count hits (flatten removes nones).
