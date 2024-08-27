@@ -1,13 +1,7 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufReader, BufWriter, Read}};
+use std::{fs::File, io::{BufReader, BufWriter}};
 use bitvec::prelude::*;
-
-use clap::ArgAction;
-use sbwt::SubsetMatrix;
-use EM::Likelihood;
-
-use crate::EM::fit_model;
 
 mod EM;
 mod colored_kmers;
@@ -141,10 +135,20 @@ fn main() {
             .value_parser(clap::value_parser!(usize))
             .default_value("1")
         )
-        .arg(clap::Arg::new("model")
-            .long("model")
-            .value_parser(clap::builder::PossibleValuesParser::new(vec!["simple", "distinguishing"]))
-            .default_value("simple")
+        .arg(clap::Arg::new("numerator")
+            .long("numerator")
+            .value_parser(clap::builder::PossibleValuesParser::new(vec!["hits", "distinguishing"]))
+            .default_value("hits")
+        )
+        .arg(clap::Arg::new("denominator")
+            .long("denominator")
+            .value_parser(clap::builder::PossibleValuesParser::new(vec!["all", "relevant", "max-distinguishing"]))
+            .default_value("all")
+        )
+        .arg(clap::Arg::new("likelihood")
+            .long("likelihood")
+            .value_parser(clap::builder::PossibleValuesParser::new(vec!["linear", "softmax", "99p", "beta-binomial"]))
+            .default_value("linear")
         )
     );
 
@@ -185,54 +189,54 @@ fn main() {
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
-        let model = sub_matches.get_one::<String>("model").unwrap();
+        let numerator = sub_matches.get_one::<&str>("numerator").unwrap();
+        let denominator = sub_matches.get_one::<&str>("denominator").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
         let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
 
-        if model == "simple" {
-            log::info!("Computing compatibility vectors");
-            let mut compatibility_matrix = Vec::<BitVec>::new();
-            while let Some(rec) = reader.read_next().unwrap(){
-                compatibility_matrix.push(index.intersection_pseudoalignment(rec.seq, min_hits));
-            }
-            log::info!("Constructed {} compatibility vectors", compatibility_matrix.len());
+        let mut likelihood_matrix = Vec::<Vec<f64>>::new();
+        while let Some(rec) = reader.read_next().unwrap(){
+            let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
+            
+            let mut row: Vec<f64> = vec![0.0; index.n_colors()];
+            for color in 0..index.n_colors() {
+                let numerator_value = match *numerator {
+                    "hits" => data.hit_counts[color],
+                    "distinguishing" => data.distinguishing_hit_counts[color],
+                    _ => panic!("Invalid numerator {}", numerator)
+                };
+                let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
+                let mut denominator_value = match *denominator {
+                    "all" => n_kmers,
+                    "relevant" => data.n_relevant_kmers,
+                    "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
+                    _ => panic!("Invalid denominator {}", denominator)
+                };
+                denominator_value = std::cmp::max(1, denominator_value); // Avoid division by zero
 
-            log::info!("Reducing to equivalence classes");
-            let counts = reduce_to_classes(&mut compatibility_matrix);
-            log::info!("Reduced to {} equivalence classes", counts.len());
-
-            log::info!("Running EM");
-            let likelihood = SimpleLikelihood{};
-            let n_colors = index.n_colors();
-            let mixing_fractions = EM::fit_model(&likelihood, &compatibility_matrix, &counts, &vec![1.0 / n_colors as f64; n_colors], n_threads);
-            println!("{:?}", &mixing_fractions);
-        } else if model == "distinguishing" {
-            let mut likelihood_matrix = Vec::<Vec<f64>>::new();
-            while let Some(rec) = reader.read_next().unwrap(){
-                let mut row: Vec<f64> = vec![0.01; index.n_colors()]; // Zero inflation: 0.01 instead of 0
-                for (color, score) in index.compute_distinguishing_scores(rec.seq) {
-                    row[color] = score; 
-                }
-
-                // Normalize
-                let rowsum = row.iter().sum::<f64>();
-                row.iter_mut().for_each(|x| *x /= rowsum);
-
-                likelihood_matrix.push(row);
+                row[color] = numerator_value as f64 / denominator_value as f64;
             }
 
-            // Observation is now a likelihood matrix row
-            let n_rows = likelihood_matrix.len();
-            let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
-            let observations: Vec<usize> = (0..n_rows).collect();
-            let observation_counts: Vec<usize> = vec![1; n_rows];
+            // Add zero inflation
+            row.iter_mut().for_each(|x| *x = x.max(0.01));
 
-            let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads);
-            println!("{:?}", &mixing_fractions);
+            // Normalize
+            let rowsum = row.iter().sum::<f64>();
+            row.iter_mut().for_each(|x| *x /= rowsum);
 
+            likelihood_matrix.push(row);
         }
+
+        // Observation is now a likelihood matrix row
+        let n_rows = likelihood_matrix.len();
+        let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
+        let observations: Vec<usize> = (0..n_rows).collect();
+        let observation_counts: Vec<usize> = vec![1; n_rows];
+
+        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads);
+        println!("{:?}", &mixing_fractions);
 
     }
 }

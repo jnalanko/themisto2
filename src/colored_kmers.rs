@@ -222,10 +222,10 @@ fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static,
     colex_to_color_set_id
 }
 
-struct PseudoalignmentData {
-    hit_counts: Vec<usize>,
-    distinguishing_hit_counts: Vec<usize>,
-    n_relevant_kmers: usize,
+pub struct PseudoalignmentData {
+    pub hit_counts: Vec<usize>,
+    pub distinguishing_hit_counts: Vec<usize>,
+    pub n_relevant_kmers: usize,
 }
 
 impl PseudoalignmentData {
@@ -242,6 +242,10 @@ impl ColoredKmers {
 
     pub fn n_colors(&self) -> usize {
         self.n_colors
+    }
+
+    pub fn get_k(&self) -> usize {
+        self.kmers.k()
     }
 
     pub fn new_from_new_themisto_index_dump(sbwt_ascii_dump: impl std::io::BufRead, themisto_metadata_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead + Send + 'static, themisto_color_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> Self {
@@ -324,7 +328,7 @@ impl ColoredKmers {
 
     // All counts smaller than the compatibility threshold are set to zero.
     // Distinguishing k-mers are determined among colors whose hits exceed the compatibility threshold. 
-    pub fn get_pseudoalignment_data(&self, query: &[u8], compatibility_threshold: usize) -> PseudoalignmentData {
+    pub fn compute_pseudoalignment_data(&self, query: &[u8], compatibility_threshold: usize) -> PseudoalignmentData {
         if query.len() < self.kmers.k() {
             return PseudoalignmentData::new_empty();
         }
