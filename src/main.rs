@@ -140,6 +140,11 @@ fn main() {
             .value_parser(clap::value_parser!(usize))
             .default_value("1")
         )
+        .arg(clap::Arg::new("max-iterations")
+            .long("max-iterations")
+            .value_parser(clap::value_parser!(usize))
+            .default_value("2000")
+        )
         .arg(clap::Arg::new("numerator")
             .long("numerator")
             .value_parser(clap::builder::PossibleValuesParser::new(vec!["hits", "distinguishing"]))
@@ -197,6 +202,7 @@ fn main() {
         let numerator = sub_matches.get_one::<String>("numerator").unwrap();
         let denominator = sub_matches.get_one::<String>("denominator").unwrap();
         let likelihood_type = sub_matches.get_one::<String>("likelihood").unwrap();
+        let max_iterations = *sub_matches.get_one::<usize>("max-iterations").unwrap();
 
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -262,9 +268,8 @@ fn main() {
         let observations: Vec<usize> = (0..n_rows).collect();
         let observation_counts: Vec<usize> = vec![1; n_rows];
 
-        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads);
+        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads, max_iterations);
         println!("{:?}", &mixing_fractions);
-
     }
 }
 

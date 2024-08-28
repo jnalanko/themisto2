@@ -36,7 +36,7 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
 // \theta_1 + ... + \theta_K = 1.
 // observation_counts[i] = number of times observation i was observed
 // It should hold that observations.len() == observation_counts.len().
-pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &[L::Observation], observation_counts: &[usize], initital_theta: &[f64], n_threads: usize) -> Vec<f64>{
+pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likelihood: &L, observations: &[L::Observation], observation_counts: &[usize], initital_theta: &[f64], n_threads: usize, max_iterations: usize) -> Vec<f64> {
 
     // There is one latent variable per observation. Let's denote the i-th latent variable with Z_i. Each latent variable
     // is assigned a value from the set {0..K-1}, where K is the number of mixture components. The interpretation is that
@@ -67,7 +67,7 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     let mut prev_theta = initital_theta.to_owned();
     let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
 
-    loop {
+    for _ in 0..max_iterations {
 
         // Compute the contributions to the next theta for each distinct observation given previous theta estimate.
         // The work is split evenly to n_threads threads.
@@ -116,10 +116,10 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
         if change < 1e-5 {
             return next_theta; // Converged
         }
-
         prev_theta = next_theta;
-
     }
+
+    prev_theta
 }
 
 
@@ -164,7 +164,7 @@ mod tests {
 
         eprintln!("{:?}", (0..=3).map(|k| observations.iter().filter(|x| **x == k).count()));
 
-        fit_model(&likelihood, &observations, &observation_counts, &initial_theta, 2);
+        fit_model(&likelihood, &observations, &observation_counts, &initial_theta, 2, 1000);
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
         let M = LikelihoodMatrix{likelihoods: L};
         let observations = (0..n).collect::<Vec::<usize>>();
         let observation_counts = vec![1; observations.len()];
-        let estimated_theta = fit_model(&M, &observations, &observation_counts, &initial_theta, 2);
+        let estimated_theta = fit_model(&M, &observations, &observation_counts, &initial_theta, 2, 1000);
         eprintln!("{:?}", estimated_theta);
     }
 }
