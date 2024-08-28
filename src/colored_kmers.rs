@@ -365,7 +365,8 @@ impl ColoredKmers {
             }
         });
 
-        hit_counts.iter_mut().for_each(|n| *n = std::cmp::min(*n, compatibility_threshold));
+        // Set all counts smaller than the compatibility threshold to zero.
+        hit_counts.iter_mut().for_each(|n| *n *= (*n >= compatibility_threshold) as usize);
 
         let mut candidate_set = bitvec!(0; self.n_colors); // All colors with at least one hit
         for (color, count) in hit_counts.iter().enumerate() {
