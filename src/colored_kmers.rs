@@ -1,4 +1,4 @@
-use std::{arch::x86_64, io::BufRead};
+use std::io::BufRead;
 
 use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
