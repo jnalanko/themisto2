@@ -99,7 +99,7 @@ fn main() {
             .required(true)
         )
     )
-    .subcommand(clap::Command::new("pseudoalign")
+    .subcommand(clap::Command::new("intersection-pseudoalign")
         .arg_required_else_help(true)
         .arg(clap::Arg::new("index")
             .long("index")
@@ -111,6 +111,28 @@ fn main() {
             .long("query")
             .short('q')
             .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+    )
+    .subcommand(clap::Command::new("dump-pseudoalignment-data")
+        .about("Dumps pseudoalignment data for each read in JSON format")
+        .arg_required_else_help(true)
+        .arg(clap::Arg::new("index")
+            .long("index")
+            .short('i')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("query")
+            .long("query")
+            .short('q')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("min-hits")
+            .long("min-hits")
+            .short('m')
+            .value_parser(clap::value_parser!(usize))
             .required(true)
         )
     )
@@ -181,7 +203,7 @@ fn main() {
 
         let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
         index.serialize(&mut out);
-    } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign"){
+    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-pseudoalign"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         
@@ -193,6 +215,21 @@ fn main() {
         while let Some(rec) = reader.read_next().unwrap(){
             let intersection = index.intersection_pseudoalignment(rec.seq, 1);
             println!("{}", intersection);
+        }
+    } else if let Some(sub_matches) = matches.subcommand_matches("dump-pseudoalignment-data"){
+        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
+        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
+        
+        log::info!("Loading index");
+        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+
+        log::info!("Pseudoaligning");
+        while let Some(rec) = reader.read_next().unwrap(){
+            let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
+            let json = serde_json::to_string(&data).unwrap();
+            println!("{}", json);
         }
     } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign-into-EM"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();

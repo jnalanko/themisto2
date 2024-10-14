@@ -222,10 +222,12 @@ fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static,
     colex_to_color_set_id
 }
 
+#[derive(serde::Serialize)]
 pub struct PseudoalignmentData {
     pub hit_counts: Vec<usize>,
     pub distinguishing_hit_counts: Vec<usize>,
     pub n_relevant_kmers: usize,
+    pub n_all_kmers: usize,
 }
 
 impl PseudoalignmentData {
@@ -233,7 +235,8 @@ impl PseudoalignmentData {
         Self {
             hit_counts: vec![0; n_colors],
             distinguishing_hit_counts: vec![0; n_colors],
-            n_relevant_kmers: 0
+            n_relevant_kmers: 0,
+            n_all_kmers: 0,
         }
     }
 }
@@ -389,7 +392,9 @@ impl ColoredKmers {
             }
         }
 
-        PseudoalignmentData{hit_counts, distinguishing_hit_counts, n_relevant_kmers}
+        let n_all_kmers = query.len() as i64 - self.get_k() as i64 + 1;
+        let n_all_kmers = std::cmp::max(0, n_all_kmers) as usize; 
+        PseudoalignmentData{hit_counts, distinguishing_hit_counts, n_relevant_kmers, n_all_kmers}
     }
 
     // Returns pairs (color id, score). Not all colors are necessarily present in the output.
