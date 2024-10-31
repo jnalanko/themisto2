@@ -31,6 +31,7 @@ fn compute_theta_contributions<O: Sync, L: Likelihood<Observation = O> + Sync + 
     next_theta
 }
 
+
 // likelihood: see the comments in the trait for an explanation for what it is.
 // initial_theta is the initial guess for the mixing fractions.
 // \theta_1 + ... + \theta_K = 1.
@@ -122,6 +123,148 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     prev_theta
 }
 
+struct IntersectionLikelihood {
+    // The likelihood ratio w specifies how much more likely compatible colors are to incompatible colors
+    w: f64, 
+}
+
+// This is specific to IntersectionLikelihood
+fn compute_expected_compatible_and_incompatible(likelihood: &IntersectionLikelihood, observations: &[<IntersectionLikelihood as Likelihood>::Observation], observation_counts: &[usize], prev_theta: &[f64]) -> (f64, f64) {
+    assert_eq!(observations.len(), observation_counts.len());
+    let K = prev_theta.len();
+
+    let mut n_compatible = 0.0;
+    let mut n_incompatible = 0.0;
+
+    for i in 0..observations.len() {
+        let mut denominator: f64 = 0.0; // Normalization factor
+        for j in 0..K {
+            denominator += prev_theta[j] * likelihood.likelihood(&observations[i], j);
+        }
+        for k in 0..K {
+            let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
+            
+            n_compatible += Z_i_k_posterior * observations[i][k] as f64;
+            n_incompatible += Z_i_k_posterior * (1 - observations[i][k]) as f64;
+        }
+    }
+    (n_compatible, n_incompatible)
+}
+
+impl Likelihood for IntersectionLikelihood {
+    type Observation = Vec<u8>; // Binary compatibility vector 
+
+    fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
+        if x_i[k] == 1 {
+            self.w / (self.w + 1.0)
+        }  else {
+            1.0 / (self.w + 1.0)
+        }
+    }
+}
+
+// Observations are compatibility vector to colors, that is:
+// observations[i][j] = 1 if observation i is compatible with mixture component j, otherwise 0.
+// Compatible colors have likelihood w, incompatible have likelihood 1.
+// The ratio w is optimizing along with the mixture fractions.
+// Returns the vector of optimized mixing fractions, and the likelihood ratio w.
+pub fn fit_model_with_intersection_inputs<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], initial_v: f64, n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
+
+    // The update rule for theta is the same as in `fit_model`.
+    // We just add an update rule for w. The deriviation of the rule
+    // is at my Obsidian notes.
+    
+    let n_distinct_observations = observations.len();
+    let n_total_observations: usize = observation_counts.iter().sum();
+    let K = initital_theta.len();
+
+    let mut prev_w = 99.0; // Likelihood ratio initial guess
+    let mut prev_theta = initital_theta.to_owned();
+    let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
+
+    for _ in 0..max_iterations {
+
+        let likelihood = IntersectionLikelihood{w: prev_w};
+
+        // Compute the contributions to the next theta for each distinct observation given previous theta estimate.
+        // The work is split evenly to n_threads threads.
+        let mut next_theta = std::thread::scope(|s| {
+            let mut join_handles = Vec::<_>::new();
+            for t in 0..n_threads {
+                let start = t*slice_len;
+                let end = std::cmp::min((t+1)*slice_len, observations.len());
+                let ob_slice = &observations[start..end];
+                let ob_count_slice = &observation_counts[start..end];
+                join_handles.push(s.spawn(|| {
+                    compute_theta_contributions(&likelihood, ob_slice, ob_count_slice, &prev_theta)
+                }));
+            }
+
+            // Add up contributions from all threads
+            let mut next_theta: Vec<f64> = vec![0.0; K];
+            for h in join_handles {
+                for (i, theta_i) in h.join().unwrap().iter().enumerate() {
+                    next_theta[i] += theta_i;
+                }
+            }
+            next_theta
+        });
+
+        for k in 0..K {
+            // These divisions should have been done to all contributions, but we do all those divisions
+            // here at once for numerical reasons.
+            next_theta[k] /= n_total_observations as f64;
+        }
+
+        // Compute the contributions next w 
+        // The work is split evenly to n_threads threads.
+        let next_w = std::thread::scope(|s| {
+            let mut join_handles = Vec::<_>::new();
+            for t in 0..n_threads {
+                let start = t*slice_len;
+                let end = std::cmp::min((t+1)*slice_len, observations.len());
+                let ob_slice = &observations[start..end];
+                let ob_count_slice = &observation_counts[start..end];
+                join_handles.push(s.spawn(|| {
+                    compute_expected_compatible_and_incompatible(&likelihood, ob_slice, ob_count_slice, &prev_theta)
+                }));
+            }
+
+            // Add up contributions from all threads
+            let mut expected_compatible = 0.0;
+            let mut expected_incompatible = 0.0;
+            for h in join_handles {
+                let (n_compat, n_incompat) = h.join().unwrap();
+                expected_compatible += n_compat;
+                expected_incompatible += n_incompat;
+            }
+            expected_compatible / expected_incompatible // This is the new estimate for w
+        });
+
+        // Compute the current log-likelihood (just FYI for the user, does not affect the algorithm)
+        /*
+        let mut total_log_likelihood: f64 = 0.0;
+        for i in 0..n_distinct_observations {
+            let prob = (0..K).fold(0.0, |acc, k| acc + next_theta[k] * likelihood.likelihood(&observations[i], k));
+            total_log_likelihood += prob.ln() * observation_counts[i] as f64;
+        }
+        */
+
+        let change = (0..K).fold((next_w - prev_w)*(next_w - prev_w), |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
+
+        log::info!("{}", change);
+
+        // change = |prev_theta - next_theta|
+        if change < 1e-5 {
+            return (next_theta, next_w); // Converged
+        }
+        prev_theta = next_theta;
+        prev_w = next_w;
+    }
+
+    (prev_theta, prev_w)
+
+}
 
 #[cfg(test)]
 mod tests {
