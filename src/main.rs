@@ -248,7 +248,7 @@ fn main() {
             let intersection = index.intersection_pseudoalignment(rec.seq, 1);
             println!("{}", intersection);
         }
-    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-into-EM"){
+    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-pseudoalign-into-EM"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
