@@ -144,8 +144,8 @@ fn compute_expected_compatible_and_incompatible(likelihood: &IntersectionLikelih
         for k in 0..K {
             let Z_i_k_posterior = prev_theta[k] * likelihood.likelihood(&observations[i], k) / denominator;
             
-            n_compatible += Z_i_k_posterior * observations[i][k] as f64;
-            n_incompatible += Z_i_k_posterior * (1 - observations[i][k]) as f64;
+            n_compatible += observation_counts[i] as f64 * Z_i_k_posterior * observations[i][k] as f64;
+            n_incompatible += observation_counts[i] as f64 * Z_i_k_posterior * (1 - observations[i][k]) as f64;
         }
     }
     (n_compatible, n_incompatible)
@@ -168,7 +168,7 @@ impl Likelihood for IntersectionLikelihood {
 // Compatible colors have likelihood w, incompatible have likelihood 1.
 // The ratio w is optimizing along with the mixture fractions.
 // Returns the vector of optimized mixing fractions, and the likelihood ratio w.
-pub fn fit_model_with_intersection_inputs<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
+pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
 
     // The update rule for theta is the same as in `fit_model`.
     // We just add an update rule for w. The deriviation of the rule

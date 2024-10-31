@@ -182,6 +182,38 @@ fn main() {
             .value_parser(clap::builder::PossibleValuesParser::new(vec!["linear", "softmax", "99p"]))
             .default_value("linear")
         )
+    )
+    .subcommand(clap::Command::new("intersection-pseudoalign-into-EM")
+        .arg_required_else_help(true)
+        .arg(clap::Arg::new("index")
+            .long("index")
+            .short('i')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("query")
+            .long("query")
+            .short('q')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("min-hits")
+            .long("min-hits")
+            .short('m')
+            .value_parser(clap::value_parser!(usize))
+            .required(true)
+        )
+        .arg(clap::Arg::new("n-threads")
+            .long("n-threads")
+            .short('t')
+            .value_parser(clap::value_parser!(usize))
+            .default_value("1")
+        )
+        .arg(clap::Arg::new("max-iterations")
+            .long("max-iterations")
+            .value_parser(clap::value_parser!(usize))
+            .default_value("2000")
+        )
     );
 
     let matches = cli.get_matches();
@@ -216,6 +248,33 @@ fn main() {
             let intersection = index.intersection_pseudoalignment(rec.seq, 1);
             println!("{}", intersection);
         }
+    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-into-EM"){
+        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
+        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
+        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
+        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
+        let max_iterations = *sub_matches.get_one::<usize>("max-iterations").unwrap();
+        
+        log::info!("Loading index");
+        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+
+        log::info!("Pseudoaligning");
+        let mut intersections = Vec::<BitVec>::new(); // Todo: store more compactly with 8 bits per byte?
+        while let Some(rec) = reader.read_next().unwrap(){
+            let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
+            intersections.push(intersection);
+        }
+
+        let class_counts = reduce_to_classes(&mut intersections);
+
+        // Represent with one byte per bit for compatibility with the EM algorithm
+        let intersections: Vec<Vec<u8>> = intersections.iter().map(|v| v.iter().map(|b| *b as u8).collect()).collect();
+
+        let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
+        println!("Likelihood ratio w: {}", w);
+        println!("Mixing fractions: {:?}", thetas);
+
     } else if let Some(sub_matches) = matches.subcommand_matches("dump-pseudoalignment-data"){
         let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
         let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
@@ -305,7 +364,7 @@ fn main() {
         let observations: Vec<usize> = (0..n_rows).collect();
         let observation_counts: Vec<usize> = vec![1; n_rows];
 
-        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / n_rows as f64; index.n_colors()], n_threads, max_iterations);
+        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
         println!("{:?}", &mixing_fractions);
     }
 }
