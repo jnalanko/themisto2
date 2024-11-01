@@ -221,7 +221,7 @@ fn main() {
             .default_value("99")
         )
         .arg(clap::Arg::new("static-likelihood")
-            .long("static-likelihood-ratio")
+            .long("static-likelihood")
             .action(clap::ArgAction::SetTrue)
         )
     );
