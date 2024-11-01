@@ -214,6 +214,16 @@ fn main() {
             .value_parser(clap::value_parser!(usize))
             .default_value("2000")
         )
+        .arg(clap::Arg::new("initial-likelihood-ratio")
+            .long("initial-likelihood-ratio")
+            .short('w')
+            .value_parser(clap::value_parser!(f64))
+            .default_value("99")
+        )
+        .arg(clap::Arg::new("static-likelihood")
+            .long("static-likelihood-ratio")
+            .action(clap::ArgAction::SetTrue)
+        )
     );
 
     let matches = cli.get_matches();
@@ -254,6 +264,8 @@ fn main() {
         let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
         let max_iterations = *sub_matches.get_one::<usize>("max-iterations").unwrap();
+        let initial_w = *sub_matches.get_one::<f64>("initial-likelihood-ratio").unwrap();
+        let optimize_w = !(sub_matches.get_flag("static-likelihood"));
         
         log::info!("Loading index");
         let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -271,8 +283,8 @@ fn main() {
         // Represent with one byte per bit for compatibility with the EM algorithm
         let intersections: Vec<Vec<u8>> = intersections.iter().map(|v| v.iter().map(|b| *b as u8).collect()).collect();
 
-        let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
-        println!("Likelihood ratio w: {}", w);
+        let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], initial_w, optimize_w, n_threads, max_iterations);
+        println!("Final likelihood ratio w: {}", w);
         println!("Mixing fractions: {:?}", thetas);
 
     } else if let Some(sub_matches) = matches.subcommand_matches("dump-pseudoalignment-data"){

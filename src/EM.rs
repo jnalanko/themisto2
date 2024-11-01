@@ -166,9 +166,10 @@ impl Likelihood for IntersectionLikelihood {
 // Observations are compatibility vector to colors, that is:
 // observations[i][j] = 1 if observation i is compatible with mixture component j, otherwise 0.
 // Compatible colors have likelihood w, incompatible have likelihood 1.
-// The ratio w is optimizing along with the mixture fractions.
-// Returns the vector of optimized mixing fractions, and the likelihood ratio w.
-pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
+// initial_w is the likelihood ratio of compatible and incompatible colors. It is optimized
+// as the algorithm progresses if optimize_w is true.
+// Returns the vector of optimized mixing fractions, and the final likelihood ratio w.
+pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], initial_w: f64, optimize_w: bool, n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
 
     // The update rule for theta is the same as in `fit_model`.
     // We just add an update rule for w. The deriviation of the rule
@@ -178,7 +179,7 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
     let n_total_observations: usize = observation_counts.iter().sum();
     let K = initital_theta.len();
 
-    let mut prev_w = 99.0; // Likelihood ratio initial guess
+    let mut prev_w = initial_w; // Likelihood ratio initial guess
     let mut prev_theta = initital_theta.to_owned();
     let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
 
@@ -218,28 +219,32 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
 
         // Compute the contributions next w 
         // The work is split evenly to n_threads threads.
-        let next_w = std::thread::scope(|s| {
-            let mut join_handles = Vec::<_>::new();
-            for t in 0..n_threads {
-                let start = t*slice_len;
-                let end = std::cmp::min((t+1)*slice_len, observations.len());
-                let ob_slice = &observations[start..end];
-                let ob_count_slice = &observation_counts[start..end];
-                join_handles.push(s.spawn(|| {
-                    compute_expected_compatible_and_incompatible(&likelihood, ob_slice, ob_count_slice, &prev_theta)
-                }));
-            }
+        let next_w = if optimize_w {
+            std::thread::scope(|s| {
+                let mut join_handles = Vec::<_>::new();
+                for t in 0..n_threads {
+                    let start = t*slice_len;
+                    let end = std::cmp::min((t+1)*slice_len, observations.len());
+                    let ob_slice = &observations[start..end];
+                    let ob_count_slice = &observation_counts[start..end];
+                    join_handles.push(s.spawn(|| {
+                        compute_expected_compatible_and_incompatible(&likelihood, ob_slice, ob_count_slice, &prev_theta)
+                    }));
+                }
 
-            // Add up contributions from all threads
-            let mut expected_compatible = 0.0;
-            let mut expected_incompatible = 0.0;
-            for h in join_handles {
-                let (n_compat, n_incompat) = h.join().unwrap();
-                expected_compatible += n_compat;
-                expected_incompatible += n_incompat;
-            }
-            expected_compatible / expected_incompatible // This is the new estimate for w
-        });
+                // Add up contributions from all threads
+                let mut expected_compatible = 0.0;
+                let mut expected_incompatible = 0.0;
+                for h in join_handles {
+                    let (n_compat, n_incompat) = h.join().unwrap();
+                    expected_compatible += n_compat;
+                    expected_incompatible += n_incompat;
+                }
+                expected_compatible / expected_incompatible // This is the new estimate for w
+            })
+        } else {
+            prev_w // Do not optimize w
+        };
 
         // Compute the current log-likelihood (just FYI for the user, does not affect the algorithm)
         /*
@@ -252,7 +257,7 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
 
         let change = (0..K).fold((next_w - prev_w)*(next_w - prev_w), |acc, k| acc + (prev_theta[k] - next_theta[k]) * (prev_theta[k] - next_theta[k])).sqrt();
 
-        log::info!("{}", change);
+        log::info!("theta change: {}, w: {}", change, prev_w);
 
         // change = |prev_theta - next_theta|
         if change < 1e-5 {
