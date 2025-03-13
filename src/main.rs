@@ -2,6 +2,7 @@
 
 use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf};
 use bitvec::prelude::*;
+use clap::{Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 
 mod EM;
@@ -71,12 +72,65 @@ fn softmax(values: &[f64]) -> Vec<f64> {
     exp_values.iter().map(|&x| x / sum_exp_values).collect()
 }
 
+#[derive(Parser)]
+#[command(arg_required_else_help = true)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Subcommands,
+}
+
+#[derive(Subcommand)]
+#[command(arg_required_else_help = true)]
+pub enum Subcommands {
+    Build {
+        #[arg(
+            help = "A file with one fasta/fastq filename per line",
+            short, long, required = true
+        )]
+        input: PathBuf,
+
+        #[arg(
+            help = "Output filename",
+            short, long, required = true
+        )]
+        output: PathBuf,
+
+
+        #[arg(
+            help = "Directory for temporary files",
+            short = 'd', long = "temp-dir", required = true
+        )]
+        temp_dir: PathBuf,
+
+
+        #[arg(short, required = true)]
+        k: usize,
+
+        #[arg(
+            help = "Number of parallel threads",
+            short = 't', long = "n-threads", default_value = "4"
+        )]
+        n_threads: usize
+    },
+}
+
 
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
     env_logger::init();
+
+    let args = Cli::parse();
+    match args.command {
+        Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
+            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+            let index = ColoredKmers::new(input_paths.as_slice(), k, n_threads, &temp_dir);
+            index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
+        }
+    }
+
+    return;
 
     let cli = clap::Command::new("themisto2")
     .arg_required_else_help(true) 
