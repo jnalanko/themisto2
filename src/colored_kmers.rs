@@ -1,7 +1,7 @@
 use std::{io::BufRead, path::{Path, PathBuf}};
 
 use clap::builder::styling::Color;
-use sbwt::{self, BitPackedKmerSorting, SbwtIndex, SeqStream, SubsetMatrix, SubsetSeq};
+use sbwt::{self, BitPackedKmerSorting, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
@@ -468,11 +468,6 @@ impl InputStream {
         }
         Self {dbs, cur_db_idx: 0, seq_idx_in_cur_db: 0}
     }
-
-    fn reset(&mut self) {
-        self.cur_db_idx = 0;
-        self.seq_idx_in_cur_db = 0;
-    }
 }
 
 impl SeqStream for InputStream {
@@ -499,7 +494,7 @@ impl SeqStream for InputStream {
 
 impl ColoredKmers {
     pub fn new(filenames: &[&Path], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
-        let input_stream = InputStream::new(filenames);
+        let mut input_stream = InputStream::new(filenames);
         let sbwt_builder = sbwt::SbwtIndexBuilder::new()
             .add_rev_comp(false) // Already added in the input stream
             .k(k)
@@ -511,9 +506,42 @@ impl ColoredKmers {
                 .temp_dir(temp_dir)
         );
         let (sbwt, lcs) = sbwt_builder.run(input_stream);
-        todo!();
+        let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
+        let streaming_index = StreamingIndex::new(&sbwt, &lcs);
+
+        // Stream over the sequences and record the colors
+        let mut input_stream = InputStream::new(filenames);
+        let num_colors = input_stream.dbs.len();
+        let mut color_sets = bitvec![0; num_colors*sbwt.n_sets()]; // Concatenation of distinct color sets
+
+        let mut color = 0_usize;
+        while let Some(seq) = input_stream.stream_next() {
+            // Search all k-mers
+            for (len, colex) in streaming_index.matching_statistics(seq) {
+                if len == k {
+                    // Full kmer -> set the bit in the color set of the k-mer
+                    assert!(colex.len() == 1);
+                    color_sets.set(colex.start*num_colors + color, true);
+                }
+            }
+            color = input_stream.cur_db_idx; // Color for the next round
+        }
+        // Todo: deduplicate color sets
+
+        let colex_to_color_set_id: Vec<usize> = (0..sbwt.n_sets()).collect(); // Identity mapping
+
+        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: num_colors}
     } 
 }
+
+/*
+    kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
+    lcs: sbwt::LcsArray,
+    distinct_color_sets: BitVec, // Concatenation of distinct color sets
+    colex_to_color_set_id: Vec<usize>,
+    empty_set: BitVec, // So that we can return a bitslice to an empty set
+    n_colors: usize,
+ */
 
 #[cfg(test)]
 mod tests {
