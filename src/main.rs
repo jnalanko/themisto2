@@ -83,19 +83,19 @@ pub struct Cli {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
-        #[arg( help = "A file with one fasta/fastq filename per line", short, long, required = true)]
+        #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
         input: PathBuf,
 
-        #[arg( help = "Output filename", short, long, required = true)]
+        #[arg(help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
-        #[arg( help = "Directory for temporary files", short = 'd', long = "temp-dir", required = true)]
+        #[arg(help = "Directory for temporary files", short = 'd', long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
         #[arg(short, required = true)]
         k: usize,
 
-        #[arg( help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
+        #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize
     },
 
