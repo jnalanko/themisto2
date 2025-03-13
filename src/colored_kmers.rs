@@ -1,6 +1,7 @@
-use std::io::BufRead;
+use std::{io::BufRead, path::{Path, PathBuf}};
 
-use sbwt::{self, SbwtIndex, SubsetMatrix, SubsetSeq};
+use clap::builder::styling::Color;
+use sbwt::{self, BitPackedKmerSorting, SbwtIndex, SeqStream, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
@@ -440,6 +441,78 @@ impl ColoredKmers {
         distinguishing_hit_counts.iter().enumerate().filter(|(_, hits)| **hits > 0).map(|(color, hits)| (color, *hits as f64 / *max_distinguishing_hits as f64)).collect()
 
     }
+}
+
+struct InputStream {
+    dbs: Vec<jseqio::seq_db::SeqDB>,
+    cur_db_idx: usize, // Index of the db currently being iterated over
+    seq_idx_in_cur_db: usize,
+}
+
+impl InputStream {
+    fn new(filenames: &[&Path]) -> InputStream {
+        let mut dbs: Vec<jseqio::seq_db::SeqDB> = vec![];
+        for path in filenames {
+            let reader = jseqio::reader::DynamicFastXReader::from_file(path).unwrap();
+            let (mut fw, rc) = reader.into_db_with_revcomp().unwrap();
+
+            if fw.sequence_count() == 0 {
+                panic!("No sequences found in file {}", path.display());
+            }
+
+            // Append reverse complement records to the forward database
+            for rec in rc.iter() {
+                fw.push_record(rec);
+            }
+            dbs.push(fw);
+        }
+        Self {dbs, cur_db_idx: 0, seq_idx_in_cur_db: 0}
+    }
+
+    fn reset(&mut self) {
+        self.cur_db_idx = 0;
+        self.seq_idx_in_cur_db = 0;
+    }
+}
+
+impl SeqStream for InputStream {
+
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        if self.cur_db_idx == self.dbs.len() {
+            return None; // Done
+        }
+
+        // Fetch the next sequence
+        let db = &self.dbs[self.cur_db_idx];
+        assert!(db.sequence_count() > 0);
+        let seq = db.get(self.seq_idx_in_cur_db).seq;
+
+        // Update the "cursor"
+        self.seq_idx_in_cur_db += 1;
+        if self.seq_idx_in_cur_db == db.sequence_count() {
+            self.cur_db_idx += 1;
+            self.seq_idx_in_cur_db = 0;
+        }
+        Some(seq)
+    } 
+}
+
+impl ColoredKmers {
+    pub fn new(filenames: &[&Path], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+        let input_stream = InputStream::new(filenames);
+        let sbwt_builder = sbwt::SbwtIndexBuilder::new()
+            .add_rev_comp(false) // Already added in the input stream
+            .k(k)
+            .build_lcs(true)
+            .n_threads(n_threads)
+            .precalc_length(8)
+            .algorithm(BitPackedKmerSorting::new()
+                .dedup_batches(true)
+                .temp_dir(temp_dir)
+        );
+        let (sbwt, lcs) = sbwt_builder.run(input_stream);
+        todo!();
+    } 
 }
 
 #[cfg(test)]
