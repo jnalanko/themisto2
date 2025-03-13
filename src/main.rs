@@ -165,7 +165,7 @@ pub enum Subcommands {
 
     },
 
-    #[command(arg_required_else_help = true, name = "pseudoalign-into-EM")]
+    #[command(arg_required_else_help = true, name = "intersection-pseudoalign-into-EM")]
     IntersectionPseudoalignIntoEM {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
