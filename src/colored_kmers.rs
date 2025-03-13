@@ -494,7 +494,9 @@ impl SeqStream for InputStream {
 
 impl ColoredKmers {
     pub fn new<P: AsRef<Path>>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
-        let mut input_stream = InputStream::new(filenames);
+        log::info!("Loading {} sequence files (colors) into memory", filenames.len());
+        let input_stream = InputStream::new(filenames);
+        log::info!("Building SBWT");
         let sbwt_builder = sbwt::SbwtIndexBuilder::new()
             .add_rev_comp(false) // Already added in the input stream
             .k(k)
@@ -509,6 +511,7 @@ impl ColoredKmers {
         let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
         let streaming_index = StreamingIndex::new(&sbwt, &lcs);
 
+        log::info!("Building colors");
         // Stream over the sequences and record the colors
         let mut input_stream = InputStream::new(filenames);
         let num_colors = input_stream.dbs.len();

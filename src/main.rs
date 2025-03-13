@@ -81,7 +81,7 @@ fn main() {
     .arg_required_else_help(true) 
     .subcommand(clap::Command::new("build")
         .arg_required_else_help(true)
-        .arg(clap::Arg::new("Input file of files.")
+        .arg(clap::Arg::new("input")
             .help("A file with one fasta/fastq filename per line")
             .short('i')
             .value_parser(clap::value_parser!(std::path::PathBuf))
@@ -90,6 +90,13 @@ fn main() {
         .arg(clap::Arg::new("output")
             .help("Outfile filename")
             .short('o')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("temp-dir")
+            .help("Directory for temporary files")
+            .long("temp-dir")
+            .short('d')
             .value_parser(clap::value_parser!(std::path::PathBuf))
             .required(true)
         )
@@ -102,13 +109,6 @@ fn main() {
             .short('t')
             .value_parser(clap::value_parser!(usize))
             .default_value("4")
-            .required(true)
-        )
-        .arg(clap::Arg::new("temp-dir")
-            .help("Directory for temporary files")
-            .short('d')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
         )
     )
     .subcommand(clap::Command::new("import")
@@ -261,8 +261,8 @@ fn main() {
 
     let matches = cli.get_matches();
     if let Some(sub_matches) = matches.subcommand_matches("build"){
-        let input_fof = sub_matches.get_one::<std::path::PathBuf>("i").unwrap();
-        let out_path = sub_matches.get_one::<std::path::PathBuf>("o").unwrap();
+        let input_fof = sub_matches.get_one::<std::path::PathBuf>("input").unwrap();
+        let out_path = sub_matches.get_one::<std::path::PathBuf>("output").unwrap();
         let k = *sub_matches.get_one::<usize>("k").unwrap();
         let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
         let temp_dir = sub_matches.get_one::<PathBuf>("temp-dir").unwrap();
