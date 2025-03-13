@@ -1,7 +1,8 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufReader, BufWriter}};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf};
 use bitvec::prelude::*;
+use colored_kmers::ColoredKmers;
 
 mod EM;
 mod colored_kmers;
@@ -78,6 +79,38 @@ fn main() {
 
     let cli = clap::Command::new("themisto2")
     .arg_required_else_help(true) 
+    .subcommand(clap::Command::new("build")
+        .arg_required_else_help(true)
+        .arg(clap::Arg::new("Input file of files.")
+            .help("A file with one fasta/fastq filename per line")
+            .short('i')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("output")
+            .help("Outfile filename")
+            .short('o')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+        .arg(clap::Arg::new("k")
+            .short('k')
+            .value_parser(clap::value_parser!(usize))
+            .required(true)
+        )
+        .arg(clap::Arg::new("n-threads")
+            .short('t')
+            .value_parser(clap::value_parser!(usize))
+            .default_value("4")
+            .required(true)
+        )
+        .arg(clap::Arg::new("temp-dir")
+            .help("Directory for temporary files")
+            .short('d')
+            .value_parser(clap::value_parser!(std::path::PathBuf))
+            .required(true)
+        )
+    )
     .subcommand(clap::Command::new("import")
         .arg_required_else_help(true)
         .arg(clap::Arg::new("sbwt-ascii-dump")
@@ -227,7 +260,17 @@ fn main() {
     );
 
     let matches = cli.get_matches();
-    if let Some(sub_matches) = matches.subcommand_matches("import"){
+    if let Some(sub_matches) = matches.subcommand_matches("build"){
+        let input_fof = sub_matches.get_one::<std::path::PathBuf>("i").unwrap();
+        let out_path = sub_matches.get_one::<std::path::PathBuf>("o").unwrap();
+        let k = *sub_matches.get_one::<usize>("k").unwrap();
+        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
+        let temp_dir = sub_matches.get_one::<PathBuf>("temp-dir").unwrap();
+        let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+        let index = ColoredKmers::new(input_paths.as_slice(), k, n_threads, temp_dir);
+        index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
+
+    } else if let Some(sub_matches) = matches.subcommand_matches("import"){
         let sbwt_ascii_dump = sub_matches.get_one::<std::path::PathBuf>("sbwt-ascii-dump").unwrap();
         let themisto_dump_prefix = sub_matches.get_one::<std::path::PathBuf>("color-dump-prefix").unwrap();
         let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();

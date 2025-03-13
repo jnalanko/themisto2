@@ -450,14 +450,14 @@ struct InputStream {
 }
 
 impl InputStream {
-    fn new(filenames: &[&Path]) -> InputStream {
+    fn new<P: AsRef<Path>>(filenames: &[P]) -> InputStream {
         let mut dbs: Vec<jseqio::seq_db::SeqDB> = vec![];
         for path in filenames {
             let reader = jseqio::reader::DynamicFastXReader::from_file(path).unwrap();
             let (mut fw, rc) = reader.into_db_with_revcomp().unwrap();
 
             if fw.sequence_count() == 0 {
-                panic!("No sequences found in file {}", path.display());
+                panic!("No sequences found in file {}", path.as_ref().display());
             }
 
             // Append reverse complement records to the forward database
@@ -493,7 +493,7 @@ impl SeqStream for InputStream {
 }
 
 impl ColoredKmers {
-    pub fn new(filenames: &[&Path], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+    pub fn new<P: AsRef<Path>>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
         let mut input_stream = InputStream::new(filenames);
         let sbwt_builder = sbwt::SbwtIndexBuilder::new()
             .add_rev_comp(false) // Already added in the input stream
