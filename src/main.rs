@@ -1,8 +1,8 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf};
 use bitvec::prelude::*;
-use clap::{Parser, Subcommand};
+use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 
 mod EM;
@@ -80,38 +80,115 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
-#[command(arg_required_else_help = true)]
 pub enum Subcommands {
+    #[command(arg_required_else_help = true)]
     Build {
-        #[arg(
-            help = "A file with one fasta/fastq filename per line",
-            short, long, required = true
-        )]
+        #[arg( help = "A file with one fasta/fastq filename per line", short, long, required = true)]
         input: PathBuf,
 
-        #[arg(
-            help = "Output filename",
-            short, long, required = true
-        )]
+        #[arg( help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
 
-        #[arg(
-            help = "Directory for temporary files",
-            short = 'd', long = "temp-dir", required = true
-        )]
+        #[arg( help = "Directory for temporary files", short = 'd', long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
 
         #[arg(short, required = true)]
         k: usize,
 
-        #[arg(
-            help = "Number of parallel threads",
-            short = 't', long = "n-threads", default_value = "4"
-        )]
+        #[arg( help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize
     },
+
+    #[command(arg_required_else_help = true)]
+    Import {
+        #[arg(long = "sbwt-ascii-dump", short = 's', required = true)]
+        sbwt_ascii_dump: PathBuf,
+
+        #[arg(long = "color-dump-prefix", short = 'c', required = true)]
+        color_dump_prefix: PathBuf,
+
+        #[arg(long = "out", short = 'o', required = true)]
+        out: PathBuf,
+    },
+
+    #[command(arg_required_else_help = true, name = "intersection-pseudoalign")]
+    IntersectionPseudoalign{
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+    },
+
+    #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
+    DumpPseudoalignmentData {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+    
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+    
+        #[arg(long = "min-hits", short = 'm', required = true)]
+        min_hits: usize,
+    },
+
+    #[command(arg_required_else_help = true, name = "pseudoalign-into-EM")]
+    PseudoalignIntoEM {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+    
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+    
+        #[arg(long = "min-hits", short = 'm', required = true)]
+        min_hits: usize,
+    
+        #[arg(long = "n-threads", short = 't', default_value = "1")]
+        n_threads: usize,
+    
+        #[arg(long = "max-iterations", default_value = "2000")]
+        max_iterations: usize,
+    
+        #[arg(long = "numerator", default_value = "hits", 
+            value_parser = PossibleValuesParser::new(["hits", "distinguishing"]))]
+        numerator: String,
+    
+        #[arg(long = "denominator", default_value = "all", 
+            value_parser = PossibleValuesParser::new(["all", "relevant", "max-distinguishing"]))]
+        denominator: String,
+    
+        #[arg(long = "likelihood", default_value = "linear", 
+            value_parser = PossibleValuesParser::new(["linear", "softmax", "99p"]))]
+        likelihood: String,
+
+    },
+
+    #[command(arg_required_else_help = true, name = "pseudoalign-into-EM")]
+    IntersectionPseudoalignIntoEM {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+    
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+    
+        #[arg(long = "min-hits", short = 'm', required = true)]
+        min_hits: usize,
+    
+        #[arg(long = "n-threads", short = 't', default_value = "1")]
+        n_threads: usize,
+    
+        #[arg(long = "max-iterations", default_value = "2000")]
+        max_iterations: usize,
+    
+        #[arg(long = "initial-likelihood-ratio", short = 'w', default_value = "99")]
+        initial_likelihood_ratio: f64,
+    
+        #[arg(long = "static-likelihood", action = clap::ArgAction::SetTrue)]
+        static_likelihood: bool,
+    }
+
 }
 
 
@@ -127,356 +204,147 @@ fn main() {
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             let index = ColoredKmers::new(input_paths.as_slice(), k, n_threads, &temp_dir);
             index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
-        }
-    }
+        },
+        Subcommands::Import { sbwt_ascii_dump, color_dump_prefix, out: out_path } => {
+            let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
+            let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
+            let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
 
-    return;
+            let sbwt_in = BufReader::new(File::open(sbwt_ascii_dump).unwrap());
+            let unitigs_in = BufReader::new(File::open(unitig_filename).unwrap());
+            let color_sets_in = BufReader::new(File::open(color_sets_filename).unwrap());
+            let metadata_in = BufReader::new(File::open(metadata_filename).unwrap());
 
-    let cli = clap::Command::new("themisto2")
-    .arg_required_else_help(true) 
-    .subcommand(clap::Command::new("build")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("input")
-            .help("A file with one fasta/fastq filename per line")
-            .short('i')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("output")
-            .help("Outfile filename")
-            .short('o')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("temp-dir")
-            .help("Directory for temporary files")
-            .long("temp-dir")
-            .short('d')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("k")
-            .short('k')
-            .value_parser(clap::value_parser!(usize))
-            .required(true)
-        )
-        .arg(clap::Arg::new("n-threads")
-            .short('t')
-            .value_parser(clap::value_parser!(usize))
-            .default_value("4")
-        )
-    )
-    .subcommand(clap::Command::new("import")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("sbwt-ascii-dump")
-            .long("sbwt-ascii-dump")
-            .short('s')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("color-dump-prefix")
-            .long("color-dump-prefix")
-            .short('c')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("out")
-            .long("out")
-            .short('o')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-    )
-    .subcommand(clap::Command::new("intersection-pseudoalign")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("index")
-            .long("index")
-            .short('i')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("query")
-            .long("query")
-            .short('q')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-    )
-    .subcommand(clap::Command::new("dump-pseudoalignment-data")
-        .about("Dumps pseudoalignment data for each read in JSON format")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("index")
-            .long("index")
-            .short('i')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("query")
-            .long("query")
-            .short('q')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("min-hits")
-            .long("min-hits")
-            .short('m')
-            .value_parser(clap::value_parser!(usize))
-            .required(true)
-        )
-    )
-    .subcommand(clap::Command::new("pseudoalign-into-EM")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("index")
-            .long("index")
-            .short('i')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("query")
-            .long("query")
-            .short('q')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("min-hits")
-            .long("min-hits")
-            .short('m')
-            .value_parser(clap::value_parser!(usize))
-            .required(true)
-        )
-        .arg(clap::Arg::new("n-threads")
-            .long("n-threads")
-            .short('t')
-            .value_parser(clap::value_parser!(usize))
-            .default_value("1")
-        )
-        .arg(clap::Arg::new("max-iterations")
-            .long("max-iterations")
-            .value_parser(clap::value_parser!(usize))
-            .default_value("2000")
-        )
-        .arg(clap::Arg::new("numerator")
-            .long("numerator")
-            .value_parser(clap::builder::PossibleValuesParser::new(vec!["hits", "distinguishing"]))
-            .default_value("hits")
-        )
-        .arg(clap::Arg::new("denominator")
-            .long("denominator")
-            .value_parser(clap::builder::PossibleValuesParser::new(vec!["all", "relevant", "max-distinguishing"]))
-            .default_value("all")
-        )
-        .arg(clap::Arg::new("likelihood")
-            .long("likelihood")
-            .value_parser(clap::builder::PossibleValuesParser::new(vec!["linear", "softmax", "99p"]))
-            .default_value("linear")
-        )
-    )
-    .subcommand(clap::Command::new("intersection-pseudoalign-into-EM")
-        .arg_required_else_help(true)
-        .arg(clap::Arg::new("index")
-            .long("index")
-            .short('i')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("query")
-            .long("query")
-            .short('q')
-            .value_parser(clap::value_parser!(std::path::PathBuf))
-            .required(true)
-        )
-        .arg(clap::Arg::new("min-hits")
-            .long("min-hits")
-            .short('m')
-            .value_parser(clap::value_parser!(usize))
-            .required(true)
-        )
-        .arg(clap::Arg::new("n-threads")
-            .long("n-threads")
-            .short('t')
-            .value_parser(clap::value_parser!(usize))
-            .default_value("1")
-        )
-        .arg(clap::Arg::new("max-iterations")
-            .long("max-iterations")
-            .value_parser(clap::value_parser!(usize))
-            .default_value("2000")
-        )
-        .arg(clap::Arg::new("initial-likelihood-ratio")
-            .long("initial-likelihood-ratio")
-            .short('w')
-            .value_parser(clap::value_parser!(f64))
-            .default_value("99")
-        )
-        .arg(clap::Arg::new("static-likelihood")
-            .long("static-likelihood")
-            .action(clap::ArgAction::SetTrue)
-        )
-    );
+            let mut out = BufWriter::new(File::create(out_path).unwrap());
 
-    let matches = cli.get_matches();
-    if let Some(sub_matches) = matches.subcommand_matches("build"){
-        let input_fof = sub_matches.get_one::<std::path::PathBuf>("input").unwrap();
-        let out_path = sub_matches.get_one::<std::path::PathBuf>("output").unwrap();
-        let k = *sub_matches.get_one::<usize>("k").unwrap();
-        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
-        let temp_dir = sub_matches.get_one::<PathBuf>("temp-dir").unwrap();
-        let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-        let index = ColoredKmers::new(input_paths.as_slice(), k, n_threads, temp_dir);
-        index.serialize(&mut BufWriter::new(File::create(out_path).unwrap()));
+            let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
+            index.serialize(&mut out);
+        },
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-    } else if let Some(sub_matches) = matches.subcommand_matches("import"){
-        let sbwt_ascii_dump = sub_matches.get_one::<std::path::PathBuf>("sbwt-ascii-dump").unwrap();
-        let themisto_dump_prefix = sub_matches.get_one::<std::path::PathBuf>("color-dump-prefix").unwrap();
-        let out_path = sub_matches.get_one::<std::path::PathBuf>("out").unwrap();
+            log::info!("Pseudoaligning");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let intersection = index.intersection_pseudoalignment(rec.seq, 1);
+                println!("{}", intersection);
+            }
+        },
+        Subcommands::DumpPseudoalignmentData { index: index_path, query: query_path, min_hits } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-        let unitig_filename = format!("{}.unitigs.fa", themisto_dump_prefix.to_str().unwrap());
-        let color_sets_filename = format!("{}.color_sets.txt", themisto_dump_prefix.to_str().unwrap());
-        let metadata_filename = format!("{}.metadata.txt", themisto_dump_prefix.to_str().unwrap());
+            log::info!("Pseudoaligning");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
+                let json = serde_json::to_string(&data).unwrap();
+                println!("{}", json);
+            }
+        },
+        Subcommands::PseudoalignIntoEM { 
+                index: index_path, 
+                query: query_path, 
+                min_hits, 
+                n_threads, 
+                max_iterations, 
+                numerator, 
+                denominator, 
+                likelihood: likelihood_type } => {
 
-        let sbwt_in = BufReader::new(File::open(sbwt_ascii_dump).unwrap());
-        let unitigs_in = BufReader::new(File::open(unitig_filename).unwrap());
-        let color_sets_in = BufReader::new(File::open(color_sets_filename).unwrap());
-        let metadata_in = BufReader::new(File::open(metadata_filename).unwrap());
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            log::info!("Loaded index with {} distinct k-mers and {} colors", index.n_kmers(), index.n_colors());
 
-        let mut out = BufWriter::new(File::create(out_path).unwrap());
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-        let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
-        index.serialize(&mut out);
-    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-pseudoalign"){
-        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
-        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
-        
-        log::info!("Loading index");
-        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+            let likelihood_function: Box<dyn Fn(&[f64]) -> Vec<f64>> = match likelihood_type.as_str() { // Takes a row of scores, returns a row of likelihoods. That is, f: R^n -> R^n, where n is the number of colors
+                "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
+                "99p" => Box::new(|v: &[f64]| {
+                    let (argmax, _max) = v.iter().enumerate().max_by(|(_, a),(_, b)| a.total_cmp(b)).unwrap();
+                    let mut answer: Vec<f64> = vec![0.01; index.n_colors()];
+                    answer[argmax] = 0.99;
+                    answer
+                }),
+                //"betabinomial" => Box::new(|_: &[f64]| {
+                //    todo!(); // Issue: Beta binomial takes in an integer, not a float. But it's almost linear with our hyperparameters, so linear works as a good substitute for this.
+                //}),
+                "softmax" => Box::new(|v: &[f64]| softmax(v)),
+                _ => panic!("Invalid likelihood type: {}", likelihood_type)
+            };
+            let mut likelihood_matrix = Vec::<Vec<f64>>::new();
+            while let Some(rec) = reader.read_next().unwrap(){
+                let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
+                
+                let mut row: Vec<f64> = vec![0.0; index.n_colors()];
+                for color in 0..index.n_colors() {
+                    let numerator_value = match numerator.as_str() {
+                        "hits" => data.hit_counts[color],
+                        "distinguishing" => data.distinguishing_hit_counts[color],
+                        _ => panic!("Invalid numerator type: {}", numerator)
+                    };
+                    let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
+                    let mut denominator_value = match denominator.as_str() {
+                        "all" => n_kmers,
+                        "relevant" => data.n_relevant_kmers,
+                        "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
+                        _ => panic!("Invalid denominator type: {}", denominator)
+                    };
+                    denominator_value = std::cmp::max(1, denominator_value); // Avoid division by zero
 
-        log::info!("Pseudoaligning");
-        while let Some(rec) = reader.read_next().unwrap(){
-            let intersection = index.intersection_pseudoalignment(rec.seq, 1);
-            println!("{}", intersection);
-        }
-    } else if let Some(sub_matches) = matches.subcommand_matches("intersection-pseudoalign-into-EM"){
-        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
-        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
-        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
-        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
-        let max_iterations = *sub_matches.get_one::<usize>("max-iterations").unwrap();
-        let initial_w = *sub_matches.get_one::<f64>("initial-likelihood-ratio").unwrap();
-        let optimize_w = !(sub_matches.get_flag("static-likelihood"));
-        
-        log::info!("Loading index");
-        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
+                    row[color] = numerator_value as f64 / denominator_value as f64;
+                }
 
-        log::info!("Pseudoaligning");
-        let mut intersections = Vec::<BitVec>::new(); // Todo: store more compactly with 8 bits per byte?
-        while let Some(rec) = reader.read_next().unwrap(){
-            let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
-            intersections.push(intersection);
-        }
+                // Add zero inflation
+                row.iter_mut().for_each(|x| *x = x.max(0.01));
 
-        let class_counts = reduce_to_classes(&mut intersections);
+                // Apply the likelihood function
+                row = likelihood_function(&row);
 
-        // Represent with one byte per bit for compatibility with the EM algorithm
-        let intersections: Vec<Vec<u8>> = intersections.iter().map(|v| v.iter().map(|b| *b as u8).collect()).collect();
+                // Normalize
+                let rowsum = row.iter().sum::<f64>();
+                row.iter_mut().for_each(|x| *x /= rowsum);
 
-        let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], initial_w, optimize_w, n_threads, max_iterations);
-        println!("Final likelihood ratio w: {}", w);
-        println!("Mixing fractions: {:?}", thetas);
-
-    } else if let Some(sub_matches) = matches.subcommand_matches("dump-pseudoalignment-data"){
-        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
-        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
-        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
-        
-        log::info!("Loading index");
-        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
-
-        log::info!("Pseudoaligning");
-        while let Some(rec) = reader.read_next().unwrap(){
-            let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
-            let json = serde_json::to_string(&data).unwrap();
-            println!("{}", json);
-        }
-    } else if let Some(sub_matches) = matches.subcommand_matches("pseudoalign-into-EM"){
-        let index_path = sub_matches.get_one::<std::path::PathBuf>("index").unwrap();
-        let query_path = sub_matches.get_one::<std::path::PathBuf>("query").unwrap();
-        let min_hits = *sub_matches.get_one::<usize>("min-hits").unwrap();
-        let n_threads = *sub_matches.get_one::<usize>("n-threads").unwrap();
-        let numerator = sub_matches.get_one::<String>("numerator").unwrap();
-        let denominator = sub_matches.get_one::<String>("denominator").unwrap();
-        let likelihood_type = sub_matches.get_one::<String>("likelihood").unwrap();
-        let max_iterations = *sub_matches.get_one::<usize>("max-iterations").unwrap();
-
-        log::info!("Loading index");
-        let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-        log::info!("Loaded index with {} distinct k-mers and {} colors", index.n_kmers(), index.n_colors());
-
-        let mut reader = jseqio::reader::DynamicFastXReader::from_file(query_path).unwrap();
-
-        let likelihood_function: Box<dyn Fn(&[f64]) -> Vec<f64>> = match likelihood_type.as_str() { // Takes a row of scores, returns a row of likelihoods. That is, f: R^n -> R^n, where n is the number of colors
-            "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
-            "99p" => Box::new(|v: &[f64]| {
-                let (argmax, _max) = v.iter().enumerate().max_by(|(_, a),(_, b)| a.total_cmp(b)).unwrap();
-                let mut answer: Vec<f64> = vec![0.01; index.n_colors()];
-                answer[argmax] = 0.99;
-                answer
-            }),
-            //"betabinomial" => Box::new(|_: &[f64]| {
-            //    todo!(); // Issue: Beta binomial takes in an integer, not a float. But it's almost linear with our hyperparameters, so linear works as a good substitute for this.
-            //}),
-            "softmax" => Box::new(|v: &[f64]| softmax(v)),
-            _ => panic!("Invalid likelihood type: {}", likelihood_type)
-        };
-        let mut likelihood_matrix = Vec::<Vec<f64>>::new();
-        while let Some(rec) = reader.read_next().unwrap(){
-            let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
-            
-            let mut row: Vec<f64> = vec![0.0; index.n_colors()];
-            for color in 0..index.n_colors() {
-                let numerator_value = match numerator.as_str() {
-                    "hits" => data.hit_counts[color],
-                    "distinguishing" => data.distinguishing_hit_counts[color],
-                    _ => panic!("Invalid numerator type: {}", numerator)
-                };
-                let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
-                let mut denominator_value = match denominator.as_str() {
-                    "all" => n_kmers,
-                    "relevant" => data.n_relevant_kmers,
-                    "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
-                    _ => panic!("Invalid denominator type: {}", denominator)
-                };
-                denominator_value = std::cmp::max(1, denominator_value); // Avoid division by zero
-
-                row[color] = numerator_value as f64 / denominator_value as f64;
+                likelihood_matrix.push(row);
             }
 
-            // Add zero inflation
-            row.iter_mut().for_each(|x| *x = x.max(0.01));
+            likelihood_matrix.shrink_to_fit(); // Saving some memory
 
-            // Apply the likelihood function
-            row = likelihood_function(&row);
+            // Observation is now a likelihood matrix row
+            let n_rows = likelihood_matrix.len();
+            let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
+            let observations: Vec<usize> = (0..n_rows).collect();
+            let observation_counts: Vec<usize> = vec![1; n_rows];
 
-            // Normalize
-            let rowsum = row.iter().sum::<f64>();
-            row.iter_mut().for_each(|x| *x /= rowsum);
+            let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
+            println!("{:?}", &mixing_fractions);
 
-            likelihood_matrix.push(row);
+        },
+        Subcommands::IntersectionPseudoalignIntoEM { index: index_path, query: query_path, min_hits, n_threads, max_iterations, initial_likelihood_ratio: initial_w, static_likelihood } => {
+            let optimize_w = !static_likelihood;
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+
+            log::info!("Pseudoaligning");
+            let mut intersections = Vec::<BitVec>::new(); // Todo: store more compactly with 8 bits per byte?
+            while let Some(rec) = reader.read_next().unwrap(){
+                let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
+                intersections.push(intersection);
+            }
+
+            let class_counts = reduce_to_classes(&mut intersections);
+
+            // Represent with one byte per bit for compatibility with the EM algorithm
+            let intersections: Vec<Vec<u8>> = intersections.iter().map(|v| v.iter().map(|b| *b as u8).collect()).collect();
+
+            let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], initial_w, optimize_w, n_threads, max_iterations);
+            println!("Final likelihood ratio w: {}", w);
+            println!("Mixing fractions: {:?}", thetas);
+
         }
-
-        likelihood_matrix.shrink_to_fit(); // Saving some memory
-
-        // Observation is now a likelihood matrix row
-        let n_rows = likelihood_matrix.len();
-        let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
-        let observations: Vec<usize> = (0..n_rows).collect();
-        let observation_counts: Vec<usize> = vec![1; n_rows];
-
-        let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
-        println!("{:?}", &mixing_fractions);
-    }
+    } 
 }
 
 #[cfg(test)]
