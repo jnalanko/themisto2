@@ -21,6 +21,7 @@ pub struct ColoredKmers {
 pub struct PseudoalignmentData {
     pub hit_counts: Vec<usize>,
     pub distinguishing_hit_counts: Vec<usize>,
+    pub unique_hit_counts: Vec<usize>,
     pub n_relevant_kmers: usize,
     pub n_all_kmers: usize,
 }
@@ -30,6 +31,7 @@ impl PseudoalignmentData {
         Self {
             hit_counts: vec![0; n_colors],
             distinguishing_hit_counts: vec![0; n_colors],
+            unique_hit_counts: vec![0; n_colors],
             n_relevant_kmers: 0,
             n_all_kmers: 0,
         }
@@ -136,6 +138,7 @@ impl ColoredKmers {
         }
 
         let mut hit_counts: Vec<usize> = vec![0; self.n_colors];
+        let mut unique_hit_counts: Vec<usize> = vec![0; self.n_colors];
         let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
         let mut color_sets: Vec<Option<&BitSlice>> = vec![None; query.len() - self.kmers.k() + 1];
         let mut n_relevant_kmers = 0_usize;
@@ -156,9 +159,13 @@ impl ColoredKmers {
 
         // Count hits (flatten removes nones).
         color_sets.iter().flatten().for_each(|bitmap| {
+            let is_singleton = bitmap.count_ones() == 1;
             for (color, bit) in bitmap.iter().enumerate() {
                 if *bit {
                     hit_counts[color] += 1;
+                    if is_singleton {
+                        unique_hit_counts[color] += 1;
+                    }
                 }
             }
         });
@@ -189,7 +196,7 @@ impl ColoredKmers {
 
         let n_all_kmers = query.len() as i64 - self.get_k() as i64 + 1;
         let n_all_kmers = std::cmp::max(0, n_all_kmers) as usize; 
-        PseudoalignmentData{hit_counts, distinguishing_hit_counts, n_relevant_kmers, n_all_kmers}
+        PseudoalignmentData{hit_counts, unique_hit_counts, distinguishing_hit_counts, n_relevant_kmers, n_all_kmers}
     }
 
     // Returns pairs (color id, score). Not all colors are necessarily present in the output.
