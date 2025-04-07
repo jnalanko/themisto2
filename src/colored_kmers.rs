@@ -58,7 +58,7 @@ impl ColoredKmers {
         log::info!("Reading Distinct color sets");
         let distinct_color_sets = read_color_sets(themisto_color_dump, metadata.num_color_sets, metadata.num_colors); 
         log::info!("Reading Building LCS array");
-        let lcs = sbwt::LcsArray::from_sbwt(&sbwt_index);
+        let lcs = sbwt::LcsArray::from_sbwt(&sbwt_index, 1);
         log::info!("Building colex to color set id mapping");
         let colex_to_color_set_id = build_colex_to_color_set_mapping(themisto_unitig_dump, &sbwt_index, &lcs);
         Self { kmers: sbwt_index, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0; metadata.num_colors], n_colors: metadata.num_colors}
