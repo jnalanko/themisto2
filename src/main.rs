@@ -245,7 +245,7 @@ fn main() {
             log::info!("Pseudoaligning");
             while let Some(rec) = reader.read_next().unwrap(){
                 let intersection = index.intersection_pseudoalignment(rec.seq, 1);
-                println!("{}", intersection); // Todo: print indices of non-zero
+                println!("{:?}", intersection.iter_ones().collect::<Vec::<usize>>()); // Todo: print indices of non-zero
             }
         },
         Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, relevant_only } => {
