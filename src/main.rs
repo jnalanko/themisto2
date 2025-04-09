@@ -139,6 +139,24 @@ pub enum Subcommands {
         relevant_only: bool,
     },
 
+    #[command(arg_required_else_help = true, name = "unique-support-pseudoalign")]
+    UniqueSupportPseudoalign{
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+
+        #[arg(long = "min-unique-hits", short = 'm', required = true)]
+        min_unique_hits: usize,
+
+        #[arg(long = "min-shared-hits", short = 's', required = true)]
+        min_shared_hits: usize,
+
+        #[arg(long = "threshold", short = 'd', required = true)]
+        threshold: f64,
+    },
+
     #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
     DumpPseudoalignmentData {
         #[arg(long = "index", short = 'i', required = true)]
@@ -242,7 +260,7 @@ fn main() {
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-            log::info!("Pseudoaligning");
+            log::info!("Pseudoaligning (intersection method)");
             while let Some(rec) = reader.read_next().unwrap(){
                 let intersection = index.intersection_pseudoalignment(rec.seq, 1);
                 println!("{:?}", intersection.iter_ones().collect::<Vec::<usize>>()); // Todo: print indices of non-zero
@@ -253,7 +271,7 @@ fn main() {
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-            log::info!("Pseudoaligning");
+            log::info!("Pseudoaligning (threshold method, relevant = {})", relevant_only);
             while let Some(rec) = reader.read_next().unwrap(){
                 let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
                 let compatible_colors = if relevant_only {
@@ -264,6 +282,18 @@ fn main() {
                 println!("{:?}", compatible_colors);
             }
 
+        },
+        Subcommands::UniqueSupportPseudoalign { index: index_path, query: query_path, min_unique_hits, min_shared_hits, threshold } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+
+            log::info!("Pseudoaligning (unique support method)");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
+                let compatible_colors = compatibility_criteria::unique_support_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, min_unique_hits, min_shared_hits, threshold);
+                println!("{:?}", compatible_colors);
+            }
         },
         Subcommands::DumpPseudoalignmentData { index: index_path, query: query_path, min_hits } => {
             log::info!("Loading index");
