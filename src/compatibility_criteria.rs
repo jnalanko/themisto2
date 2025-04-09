@@ -1,7 +1,7 @@
 use std::cmp::max;
 
 fn indices_with_minimum_support(supports: &[usize], minimum_support: usize) -> Vec<usize> {
-    supports.iter().filter(|s| **s >= minimum_support).copied().collect()
+    supports.iter().enumerate().filter(|(_, s)| **s >= minimum_support).map(|(i,_)| i).collect()
 }
 
 // query_kmers can be e.g. either the number of k-mers in the query, or the number of relevant

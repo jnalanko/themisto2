@@ -122,7 +122,7 @@ pub enum Subcommands {
     },
 
     #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
-    TresholdPseudoalign {
+    ThresholdPseudoalign {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
@@ -248,7 +248,7 @@ fn main() {
                 println!("{}", intersection); // Todo: print indices of non-zero
             }
         },
-        Subcommands::TresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, relevant_only } => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, relevant_only } => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
