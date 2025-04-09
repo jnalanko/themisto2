@@ -8,6 +8,7 @@ use colored_kmers::ColoredKmers;
 mod EM;
 mod colored_kmers;
 mod themisto1_compatibility;
+mod compatibility_criteria;
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 
