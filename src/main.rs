@@ -113,12 +113,30 @@ pub enum Subcommands {
     },
 
     #[command(arg_required_else_help = true, name = "intersection-pseudoalign")]
-    IntersectionPseudoalign{
+    IntersectionPseudoalign {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
+    },
+
+    #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
+    TresholdPseudoalign {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+
+        #[arg(long = "min-hits", short = 'm', required = true)]
+        min_hits: usize,
+
+        #[arg(long = "threshold", short = 'd', required = true)]
+        threshold: f64,
+
+        #[arg(long = "relevant-only", short = 'r', required = true)]
+        relevant_only: bool,
     },
 
     #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
@@ -227,8 +245,25 @@ fn main() {
             log::info!("Pseudoaligning");
             while let Some(rec) = reader.read_next().unwrap(){
                 let intersection = index.intersection_pseudoalignment(rec.seq, 1);
-                println!("{}", intersection);
+                println!("{}", intersection); // Todo: print indices of non-zero
             }
+        },
+        Subcommands::TresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, relevant_only } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+
+            log::info!("Pseudoaligning");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
+                let compatible_colors = if relevant_only {
+                    compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_relevant_kmers, min_hits, threshold)
+                } else {
+                    compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_all_kmers, min_hits, threshold)
+                };
+                println!("{:?}", compatible_colors);
+            }
+
         },
         Subcommands::DumpPseudoalignmentData { index: index_path, query: query_path, min_hits } => {
             log::info!("Loading index");
