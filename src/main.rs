@@ -119,6 +119,9 @@ pub enum Subcommands {
 
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
+
+        #[arg(long = "min-hits", short = 'm', default_value = "1")]
+        min_hits: usize,
     },
 
     #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
@@ -255,14 +258,14 @@ fn main() {
             let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
             index.serialize(&mut out);
         },
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path } => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits} => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
             log::info!("Pseudoaligning (intersection method)");
             while let Some(rec) = reader.read_next().unwrap(){
-                let intersection = index.intersection_pseudoalignment(rec.seq, 1);
+                let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
                 println!("{:?}", intersection.iter_ones().collect::<Vec::<usize>>()); // Todo: print indices of non-zero
             }
         },
