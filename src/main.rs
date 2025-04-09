@@ -160,6 +160,30 @@ pub enum Subcommands {
         threshold: f64,
     },
 
+    #[command(arg_required_else_help = true, name = "segment-consensus-pseudoalign")]
+    SegmentConsensusPseudoalign{
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+
+        #[arg(long = "min-hits", short = 'm', required = true, help = "This is applied for each segment")]
+        min_hits: usize,
+
+        #[arg(long = "segment-length", required = true, default_value = "100")]
+        segment_length: usize,
+
+        #[arg(long = "min-unique-segments", required = true, default_value = "1")]
+        min_unique_segments: usize,
+
+        #[arg(long = "min-shared-segments", required = true, default_value = "5")]
+        min_shared_segments: usize,
+
+        #[arg(long = "consensus-threshold", short = 'd', required = true)]
+        consensus_threshold: f64,
+    },
+
     #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
     DumpPseudoalignmentData {
         #[arg(long = "index", short = 'i', required = true)]
@@ -298,6 +322,23 @@ fn main() {
                 println!("{:?}", compatible_colors);
             }
         },
+        Subcommands::SegmentConsensusPseudoalign { index: index_path, query: query_path, min_hits, segment_length, min_shared_segments, min_unique_segments, consensus_threshold } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+
+            log::info!("Pseudoaligning (segment consensus method)");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let color_sets: Vec<Vec<usize>> = rec.seq.windows(segment_length).step_by(segment_length).map(|segment| {
+                    let bitmap = index.intersection_pseudoalignment(segment, min_hits);
+                    bitmap.iter_ones().collect::<Vec::<usize>>()
+                }).collect();
+
+                let slices: Vec<&[usize]> = color_sets.iter().map(|v| v.as_slice()).collect();
+                let consensus = compatibility_criteria::resolve_consensus_compatibility(&slices, index.n_colors(), min_unique_segments, min_shared_segments, consensus_threshold);
+                println!("{:?}", consensus);
+            }
+        }
         Subcommands::DumpPseudoalignmentData { index: index_path, query: query_path, min_hits } => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
