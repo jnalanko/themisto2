@@ -135,7 +135,7 @@ pub enum Subcommands {
         #[arg(long = "threshold", short = 'd', required = true)]
         threshold: f64,
 
-        #[arg(long = "relevant-only", short = 'r', required = true)]
+        #[arg(long = "relevant-only", short = 'r')]
         relevant_only: bool,
     },
 
