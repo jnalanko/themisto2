@@ -184,6 +184,27 @@ pub enum Subcommands {
         consensus_threshold: f64,
     },
 
+    #[command(arg_required_else_help = true, name = "dynamic-consensus-pseudoalign")]
+    DynamicConsensusPseudoalign{
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+
+        #[arg(long = "min-hits", short = 'm', required = true, help = "This is applied for each segment")]
+        min_hits: usize,
+
+        #[arg(long = "min-unique-segments", required = true, default_value = "1")]
+        min_unique_segments: usize,
+
+        #[arg(long = "min-shared-segments", required = true, default_value = "5")]
+        min_shared_segments: usize,
+
+        #[arg(long = "consensus-threshold", short = 'd', required = true)]
+        consensus_threshold: f64,
+    },
+
     #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
     DumpPseudoalignmentData {
         #[arg(long = "index", short = 'i', required = true)]
@@ -330,6 +351,53 @@ fn main() {
             log::info!("Pseudoaligning (segment consensus method)");
             while let Some(rec) = reader.read_next().unwrap(){
                 let color_sets: Vec<Vec<usize>> = rec.seq.windows(segment_length).step_by(segment_length).map(|segment| {
+                    let bitmap = index.intersection_pseudoalignment(segment, min_hits);
+                    bitmap.iter_ones().collect::<Vec::<usize>>()
+                }).collect();
+
+                let slices: Vec<&[usize]> = color_sets.iter().map(|v| v.as_slice()).collect();
+                let consensus = compatibility_criteria::resolve_consensus_compatibility(&slices, index.n_colors(), min_unique_segments, min_shared_segments, consensus_threshold);
+                println!("{:?}", consensus);
+            }
+        }
+        Subcommands::DynamicConsensusPseudoalign { index: index_path, query: query_path, min_hits, min_shared_segments, min_unique_segments, consensus_threshold } => {
+            log::info!("Loading index");
+            let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap()
+;
+            log::info!("Pseudoaligning (segment consensus method)");
+            while let Some(rec) = reader.read_next().unwrap(){
+
+                let mut match_opts = kbo::MatchOpts::default();
+                match_opts.max_error_prob = 1e-08_f64;
+
+                // TODO call the lower level functions in kbo and reuse the matching statistics vector in the loop over segments
+
+                // move index to run kbo query
+                let sbwt = sbwt::SbwtIndexVariant::SubsetMatrix(index.kmers);
+                let aln: Vec<char> = kbo::matches(rec.seq, &sbwt, &index.lcs, match_opts);
+                let breakpoints = aln.windows(2).enumerate().filter_map(|(i, x)| if x[0] == 'R' && x[1] == 'R' { Some(i + 1) } else { None}).collect::<Vec<usize>>();
+
+                let segments = if breakpoints.is_empty() {
+                    vec![rec.seq.to_vec()]
+                } else {
+                    let mut ret: Vec<Vec<u8>> = Vec::with_capacity(breakpoints.len());
+                    let mut prev = 0;
+                    for i in breakpoints {
+                        ret.push(rec.seq[prev..i].to_vec());
+                        prev = i;
+                    }
+                    ret
+                };
+
+                // move index back
+                match sbwt {
+                    sbwt::SbwtIndexVariant::SubsetMatrix(sbwt) => {
+                        index.kmers = sbwt;
+                    }
+                }
+
+                let color_sets: Vec<Vec<usize>> = segments.iter().map(|segment| {
                     let bitmap = index.intersection_pseudoalignment(segment, min_hits);
                     bitmap.iter_ones().collect::<Vec::<usize>>()
                 }).collect();

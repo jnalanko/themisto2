@@ -9,8 +9,8 @@ use crate::themisto1_compatibility::{build_colex_to_color_set_mapping, read_colo
 
 #[derive(Debug)]
 pub struct ColoredKmers {
-    kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
-    lcs: sbwt::LcsArray,
+    pub kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
+    pub lcs: sbwt::LcsArray,
     distinct_color_sets: BitVec, // Concatenation of distinct color sets
     colex_to_color_set_id: Vec<usize>,
     empty_set: BitVec, // So that we can return a bitslice to an empty set
