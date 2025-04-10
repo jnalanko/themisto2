@@ -387,6 +387,7 @@ fn main() {
                         ret.push(rec.seq[prev..i].to_vec());
                         prev = i;
                     }
+                    ret.push(rec.seq[prev..rec.seq.len()].to_vec());
                     ret
                 };
 
