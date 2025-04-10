@@ -381,7 +381,7 @@ fn main() {
                 let segments = if breakpoints.is_empty() {
                     vec![rec.seq.to_vec()]
                 } else {
-                    let mut ret: Vec<Vec<u8>> = Vec::with_capacity(breakpoints.len());
+                    let mut ret: Vec<Vec<u8>> = Vec::with_capacity(breakpoints.len() + 1);
                     let mut prev = 0;
                     for i in breakpoints {
                         ret.push(rec.seq[prev..i].to_vec());
