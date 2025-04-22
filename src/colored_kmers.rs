@@ -339,15 +339,14 @@ impl ColoredKmers {
         let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
 
         let sbwt_len = sbwt.n_sets();
-        let streaming_index = StreamingIndex::new(&sbwt, &lcs);
+        let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
+        let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
         log::info!("Reading input sequences back into memory again");
         let input_stream = InputStream::new(filenames); // Read the data into memory again
+        let dbs = &input_stream.dbs;
 
-        let dbs_ref = &input_stream.dbs; // Pass into the scope by reference
-        let streaming_index_ref = &streaming_index; // Pass into the scope by reference
-
-        let color_sets = std::thread::scope(move |scope| {
+        let color_sets = std::thread::scope(|scope| {
 
             log::info!("Building colors");
 
@@ -361,7 +360,7 @@ impl ColoredKmers {
             // Spawn a producer thread that pushes (color, seq) pairs to the worker threads
             let producer_handle = scope.spawn(move || {
                 for color in 0..filenames_clone.len() {
-                    for rec in dbs_ref[color].iter() {
+                    for rec in dbs[color].iter() {
                         work_input_queue_clone.0.send((color, rec.seq)).unwrap(); 
                     }
                 }
@@ -376,7 +375,7 @@ impl ColoredKmers {
                     loop {
                         match recv_clone.recv() {
                             Ok((color, seq)) => {
-                                mark_all_kmers_of_seq(&sender_clone, color, seq, k, 100000, streaming_index_ref);
+                                mark_all_kmers_of_seq(&sender_clone, color, seq, k, 100000, streaming_index);
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
