@@ -294,7 +294,7 @@ impl SeqStream for InputStream {
     } 
 }
 
-fn mark_all_kmers_of_seq(sender: Sender<(usize, Vec<usize>)>, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
+fn mark_all_kmers_of_seq(sender: &Sender<(usize, Vec<usize>)>, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
     // Search all k-mers
     let mut marking_buffer: Vec<usize> = Vec::new(); // These bits should be marked
     for (len, colex) in index.matching_statistics(seq) {
@@ -304,8 +304,8 @@ fn mark_all_kmers_of_seq(sender: Sender<(usize, Vec<usize>)>, color: usize, seq:
             marking_buffer.push(colex.start);
             if marking_buffer.len() == mark_buffer_size {
                  // Send to marker thread
-                sender.send((color, marking_buffer.clone())).unwrap();
-                marking_buffer.clear();
+                sender.send((color, marking_buffer)).unwrap();
+                marking_buffer = Vec::new();
             }
         }
     }
@@ -376,7 +376,7 @@ impl ColoredKmers {
                     loop {
                         match recv_clone.recv() {
                             Ok((color, seq)) => {
-                                mark_all_kmers_of_seq(sender_clone.clone(), color, seq, k, 100000, streaming_index_ref);
+                                mark_all_kmers_of_seq(&sender_clone, color, seq, k, 100000, streaming_index_ref);
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
