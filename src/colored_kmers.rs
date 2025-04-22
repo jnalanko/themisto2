@@ -1,4 +1,4 @@
-use std::{io::BufRead, path::{Path, PathBuf}};
+use std::{io::BufRead, ops::DerefMut, path::{Path, PathBuf}, sync::{Arc, Mutex}};
 
 use clap::builder::styling::Color;
 use crossbeam::channel::{Receiver, RecvError, Sender};
@@ -294,7 +294,14 @@ impl SeqStream for InputStream {
     } 
 }
 
-fn mark_all_kmers_of_seq(sender: &Sender<(usize, Vec<usize>)>, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
+fn mark_bits(bv: &mut BitVec, color: usize, num_colors: usize, to_mark: Vec<usize>) {
+    for i in to_mark {
+        bv.set(i*num_colors + color, true);
+    }
+
+}
+
+fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
     // Search all k-mers
     let mut marking_buffer: Vec<usize> = Vec::new(); // These bits should be marked
     for (len, colex) in index.matching_statistics(seq) {
@@ -303,16 +310,15 @@ fn mark_all_kmers_of_seq(sender: &Sender<(usize, Vec<usize>)>, color: usize, seq
             assert!(colex.len() == 1);
             marking_buffer.push(colex.start);
             if marking_buffer.len() == mark_buffer_size {
-                 // Send to marker thread
-                sender.send((color, marking_buffer)).unwrap();
+                mark_bits(bv.lock().unwrap().deref_mut(), color, num_colors, marking_buffer);
                 marking_buffer = Vec::new();
             }
         }
     }
 
     if !marking_buffer.is_empty() { 
-        // Send to marker thread
-        sender.send((color, marking_buffer)).unwrap();
+        // Mark the rest
+        mark_bits(bv.lock().unwrap().deref_mut(), color, num_colors, marking_buffer);
     }
 } 
 
@@ -351,31 +357,25 @@ impl ColoredKmers {
             log::info!("Building colors");
 
             let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
-            let work_output_queue: (Sender<(usize, Vec<usize>)>, Receiver<(usize, Vec<usize>)>) = crossbeam::channel::bounded(n_threads);
 
-            let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
-
-            let work_input_queue_clone = work_input_queue.clone();
-
-            // Spawn a producer thread that pushes (color, seq) pairs to the worker threads
-            let producer_handle = scope.spawn(move || {
-                for color in 0..filenames_clone.len() {
-                    for rec in dbs[color].iter() {
-                        work_input_queue_clone.0.send((color, rec.seq)).unwrap(); 
-                    }
+            // Push work to the input queue
+            for color in 0..filenames.len() {
+                for rec in dbs[color].iter() {
+                    work_input_queue.0.send((color, rec.seq)).unwrap(); 
                 }
-            });
+            }
 
-            // Spawn threads that determine which k-mers should be marked for which color
+            // Spawn worker threads
             let mut worker_handles = Vec::new();
+            let color_sets_lock = Arc::new(Mutex::new(bitvec![0; num_colors*sbwt_len])); // Concatenation of distinct color sets
             for thread_id in 0..n_threads {
                 let recv_clone = work_input_queue.1.clone();
-                let sender_clone = work_output_queue.0.clone();
+                let color_sets_lock_clone = color_sets_lock.clone();
                 let consumer_handle = scope.spawn(move || {
                     loop {
                         match recv_clone.recv() {
                             Ok((color, seq)) => {
-                                mark_all_kmers_of_seq(&sender_clone, color, seq, k, 100000, streaming_index);
+                                mark_all_kmers_of_seq(color_sets_lock_clone.clone(), num_colors, color, seq, k, 100000, streaming_index);
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
@@ -387,37 +387,14 @@ impl ColoredKmers {
                 worker_handles.push(consumer_handle);
             }
 
-
-            // Spawn a thread that sets the marks received from the workers
-            let collector = scope.spawn(move || {
-                let mut color_sets = bitvec![0; num_colors*sbwt_len]; // Concatenation of distinct color sets
-                loop {
-                    match work_output_queue.1.recv() {
-                        Ok((color, to_mark)) => {
-                            for i in to_mark {
-                                color_sets.set(i*num_colors + color, true);
-                            }
-                        },
-                        Err(RecvError) => {
-                            log::info!("Finished collecting all color sets");
-                            break color_sets;
-                        }
-                    }
-                }
-            });
-
-            // Wait for the producer to finish
-            producer_handle.join().unwrap();
-            drop(work_input_queue.0); // Close the work input queue
-
             // Wait for all workers to finish
             for handle in worker_handles {
                 handle.join().unwrap();
             }
-            drop(work_output_queue.0); // Close the work output queue 
 
-            // Wait for the collector to finish and return the collected color set bit vector
-            collector.join().unwrap()
+            // Since we have joined the workers, there should be only one clone of the
+            // Arc<Mutex> (the one owned by this thread), so we can consume the lock and return the data.
+            Arc::try_unwrap(color_sets_lock).unwrap().into_inner().unwrap()
 
         }); // End of thread scope 
 
