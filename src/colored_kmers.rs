@@ -1,7 +1,8 @@
 use std::{io::BufRead, path::{Path, PathBuf}};
 
 use clap::builder::styling::Color;
-use sbwt::{self, BitPackedKmerSorting, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, SubsetSeq};
+use crossbeam::channel::{Receiver, RecvError, Sender};
+use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, SubsetSeq};
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
@@ -293,10 +294,23 @@ impl SeqStream for InputStream {
     } 
 }
 
+fn mark_all_kmers_of_seq(seq: &[u8], k: usize, marks: &mut BitVec, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
+    // Search all k-mers
+    for (len, colex) in index.matching_statistics(seq) {
+        if len == k {
+            // Full kmer -> set the bit in the color set of the k-mer
+            assert!(colex.len() == 1);
+            marks.set(colex.start, true);
+        }
+    }
+} 
+
 impl ColoredKmers {
-    pub fn new<P: AsRef<Path>>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+    pub fn new<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+
         log::info!("Loading {} sequence files (colors) into memory", filenames.len());
         let input_stream = InputStream::new(filenames);
+        let num_colors = input_stream.dbs.len();
         log::info!("Building SBWT");
         let sbwt_builder = sbwt::SbwtIndexBuilder::new()
             .add_rev_comp(false) // Already added in the input stream
@@ -310,39 +324,101 @@ impl ColoredKmers {
         );
         let (sbwt, lcs) = sbwt_builder.run(input_stream);
         let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
+
+        let sbwt_len = sbwt.n_sets();
         let streaming_index = StreamingIndex::new(&sbwt, &lcs);
 
-        log::info!("Building colors");
-        // Stream over the sequences and record the colors
-        let mut input_stream = InputStream::new(filenames);
-        let num_colors = input_stream.dbs.len();
-        let mut color_sets = bitvec![0; num_colors*sbwt.n_sets()]; // Concatenation of distinct color sets
+        let input_stream = InputStream::new(filenames); // Read the data into memory again
 
-        let mut prev_color: Option<usize> = None;
-        let mut color = 0_usize;
-        while let Some(seq) = input_stream.stream_next() {
-            if prev_color.is_none() || color != prev_color.unwrap() {
-                let cur_filename = filenames[color].as_ref();
-                log::info!("Setting color bits for color {} ({})", color, cur_filename.display());
-            }
-            // Search all k-mers
-            for (len, colex) in streaming_index.matching_statistics(seq) {
-                if len == k {
-                    // Full kmer -> set the bit in the color set of the k-mer
-                    assert!(colex.len() == 1);
-                    color_sets.set(colex.start*num_colors + color, true);
+        let dbs_ref = &input_stream.dbs; // Pass into the scope by reference
+        let streaming_index_ref = &streaming_index; // Pass into the scope by reference
+
+        let color_sets = std::thread::scope(move |scope| {
+
+            log::info!("Building colors");
+
+            let work_input_queue: (Sender<(usize, PathBuf)>, Receiver<(usize, PathBuf)>) = crossbeam::channel::unbounded();
+            let work_output_queue: (Sender<(usize, BitVec)>, Receiver<(usize, BitVec)>) = crossbeam::channel::unbounded();
+
+            let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
+
+            let producer_handle = scope.spawn(move || {
+                // Send all filenames to the work queue
+                for color in 0..filenames_clone.len() {
+                    work_input_queue.0.send((color, filenames_clone[color].clone())).unwrap(); 
                 }
+                drop(work_input_queue.0); // Close the channel sender
+            });
+
+            // Spawn threads that mark the k-mers for each color
+            let mut worker_handles = Vec::new();
+            for thread_id in 0..n_threads {
+                let recv_clone = work_input_queue.1.clone();
+                let sender_clone = work_output_queue.0.clone();
+                let consumer_handle = scope.spawn(move || {
+                    loop {
+                        match recv_clone.recv() {
+                            Ok((color, filename)) => {
+                                log::info!("Processing color {} ({})", color, filename.display());
+                                let mut marks = bitvec![0; sbwt_len];
+                                for rec in dbs_ref[color].iter() {
+                                    mark_all_kmers_of_seq(rec.seq, k, &mut marks, &streaming_index_ref);
+                                }
+                                log::info!("Color {} done ({})", color, filename.display());
+                                sender_clone.send((color, marks));
+                            },
+                            Err(RecvError) => {
+                                log::info!("Thread {} finished", thread_id);
+                                break;
+                            }
+                        }
+                    }
+                });
+                worker_handles.push(consumer_handle);
             }
 
-            prev_color = Some(color);
-            color = input_stream.cur_db_idx; // Color for the next round
-        }
+
+            // Spawn a thread that collects the bit vectors from the workers
+            let collector = scope.spawn(move || {
+                let mut color_sets = bitvec![0; num_colors*sbwt_len]; // Concatenation of distinct color sets
+                loop {
+                    match work_output_queue.1.recv() {
+                        Ok((color, marks)) => {
+                            for i in 0..marks.len() {
+                                if marks.get(i).unwrap() == true {
+                                    color_sets.set(i*num_colors + color, true);
+
+                                }
+                            }
+                        },
+                        Err(RecvError) => {
+                            log::info!("Finished collecting all color sets");
+                            break color_sets;
+                        }
+                    }
+                }
+            });
+
+            // Wait for the producer to finish
+            producer_handle.join();
+
+            // Wait for all workers to finish
+            for handle in worker_handles {
+                handle.join();
+            }
+            drop(work_output_queue.0); // Close the sender of the channel
+
+            // Wait for the collector to finish and return the collected color set bit vector
+            collector.join().unwrap()
+
+        }); // End of thread scope 
+
         // Todo: deduplicate color sets
 
-        let colex_to_color_set_id: Vec<usize> = (0..sbwt.n_sets()).collect(); // Identity mapping
+        let colex_to_color_set_id: Vec<usize> = (0..sbwt_len).collect(); // Identity mapping
 
-        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: num_colors}
-    } 
+        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: filenames.len()}
+    }
 }
 
 #[cfg(test)]

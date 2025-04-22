@@ -292,7 +292,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1c92ff2d7a202d592f5a412d75cf421495c913817781c1cb383bf12a77e185f"
 dependencies = [
  "cfg-if 0.1.10",
- "crossbeam-channel",
+ "crossbeam-channel 0.3.9",
  "crossbeam-deque 0.6.3",
  "crossbeam-epoch 0.6.1",
  "crossbeam-utils 0.6.6",
@@ -302,12 +302,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
+dependencies = [
+ "crossbeam-channel 0.5.15",
+ "crossbeam-deque 0.8.6",
+ "crossbeam-epoch 0.9.18",
+ "crossbeam-queue",
+ "crossbeam-utils 0.8.21",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8ec7fcd21571dc78f96cc96243cab8d8f035247c3efd16c687be154c3fa9efa"
 dependencies = [
  "crossbeam-utils 0.6.6",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils 0.8.21",
 ]
 
 [[package]]
@@ -363,6 +385,15 @@ name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+dependencies = [
+ "crossbeam-utils 0.8.21",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
 dependencies = [
  "crossbeam-utils 0.8.21",
 ]
@@ -1148,7 +1179,7 @@ dependencies = [
  "byteorder",
  "chrono",
  "clap",
- "crossbeam",
+ "crossbeam 0.5.0",
  "embed-doc-image",
  "env_logger 0.10.2",
  "jseqio",
@@ -1359,6 +1390,7 @@ dependencies = [
  "bitvec",
  "byteorder",
  "clap",
+ "crossbeam 0.8.4",
  "env_logger 0.10.2",
  "indicatif",
  "jseqio",
