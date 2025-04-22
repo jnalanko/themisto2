@@ -357,8 +357,9 @@ impl ColoredKmers {
             let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
 
             let work_input_queue_clone = work_input_queue.clone();
+
+            // Spawn a producer thread that pushes (color, seq) pairs to the worker threads
             let producer_handle = scope.spawn(move || {
-                // Send all filenames to the work queue
                 for color in 0..filenames_clone.len() {
                     log::info!("Processing color {} ({})", color, filenames_clone[color].display());
                     for rec in dbs_ref[color].iter() {
