@@ -318,8 +318,13 @@ impl ColoredKmers {
         let num_colors = input_stream.dbs.len();
         let mut color_sets = bitvec![0; num_colors*sbwt.n_sets()]; // Concatenation of distinct color sets
 
+        let mut prev_color: Option<usize> = None;
         let mut color = 0_usize;
         while let Some(seq) = input_stream.stream_next() {
+            if prev_color.is_none() || color != prev_color.unwrap() {
+                let cur_filename = filenames[color].as_ref();
+                log::info!("Setting color bits for color {} ({})", color, cur_filename.display());
+            }
             // Search all k-mers
             for (len, colex) in streaming_index.matching_statistics(seq) {
                 if len == k {
@@ -328,6 +333,8 @@ impl ColoredKmers {
                     color_sets.set(colex.start*num_colors + color, true);
                 }
             }
+
+            prev_color = Some(color);
             color = input_stream.cur_db_idx; // Color for the next round
         }
         // Todo: deduplicate color sets
