@@ -330,6 +330,7 @@ impl ColoredKmers {
         let sbwt_len = sbwt.n_sets();
         let streaming_index = StreamingIndex::new(&sbwt, &lcs);
 
+        log::info!("Reading input sequences back into memory again");
         let input_stream = InputStream::new(filenames); // Read the data into memory again
 
         let dbs_ref = &input_stream.dbs; // Pass into the scope by reference
