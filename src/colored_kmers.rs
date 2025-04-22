@@ -368,7 +368,7 @@ impl ColoredKmers {
 
             // Spawn worker threads
             let mut worker_handles = Vec::new();
-            let color_sets_lock = Arc::new(Mutex::new(bitvec![0; num_colors*sbwt_len])); // Concatenation of distinct color sets
+            let color_sets_lock = Arc::new(Mutex::new(bitvec![0; num_colors*sbwt_len])); // Concatenation of color sets
             for thread_id in 0..n_threads {
                 let recv_clone = work_input_queue.1.clone();
                 let color_sets_lock_clone = color_sets_lock.clone();
