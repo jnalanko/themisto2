@@ -390,7 +390,7 @@ impl ColoredKmers {
             }
 
 
-            // Spawn a thread that collects the bit vectors from the workers
+            // Spawn a thread that sets the marks received from the workers
             let collector = scope.spawn(move || {
                 let mut color_sets = bitvec![0; num_colors*sbwt_len]; // Concatenation of distinct color sets
                 loop {
