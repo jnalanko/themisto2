@@ -306,6 +306,8 @@ fn mark_all_kmers_of_seq(seq: &[u8], k: usize, marks: &mut BitVec, index: &Strea
 } 
 
 impl ColoredKmers {
+
+    #[allow(clippy::type_complexity)]
     pub fn new<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
 
         log::info!("Loading {} sequence files (colors) into memory", filenames.len());
@@ -342,12 +344,12 @@ impl ColoredKmers {
 
             let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
 
+            let work_input_queue_clone = work_input_queue.clone();
             let producer_handle = scope.spawn(move || {
                 // Send all filenames to the work queue
                 for color in 0..filenames_clone.len() {
-                    work_input_queue.0.send((color, filenames_clone[color].clone())).unwrap(); 
+                    work_input_queue_clone.0.send((color, filenames_clone[color].clone())).unwrap(); 
                 }
-                drop(work_input_queue.0); // Close the channel sender
             });
 
             // Spawn threads that mark the k-mers for each color
@@ -362,10 +364,10 @@ impl ColoredKmers {
                                 log::info!("Processing color {} ({})", color, filename.display());
                                 let mut marks = bitvec![0; sbwt_len];
                                 for rec in dbs_ref[color].iter() {
-                                    mark_all_kmers_of_seq(rec.seq, k, &mut marks, &streaming_index_ref);
+                                    mark_all_kmers_of_seq(rec.seq, k, &mut marks, streaming_index_ref);
                                 }
                                 log::info!("Color {} done ({})", color, filename.display());
-                                sender_clone.send((color, marks));
+                                sender_clone.send((color, marks)).unwrap();
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
@@ -400,13 +402,14 @@ impl ColoredKmers {
             });
 
             // Wait for the producer to finish
-            producer_handle.join();
+            producer_handle.join().unwrap();
+            drop(work_input_queue.0); // Close the work input queue
 
             // Wait for all workers to finish
             for handle in worker_handles {
-                handle.join();
+                handle.join().unwrap();
             }
-            drop(work_output_queue.0); // Close the sender of the channel
+            drop(work_output_queue.0); // Close the work output queue 
 
             // Wait for the collector to finish and return the collected color set bit vector
             collector.join().unwrap()
