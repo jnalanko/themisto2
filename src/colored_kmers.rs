@@ -351,7 +351,7 @@ impl ColoredKmers {
 
             log::info!("Building colors");
 
-            let work_input_queue: (Sender<(usize, PathBuf)>, Receiver<(usize, PathBuf)>) = crossbeam::channel::unbounded();
+            let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
             let work_output_queue: (Sender<(usize, Vec<usize>)>, Receiver<(usize, Vec<usize>)>) = crossbeam::channel::bounded(n_threads);
 
             let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
@@ -360,7 +360,10 @@ impl ColoredKmers {
             let producer_handle = scope.spawn(move || {
                 // Send all filenames to the work queue
                 for color in 0..filenames_clone.len() {
-                    work_input_queue_clone.0.send((color, filenames_clone[color].clone())).unwrap(); 
+                    log::info!("Processing color {} ({})", color, filenames_clone[color].display());
+                    for rec in dbs_ref[color].iter() {
+                        work_input_queue_clone.0.send((color, rec.seq)).unwrap(); 
+                    }
                 }
             });
 
@@ -372,12 +375,8 @@ impl ColoredKmers {
                 let consumer_handle = scope.spawn(move || {
                     loop {
                         match recv_clone.recv() {
-                            Ok((color, filename)) => {
-                                log::info!("Processing color {} ({})", color, filename.display());
-                                for rec in dbs_ref[color].iter() {
-                                    mark_all_kmers_of_seq(sender_clone.clone(), color, rec.seq, k, 10000, streaming_index_ref);
-                                }
-                                log::info!("Color {} done ({})", color, filename.display());
+                            Ok((color, seq)) => {
+                                mark_all_kmers_of_seq(sender_clone.clone(), color, seq, k, 100000, streaming_index_ref);
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
