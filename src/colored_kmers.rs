@@ -367,7 +367,7 @@ impl ColoredKmers {
                 }
             });
 
-            // Spawn threads that mark the k-mers for each color
+            // Spawn threads that determine which k-mers should be marked for which color
             let mut worker_handles = Vec::new();
             for thread_id in 0..n_threads {
                 let recv_clone = work_input_queue.1.clone();
