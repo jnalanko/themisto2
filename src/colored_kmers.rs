@@ -364,6 +364,7 @@ impl ColoredKmers {
                     work_input_queue.0.send((color, rec.seq)).unwrap(); 
                 }
             }
+            drop(work_input_queue.0); // Close the channel
 
             // Spawn worker threads
             let mut worker_handles = Vec::new();
