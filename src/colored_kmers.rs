@@ -361,7 +361,6 @@ impl ColoredKmers {
             // Spawn a producer thread that pushes (color, seq) pairs to the worker threads
             let producer_handle = scope.spawn(move || {
                 for color in 0..filenames_clone.len() {
-                    log::info!("Processing color {} ({})", color, filenames_clone[color].display());
                     for rec in dbs_ref[color].iter() {
                         work_input_queue_clone.0.send((color, rec.seq)).unwrap(); 
                     }
