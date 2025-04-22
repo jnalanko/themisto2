@@ -294,14 +294,25 @@ impl SeqStream for InputStream {
     } 
 }
 
-fn mark_all_kmers_of_seq(seq: &[u8], k: usize, marks: &mut BitVec, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
+fn mark_all_kmers_of_seq(sender: Sender<(usize, Vec<usize>)>, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
     // Search all k-mers
+    let mut marking_buffer: Vec<usize> = Vec::new(); // These bits should be marked
     for (len, colex) in index.matching_statistics(seq) {
         if len == k {
             // Full kmer -> set the bit in the color set of the k-mer
             assert!(colex.len() == 1);
-            marks.set(colex.start, true);
+            marking_buffer.push(colex.start);
+            if marking_buffer.len() == mark_buffer_size {
+                 // Send to marker thread
+                sender.send((color, marking_buffer.clone())).unwrap();
+                marking_buffer.clear();
+            }
         }
+    }
+
+    if !marking_buffer.is_empty() { 
+        // Send to marker thread
+        sender.send((color, marking_buffer)).unwrap();
     }
 } 
 
@@ -341,7 +352,7 @@ impl ColoredKmers {
             log::info!("Building colors");
 
             let work_input_queue: (Sender<(usize, PathBuf)>, Receiver<(usize, PathBuf)>) = crossbeam::channel::unbounded();
-            let work_output_queue: (Sender<(usize, BitVec)>, Receiver<(usize, BitVec)>) = crossbeam::channel::unbounded();
+            let work_output_queue: (Sender<(usize, Vec<usize>)>, Receiver<(usize, Vec<usize>)>) = crossbeam::channel::bounded(n_threads);
 
             let filenames_clone: Vec<PathBuf> = filenames.iter().map(|f| f.as_ref().to_owned()).collect();
 
@@ -363,12 +374,10 @@ impl ColoredKmers {
                         match recv_clone.recv() {
                             Ok((color, filename)) => {
                                 log::info!("Processing color {} ({})", color, filename.display());
-                                let mut marks = bitvec![0; sbwt_len];
                                 for rec in dbs_ref[color].iter() {
-                                    mark_all_kmers_of_seq(rec.seq, k, &mut marks, streaming_index_ref);
+                                    mark_all_kmers_of_seq(sender_clone.clone(), color, rec.seq, k, 10000, streaming_index_ref);
                                 }
                                 log::info!("Color {} done ({})", color, filename.display());
-                                sender_clone.send((color, marks)).unwrap();
                             },
                             Err(RecvError) => {
                                 log::info!("Thread {} finished", thread_id);
@@ -386,12 +395,9 @@ impl ColoredKmers {
                 let mut color_sets = bitvec![0; num_colors*sbwt_len]; // Concatenation of distinct color sets
                 loop {
                     match work_output_queue.1.recv() {
-                        Ok((color, marks)) => {
-                            for i in 0..marks.len() {
-                                if marks.get(i).unwrap() == true {
-                                    color_sets.set(i*num_colors + color, true);
-
-                                }
+                        Ok((color, to_mark)) => {
+                            for i in to_mark {
+                                color_sets.set(i*num_colors + color, true);
                             }
                         },
                         Err(RecvError) => {
