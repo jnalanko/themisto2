@@ -249,6 +249,15 @@ pub enum Subcommands {
     
         #[arg(long = "static-likelihood", action = clap::ArgAction::SetTrue)]
         static_likelihood: bool,
+    },
+
+    #[command(arg_required_else_help = true, name = "print-color-sets")]
+    PrintColorSets {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+    
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
     }
 
 }
@@ -450,7 +459,20 @@ fn main() {
             let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], initial_w, optimize_w, n_threads, max_iterations);
             println!("Final likelihood ratio w: {}", w);
             println!("Mixing fractions: {:?}", thetas);
-
+        },
+        Subcommands::PrintColorSets { index: index_path, query: query_path } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+            while let Some(rec) = reader.read_next().unwrap() {
+                println!(">{}", String::from_utf8(rec.head.to_vec()).unwrap());
+                let sets = index.get_all_color_sets(rec.seq);
+                for set in sets {
+                    set.to_string();
+                    let bitstring: String = set.iter().by_vals().map(|b| if b { '1' } else { '0' }).collect();
+                    println!("{}", bitstring);
+                }
+            }
         }
     } 
 }
