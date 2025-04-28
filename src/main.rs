@@ -1,6 +1,6 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf};
+use std::{cmp::max, fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
@@ -140,6 +140,21 @@ pub enum Subcommands {
 
         #[arg(long = "relevant-only", short = 'r')]
         relevant_only: bool,
+    },
+
+    #[command(arg_required_else_help = true, name = "fraction-of-max-pseudoalign")]
+    FractionOfMaxPseudoalign {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "query", short = 'q', required = true)]
+        query: PathBuf,
+
+        #[arg(long = "min-hits", short = 'm', required = true)]
+        min_hits: usize,
+
+        #[arg(long = "fraction", short = 'd', required = true)]
+        fraction: f64,
     },
 
     #[command(arg_required_else_help = true, name = "unique-support-pseudoalign")]
@@ -315,6 +330,21 @@ fn main() {
                 } else {
                     compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_all_kmers, min_hits, threshold)
                 };
+                println!("{:?}", compatible_colors);
+            }
+
+        },
+        Subcommands::FractionOfMaxPseudoalign { index: index_path, query: query_path, min_hits, fraction } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+
+            log::info!("Pseudoaligning (fraction of max method)");
+            while let Some(rec) = reader.read_next().unwrap(){
+                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
+                let max_count = *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array");
+                let min_needed = max(min_hits, (max_count as f64 * fraction) as usize);
+                let compatible_colors = pa_data.hit_counts.iter().enumerate().filter(|(_, count)| **count >= min_needed).map(|(i, _)| i); 
                 println!("{:?}", compatible_colors);
             }
 
