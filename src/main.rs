@@ -347,7 +347,7 @@ fn main() {
                 let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
                 let max_count = *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array");
                 let min_needed = max(min_hits, (max_count as f64 * fraction) as usize);
-                let compatible_colors = pa_data.hit_counts.iter().enumerate().filter(|(_, count)| **count >= min_needed).map(|(i, _)| i); 
+                let compatible_colors: Vec<usize> = pa_data.hit_counts.iter().enumerate().filter(|(_, count)| **count >= min_needed).map(|(i, _)| i).collect(); 
                 println!("{:?}", compatible_colors);
             }
 
