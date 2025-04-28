@@ -273,6 +273,9 @@ pub enum Subcommands {
     
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
+
+        #[arg(long = "print-kmers", short = 'p', help = "Also print the k-mers on each line")]
+        print_kmers: bool,
     }
 
 }
@@ -490,14 +493,17 @@ fn main() {
             println!("Final likelihood ratio w: {}", w);
             println!("Mixing fractions: {:?}", thetas);
         },
-        Subcommands::PrintColorSets { index: index_path, query: query_path } => {
+        Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
             while let Some(rec) = reader.read_next().unwrap() {
                 println!(">{}", String::from_utf8(rec.head.to_vec()).unwrap());
                 let sets = index.get_all_color_sets(rec.seq);
-                for set in sets {
+                for (set_idx, set) in sets.iter().enumerate() {
+                    if print_kmers {
+                        print!("{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap())
+                    }
                     set.to_string();
                     let bitstring: String = set.iter().by_vals().map(|b| if b { '1' } else { '0' }).collect();
                     println!("{}", bitstring);
