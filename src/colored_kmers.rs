@@ -81,8 +81,10 @@ impl ColoredKmers {
     pub fn get_all_color_sets(&self, seq: &[u8]) -> Vec<&BitSlice> {
         let mut sets = Vec::new();
         let index = sbwt::StreamingIndex::new(&self.kmers, &self.lcs);
-        for (match_len, colex_range) in index.matching_statistics(seq) {
-            if match_len == self.kmers.k() {
+
+        // Start iterating from index k-1 because those before do not correspond to a full k-mer
+        for (match_len, colex_range) in index.matching_statistics(seq)[self.kmers.k()-1 ..].iter() {
+            if *match_len == self.kmers.k() {
                 assert_eq!(colex_range.len(), 1);
                 let id = self.colex_to_color_set_id[colex_range.start];
                 sets.push(self.get_color_set_by_id(id));
