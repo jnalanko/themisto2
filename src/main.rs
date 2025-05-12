@@ -82,7 +82,7 @@ pub struct Cli {
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
-enum Denominator {
+pub enum Denominator {
     All,
     Relevant,
     MaxHits,
@@ -155,13 +155,13 @@ pub enum Subcommands {
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
 
-        #[arg(long = "min-hits", short = 'm', required = true)]
+        #[arg(long = "min-hits", short = 'm', required = true, default_value = "1")]
         min_hits: usize,
 
         #[arg(long = "threshold", short = 'd', required = true)]
         threshold: f64,
 
-        #[arg(long = "denominator", short = 'n', value_enum)]
+        #[arg(long = "denominator", short = 'n')]
         denominator: Denominator,
 
         #[arg(long = "unique-weight", short = 'u', default_value = "0", help = "Weight for unique matches (in the range [0,1])")]
