@@ -52,8 +52,10 @@ pub fn unique_support_combination_method(
     (0..ncolors)
     .filter(|i| unique_supports[*i] >= min_unique_support || common_supports[*i] >= min_common_support)
     .filter(|i| {
-        let x = unique_supports[*i] as f64 * unique_weight + common_supports[*i] as f64 * (1.0-unique_weight);
-        x / denominator as f64 >= threshold
+        let us = unique_supports[*i] as f64;
+        let cs = common_supports[*i] as f64;
+        let w = unique_weight;
+        (us*w + cs*(1.0-w)) / denominator as f64 >= threshold
     })
     .collect()
 
