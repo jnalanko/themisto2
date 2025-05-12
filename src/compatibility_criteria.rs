@@ -4,13 +4,6 @@ fn indices_with_minimum_support(supports: &[usize], minimum_support: usize) -> V
     supports.iter().enumerate().filter(|(_, s)| **s >= minimum_support).map(|(i,_)| i).collect()
 }
 
-// query_kmers can be e.g. either the number of k-mers in the query, or the number of relevant
-// k-mers in the query.
-pub fn basic_threshold_method(supports: &[usize], query_kmers: usize, mut min_support: usize, threshold: f64) -> Vec<usize> {
-    min_support = max(min_support, (query_kmers as f64 * threshold).ceil() as usize);
-    indices_with_minimum_support(supports, min_support)
-}
-
 /// Shared support counts include the unique support hits (todo: rename?)
 pub fn unique_support_method(
     unique_supports: &[usize], 
