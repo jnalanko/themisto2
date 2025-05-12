@@ -37,7 +37,7 @@ pub fn unique_support_method(
     vec![] // Not enough evidence for anything -> return the empty set
 }
 
-pub fn unique_support_combination_method<F>(
+pub fn unique_support_combination_method(
     unique_supports: &[usize], 
     common_supports: &[usize], 
     unique_weight: f64, // In the range [0,1]
