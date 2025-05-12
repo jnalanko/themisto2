@@ -1,8 +1,8 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{cmp::max, fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf};
+use std::{cmp::max, fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf, str::FromStr};
 use bitvec::prelude::*;
-use clap::{builder::PossibleValuesParser, Parser, Subcommand};
+use clap::{builder::PossibleValuesParser, Parser, Subcommand, ValueEnum};
 use colored_kmers::ColoredKmers;
 
 mod EM;
@@ -80,6 +80,28 @@ pub struct Cli {
     pub command: Subcommands,
 }
 
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum Denominator {
+    All,
+    Relevant,
+    MaxHits,
+}
+
+/*
+impl FromStr for Denominator {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "all" => Ok(Denominator::All),
+            "relevant" => Ok(Denominator::Relevant),
+            "maxhits" => Ok(Denominator::MaxHits),
+            _ => Err(format!("Invalid denominator value: {}", s)),
+        }
+    }
+}
+*/
+
 #[derive(Subcommand)]
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
@@ -138,8 +160,11 @@ pub enum Subcommands {
         #[arg(long = "threshold", short = 'd', required = true)]
         threshold: f64,
 
-        #[arg(long = "relevant-only", short = 'r')]
-        relevant_only: bool,
+        #[arg(long = "denominator", short = 'n', value_enum)]
+        denominator: Denominator,
+
+        #[arg(long = "unique-weight", short = 'u', default_value = "0", help = "Weight for unique matches (in the range [0,1])")]
+        unique_weight: f64,
     },
 
     #[command(arg_required_else_help = true, name = "fraction-of-max-pseudoalign")]
@@ -320,20 +345,24 @@ fn main() {
                 println!("{:?}", intersection.iter_ones().collect::<Vec::<usize>>()); // Todo: print indices of non-zero
             }
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, relevant_only } => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, unique_weight} => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
-            log::info!("Pseudoaligning (threshold method, relevant = {})", relevant_only);
+            log::info!("Pseudoaligning (threshold method, denominator = {:?})", denominator);
             while let Some(rec) = reader.read_next().unwrap(){
                 let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
+
+                todo!();
+                /* 
                 let compatible_colors = if relevant_only {
                     compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_relevant_kmers, min_hits, threshold)
                 } else {
                     compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_all_kmers, min_hits, threshold)
                 };
                 println!("{:?}", compatible_colors);
+                */
             }
 
         },
