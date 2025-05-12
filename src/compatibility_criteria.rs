@@ -37,6 +37,28 @@ pub fn unique_support_method(
     vec![] // Not enough evidence for anything -> return the empty set
 }
 
+pub fn unique_support_combination_method<F>(
+    unique_supports: &[usize], 
+    common_supports: &[usize], 
+    unique_weight: f64, // In the range [0,1]
+    min_unique_support: usize, 
+    min_common_support: usize,
+    denominator: usize,
+    threshold: f64) -> Vec<usize> {
+
+    let ncolors = unique_supports.len();
+    assert_eq!(ncolors, common_supports.len());
+
+    (0..ncolors)
+    .filter(|i| unique_supports[*i] >= min_unique_support || common_supports[*i] >= min_common_support)
+    .filter(|i| {
+        let x = unique_supports[*i] as f64 * unique_weight + common_supports[*i] as f64 * (1.0-unique_weight);
+        x / denominator as f64 >= threshold
+    })
+    .collect()
+
+}
+
 pub fn resolve_consensus_compatibility(
     compatibility_sets: &[&[usize]], 
     n_colors: usize, 
