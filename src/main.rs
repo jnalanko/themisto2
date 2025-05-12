@@ -4,6 +4,7 @@ use std::{cmp::max, fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, pat
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand, ValueEnum};
 use colored_kmers::ColoredKmers;
+use compatibility_criteria::unique_support_combination_method;
 
 mod EM;
 mod colored_kmers;
@@ -167,39 +168,6 @@ pub enum Subcommands {
         unique_weight: f64,
     },
 
-    #[command(arg_required_else_help = true, name = "fraction-of-max-pseudoalign")]
-    FractionOfMaxPseudoalign {
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-
-        #[arg(long = "min-hits", short = 'm', required = true)]
-        min_hits: usize,
-
-        #[arg(long = "fraction", short = 'd', required = true)]
-        fraction: f64,
-    },
-
-    #[command(arg_required_else_help = true, name = "unique-support-pseudoalign")]
-    UniqueSupportPseudoalign{
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-
-        #[arg(long = "min-unique-hits", short = 'm', required = true)]
-        min_unique_hits: usize,
-
-        #[arg(long = "min-shared-hits", short = 's', required = true)]
-        min_shared_hits: usize,
-
-        #[arg(long = "threshold", short = 'd', required = true)]
-        threshold: f64,
-    },
-
     #[command(arg_required_else_help = true, name = "segment-consensus-pseudoalign")]
     SegmentConsensusPseudoalign{
         #[arg(long = "index", short = 'i', required = true)]
@@ -353,45 +321,15 @@ fn main() {
             log::info!("Pseudoaligning (threshold method, denominator = {:?})", denominator);
             while let Some(rec) = reader.read_next().unwrap(){
                 let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
-
-                todo!();
-                /* 
-                let compatible_colors = if relevant_only {
-                    compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_relevant_kmers, min_hits, threshold)
-                } else {
-                    compatibility_criteria::basic_threshold_method(&pa_data.hit_counts, pa_data.n_all_kmers, min_hits, threshold)
+                let den = match denominator {
+                    Denominator::All => pa_data.n_all_kmers,
+                    Denominator::Relevant => pa_data.n_relevant_kmers,
+                    Denominator::MaxHits => *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array"),
                 };
-                println!("{:?}", compatible_colors);
-                */
-            }
-
-        },
-        Subcommands::FractionOfMaxPseudoalign { index: index_path, query: query_path, min_hits, fraction } => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            log::info!("Pseudoaligning (fraction of max method)");
-            while let Some(rec) = reader.read_next().unwrap(){
-                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
-                let max_count = *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array");
-                let min_needed = max(min_hits, (max_count as f64 * fraction) as usize);
-                let compatible_colors: Vec<usize> = pa_data.hit_counts.iter().enumerate().filter(|(_, count)| **count >= min_needed).map(|(i, _)| i).collect(); 
+                let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, min_hits, min_hits, den, threshold);
                 println!("{:?}", compatible_colors);
             }
 
-        },
-        Subcommands::UniqueSupportPseudoalign { index: index_path, query: query_path, min_unique_hits, min_shared_hits, threshold } => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            log::info!("Pseudoaligning (unique support method)");
-            while let Some(rec) = reader.read_next().unwrap(){
-                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
-                let compatible_colors = compatibility_criteria::unique_support_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, min_unique_hits, min_shared_hits, threshold);
-                println!("{:?}", compatible_colors);
-            }
         },
         Subcommands::SegmentConsensusPseudoalign { index: index_path, query: query_path, min_hits, segment_length, min_shared_segments, min_unique_segments, consensus_threshold } => {
             log::info!("Loading index");
