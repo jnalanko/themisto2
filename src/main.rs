@@ -326,7 +326,7 @@ fn main() {
                     Denominator::Relevant => pa_data.n_relevant_kmers,
                     Denominator::MaxHits => *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array"),
                 };
-                let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, min_hits, 0, den, threshold);
+                let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, 0, min_hits, den, threshold);
                 println!("{:?}", compatible_colors);
             }
 
