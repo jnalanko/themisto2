@@ -50,7 +50,7 @@ pub fn unique_support_combination_method(
     assert_eq!(ncolors, common_supports.len());
 
     (0..ncolors)
-    .filter(|i| unique_supports[*i] >= min_unique_support || common_supports[*i] >= min_common_support)
+    .filter(|i| unique_supports[*i] >= min_unique_support && common_supports[*i] >= min_common_support)
     .filter(|i| {
         let us = unique_supports[*i] as f64;
         let cs = common_supports[*i] as f64;
