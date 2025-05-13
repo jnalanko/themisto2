@@ -325,7 +325,7 @@ fn main() {
                     Denominator::All => pa_data.n_all_kmers as f64,
                     Denominator::Relevant => pa_data.n_unique_kmers as f64 * unique_weight + pa_data.n_relevant_kmers as f64 * (1.0 - unique_weight),
                     Denominator::MaxHits => {
-                        (0..pa_data.n_all_kmers).map(|i| 
+                        (0..index.n_colors()).map(|i| 
                             pa_data.unique_hit_counts[i] as f64 * unique_weight +
                             pa_data.hit_counts[i] as f64 * (1.0 - unique_weight)).
                             max_by(|a,b| a.partial_cmp(b).unwrap())
