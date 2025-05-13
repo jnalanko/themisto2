@@ -322,9 +322,9 @@ fn main() {
             while let Some(rec) = reader.read_next().unwrap(){
                 let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
                 let den = match denominator {
-                    Denominator::All => pa_data.n_all_kmers,
-                    Denominator::Relevant => pa_data.n_relevant_kmers,
-                    Denominator::MaxHits => *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array"),
+                    Denominator::All => pa_data.n_all_kmers as f64,
+                    Denominator::Relevant => pa_data.n_unique_kmers as f64 * unique_weight + pa_data.n_relevant_kmers as f64 * (1.0 - unique_weight),
+                    Denominator::MaxHits => *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array") as f64,
                 };
                 let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, 0, min_hits, den, threshold);
                 println!("{:?}", compatible_colors);

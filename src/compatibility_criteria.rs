@@ -36,7 +36,7 @@ pub fn unique_support_combination_method(
     unique_weight: f64, // In the range [0,1]
     min_unique_support: usize, 
     min_common_support: usize,
-    denominator: usize,
+    denominator: f64,
     threshold: f64) -> Vec<usize> {
 
     let ncolors = unique_supports.len();
@@ -48,7 +48,7 @@ pub fn unique_support_combination_method(
         let us = unique_supports[*i] as f64;
         let cs = common_supports[*i] as f64;
         let w = unique_weight;
-        (us*w + cs*(1.0-w)) / denominator as f64 >= threshold
+        (us*w + cs*(1.0-w)) / denominator >= threshold
     })
     .collect()
 
