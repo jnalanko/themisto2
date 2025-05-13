@@ -44,6 +44,9 @@ pub fn unique_support_combination_method(
         return vec![];
     }
 
+    // Wiggle room to compensate for floating point inaccuracy.
+    let epsilon = 1e-8; 
+
     let ncolors = unique_supports.len();
     assert_eq!(ncolors, common_supports.len());
 
@@ -53,7 +56,7 @@ pub fn unique_support_combination_method(
         let us = unique_supports[*i] as f64;
         let cs = common_supports[*i] as f64;
         let w = unique_weight;
-        (us*w + cs*(1.0-w)) / denominator >= threshold
+        (us*w + cs*(1.0-w)) / denominator >= threshold - epsilon
     })
     .collect()
 
