@@ -39,6 +39,11 @@ pub fn unique_support_combination_method(
     denominator: f64,
     threshold: f64) -> Vec<usize> {
 
+    if denominator <= 0.0 {
+        // This happens e.g. when the read has no k-mer matches at all
+        return vec![];
+    }
+
     let ncolors = unique_supports.len();
     assert_eq!(ncolors, common_supports.len());
 

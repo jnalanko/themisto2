@@ -324,7 +324,13 @@ fn main() {
                 let den = match denominator {
                     Denominator::All => pa_data.n_all_kmers as f64,
                     Denominator::Relevant => pa_data.n_unique_kmers as f64 * unique_weight + pa_data.n_relevant_kmers as f64 * (1.0 - unique_weight),
-                    Denominator::MaxHits => *pa_data.hit_counts.iter().max().expect("Programming error: empty hit counts array") as f64,
+                    Denominator::MaxHits => {
+                        (0..pa_data.n_all_kmers).map(|i| 
+                            pa_data.unique_hit_counts[i] as f64 * unique_weight +
+                            pa_data.hit_counts[i] as f64 * (1.0 - unique_weight)).
+                            max_by(|a,b| a.partial_cmp(b).unwrap())
+                            .expect("Programming error: no hit counts found")
+                    }
                 };
                 let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, 0, min_hits, den, threshold);
                 println!("{:?}", compatible_colors);
