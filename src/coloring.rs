@@ -1,6 +1,6 @@
 use bitvec::slice::BitSlice;
 use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Resize, Vector}};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
 
 // This enum is only for passing references to individual sets around.
 enum ColorSet<'a> {
@@ -111,18 +111,26 @@ impl BitMaps {
 
 struct ColorSets<'a> {
     //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
-    bitmap_data: bitvec::vec::BitVec, // Concatenation of dense sets as bitmaps
-    intvec_data: IntVector, // Concatenation of sparse sets as int vecs
+    bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
+    intvecs: IntVecs, // Concatenation of sparse sets as int vecs
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
     sbwt: &'a SbwtIndex<SubsetMatrix>, // Lifetime 'b can outlive this struct
     sampling: simple_sds_sbwt::bit_vector::BitVector // Marks colex ranks that have a color set stored. Has rank support.
 }
 
 impl ColorSets<'_> {
-    fn get(&self, colex: usize) -> &ColorSet {
+    fn get(&self, colex: usize) -> ColorSet {
         if self.sampling.get(colex) {
-            &self.sets[colex]
+            // This set is stored
+            if self.is_dense_marks.get(colex) {
+                let set_idx = self.is_dense_marks.rank(colex);
+                return ColorSet::Dense(&self.bitmaps.get(set_idx));
+            } else {
+                let set_idx = self.is_dense_marks.rank_zero(colex);
+                return ColorSet::Sparse(self.intvecs.get(set_idx));
+            }
         } else {
+            // This set is not stored -> walk forward in the de Bruijn graph
             for char_idx in 0..self.sbwt.alphabet().len() {
                 if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
                     let new_colex = self.sbwt.lf_step(colex, char_idx);
