@@ -1,15 +1,8 @@
 use bitvec::slice::BitSlice;
 use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Vector}};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Resize, Vector}};
 
-struct IntVecSlice<'a> {
-    vec: &'a IntVector, // Todo: do not store this
-    start: usize,
-    end: usize, // Exclusive end
-}
-
-// TODO: should not do this: BitSlice store a pointer for each. We only need an offset and a length.
-// Actually since the bitslices are of the same known width, we only need an offset.
+// This enum is only for passing references to individual sets around.
 enum ColorSet<'a> {
     Dense(&'a BitSlice),
     Sparse(IntVecSlice<'a>),
@@ -56,16 +49,76 @@ fn is_dense(bv: &BitSlice) -> bool {
 
 */
 
+struct IntVecs {
+    intvec_data: IntVector, // Concatenation of IntVecs
 
-struct ColorSets<'a, 'b> {
-    sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
+    // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
+    // exclusive end of the i-th vector.
+    ends: Vec<usize>, 
+}
+
+struct IntVecSlice<'a> {
+    vec: &'a IntVector,
+    start: usize,
+    end: usize, // Exclusive end
+}
+
+impl IntVecs {
+    fn new(bit_width: usize) -> Self {
+        IntVecs{intvec_data: IntVector::new(bit_width).unwrap(), ends: vec![0]}
+    }
+
+    fn push(&mut self, vec: &IntVector) {
+        assert_eq!(vec.width(), self.intvec_data.width());
+        self.intvec_data.extend(vec.iter());
+        self.ends.push(self.intvec_data.len());
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.intvec_data.resize(self.intvec_data.len(), 0);
+    }
+
+    fn get(&self, vec_idx: usize) -> IntVecSlice {
+        IntVecSlice{vec: &self.intvec_data, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
+    }
+}
+
+struct BitMaps {
+    bitmap_data: bitvec::vec::BitVec, // Concatenation of bit vectors
+    individual_length: usize, // Length of each bitmap in bitmap_data
+}
+
+impl BitMaps {
+    fn new(individual_length: usize) -> Self {
+        BitMaps{bitmap_data: bitvec::vec::BitVec::new(), individual_length}
+    }
+
+    fn push(&mut self, bv: bitvec::vec::BitVec) {
+        assert_eq!(bv.len(), self.individual_length);
+        self.bitmap_data.extend_from_bitslice(&bv);
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.bitmap_data.shrink_to_fit();
+    }
+
+    fn get(&self, bitmap_idx: usize) -> &BitSlice {
+        &self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
+    }
+}
+
+
+
+struct ColorSets<'a> {
+    //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
     bitmap_data: bitvec::vec::BitVec, // Concatenation of dense sets as bitmaps
     intvec_data: IntVector, // Concatenation of sparse sets as int vecs
-    sbwt: &'b SbwtIndex<SubsetMatrix>, // Lifetime 'b can outlive this struct
+    is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
+    sbwt: &'a SbwtIndex<SubsetMatrix>, // Lifetime 'b can outlive this struct
     sampling: simple_sds_sbwt::bit_vector::BitVector // Marks colex ranks that have a color set stored. Has rank support.
 }
 
-impl ColorSets<'_, '_> {
+impl ColorSets<'_> {
     fn get(&self, colex: usize) -> &ColorSet {
         if self.sampling.get(colex) {
             &self.sets[colex]
