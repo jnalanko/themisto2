@@ -215,6 +215,7 @@ impl ColorSets<'_> {
         is_dense_marks.resize(sbwt_len, false);
 
         let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt);
+        log::info!("Hashing distinct color sets");
 
         let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
         let mut bitvec_data = bitvec::vec::BitVec::<usize, Lsb0>::new();
@@ -235,6 +236,8 @@ impl ColorSets<'_> {
             }
         }
 
+        log::info!("Storing color set pointers for sampled nodes");
+
         // Store color set pointers only for the sampled nodes
         let color_set_id_bit_width = distinct_sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -249,6 +252,7 @@ impl ColorSets<'_> {
             }
         }
 
+        log::info!("Color compression finished");
         todo!();
     }
 }
