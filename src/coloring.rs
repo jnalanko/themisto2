@@ -223,6 +223,7 @@ impl ColorSets<'_> {
         let mut intvec_data_ends = vec![0_usize];
 
         let mut distinct_sets = std::collections::HashMap::<&BitSlice, usize>::new(); // Set -> id
+        let bar = indicatif::ProgressBar::new(sbwt_len as u64);
         for colex in 0..sbwt_len {
             let set = &bm[colex*n_colors .. colex*(n_colors+1)];
             if !distinct_sets.contains_key(set) {
@@ -234,7 +235,11 @@ impl ColorSets<'_> {
                     intvec_data_ends.push(intvec_data.len());
                 }
             }
+            if colex % 100 == 0 {
+                bar.inc(100);
+            }
         }
+        bar.finish();
 
         log::info!("{} distinct color sets found", distinct_sets.len());
         log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
