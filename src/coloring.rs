@@ -2,7 +2,7 @@ use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
 use rustc_hash::FxHasher;
-use std::hash::BuildHasherDefault;
+use std::{cmp::min, hash::BuildHasherDefault};
 use std::hash::{Hash, Hasher};
 
 // This enum is only for passing references to individual sets around.
@@ -181,16 +181,16 @@ pub struct BitKey<'a> {
     pub bits: &'a BitSlice,
 }
 
-impl<'a> Hash for BitKey<'a> {
+impl Hash for BitKey<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let len = self.bits.len();
-        assert!(
-            len <= usize::BITS as usize,
-            "BitSlice too long to load into usize"
-        );
-
-        let word: usize = self.bits.load();
-        word.hash(state); // hash as an integer
+        let n_words = len.div_ceil(64);
+        for i in 0..n_words {
+            let start = 64*i;
+            let end = min(64*(i+1), len);
+            let word: u64 = self.bits[start..end].load();
+            word.hash(state);
+        }
         len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
     }
 }
