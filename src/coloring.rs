@@ -189,7 +189,10 @@ impl<'a> Hash for BitKey<'a> {
             "BitSlice too long to load into usize"
         );
 
-        let word: usize = self.bits.load();
+        let word: usize = match self.bits.len() {
+            0 => 0, // This needs to be a special case, else panics
+            _ => self.bits.load(),
+        };
         word.hash(state); // hash as an integer
         len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
     }
