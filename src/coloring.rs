@@ -189,10 +189,7 @@ impl<'a> Hash for BitKey<'a> {
             "BitSlice too long to load into usize"
         );
 
-        let word: usize = match self.bits.len() {
-            0 => 0, // This needs to be a special case, else panics
-            _ => self.bits.load(),
-        };
+        let word: usize = self.bits.load();
         word.hash(state); // hash as an integer
         len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
     }
@@ -250,7 +247,7 @@ impl ColorSets<'_> {
         let mut distinct_sets = std::collections::HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
         let bar = indicatif::ProgressBar::new(sbwt_len as u64);
         for colex in 0..sbwt_len {
-            let set = &bm[colex*n_colors .. colex*(n_colors+1)];
+            let set = &bm[colex*n_colors .. (colex+1)*n_colors];
             let key = BitKey{bits: set};
             if !distinct_sets.contains_key(&key) {
                 distinct_sets.insert(key, distinct_sets.len());
@@ -279,7 +276,7 @@ impl ColorSets<'_> {
         let mut n_ids_stored = 0_usize;
         for colex in 0..sbwt_len {
             if sampling_marks[colex] {
-                let set = &bm[colex*n_colors .. colex*(n_colors+1)];
+                let set = &bm[colex*n_colors .. (colex+1)*n_colors];
                 let key = BitKey{bits: set};
                 let id = distinct_sets[&key]; // Should exist in the hash map. Panics if does not exist.
                 sampled_color_set_ids.set(n_ids_stored, id as u64);
