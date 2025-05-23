@@ -23,3 +23,4 @@ simple-sds-sbwt = "0.3.1"
 serde = {version = "1.0.210", features = ["derive"]}
 serde_json = "1.0.128"
 crossbeam = "0.8.4"
+rustc-hash = "2.1.1"

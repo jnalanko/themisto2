@@ -1,6 +1,8 @@
 use bitvec::{order::Lsb0, slice::BitSlice};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
+use rustc_hash::FxHasher;
+use std::hash::BuildHasherDefault;
 
 // This enum is only for passing references to individual sets around.
 enum ColorSet<'a> {
@@ -222,7 +224,7 @@ impl ColorSets<'_> {
 
         let mut intvec_data_ends = vec![0_usize];
 
-        let mut distinct_sets = std::collections::HashMap::<&BitSlice, usize>::new(); // Set -> id
+        let mut distinct_sets = std::collections::HashMap::<&BitSlice, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
         let bar = indicatif::ProgressBar::new(sbwt_len as u64);
         for colex in 0..sbwt_len {
             let set = &bm[colex*n_colors .. colex*(n_colors+1)];
