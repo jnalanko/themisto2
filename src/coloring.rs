@@ -236,6 +236,9 @@ impl ColorSets<'_> {
             }
         }
 
+        log::info!("{} distinct color sets found", distinct_sets.len());
+        log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
+
         log::info!("Storing color set pointers for sampled nodes");
 
         // Store color set pointers only for the sampled nodes
