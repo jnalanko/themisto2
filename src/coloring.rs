@@ -1,5 +1,5 @@
-use bitvec::slice::BitSlice;
-use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
+use bitvec::{order::Lsb0, slice::BitSlice};
+use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
 
 // This enum is only for passing references to individual sets around.
@@ -114,8 +114,63 @@ struct ColorSets<'a> {
     bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
     intvecs: IntVecs, // Concatenation of sparse sets as int vecs
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
-    sbwt: &'a SbwtIndex<SubsetMatrix>, // Lifetime 'b can outlive this struct
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
     sampling: simple_sds_sbwt::bit_vector::BitVector // Marks colex ranks that have a color set stored. Has rank support.
+}
+
+fn is_first_kmer_of_unitig(dbg: &Dbg<SubsetMatrix>, v: Node) -> bool {
+    if dbg.indegree(v) > 1 {
+        return true;
+    }
+    if let Some(u) = dbg.follow_inedge(v, 0) {
+        dbg.outdegree(u) > 1
+    } else {
+        true
+    }
+}
+
+// Returns the sequence of nodes and the label of the unitig
+// The out_labels_buf is working space for the function. Don't assume
+// anything about its contents when the function returns.
+fn walk_unitig_from(dbg: &Dbg<SubsetMatrix>, mut v: Node, out_labels_buf: &mut Vec<u8>) -> (Vec<Node>, Vec<u8>){
+    let v0 = v;
+    let mut nodes = Vec::<Node>::new();
+    nodes.push(v);
+    
+    let mut label = Vec::<u8>::new();
+    dbg.push_node_kmer(v, &mut label); 
+
+    while dbg.outdegree(v) == 1 {
+        out_labels_buf.clear();
+        dbg.push_outlabels(v, out_labels_buf);
+        let c = out_labels_buf[0];
+        v = dbg.follow_outedge(v, c).unwrap();
+        if v != v0 && dbg.indegree(v) == 1 {
+            label.push(c);
+            nodes.push(v);
+        } else { break; }
+    }
+
+    (nodes, label)
+}
+
+fn pick_sampled_kmers(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> bitvec::vec::BitVec {
+    // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
+    
+    // TODO: for now, just mark every non-dummy node.
+    log::info!("WARNING: unitig sampling not implement, marking all nodes instead");
+
+    let dbg = sbwt::dbg::Dbg::new(&sbwt, None, 1); // Todo: n_threads
+
+    let mut marks = bitvec::vec::BitVec::new();
+    marks.resize(sbwt.n_sets(), false);
+    for node in dbg.node_iterator() {
+        marks.set(node.id, true);
+    }
+
+    log::info!("Unitig sampling finished");
+
+    marks
 }
 
 impl ColorSets<'_> {
@@ -141,22 +196,27 @@ impl ColorSets<'_> {
         }
     }
 
+
+
+
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
     /// - sample_distance: max walk length to the next sampled color set in a unitig 
-    fn new_from_bitmaps(&self, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
+    fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
         assert_eq!(bm.len() % n_colors, 0);
         let sbwt_len = bm.len() % n_colors;
         assert_eq!(sbwt_len, sbwt.n_sets());
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
 
+        let mut is_dense_marks = bitvec::vec::BitVec::new();
+        is_dense_marks.resize(sbwt_len, false);
+
         let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
         let mut bitvec_data = bitvec::vec::BitVec::new();
 
         let mut distinct_sets = std::collections::HashSet::<&BitSlice>::new();
-        let mut distinct_sets_encoded = Vec::<ColorSet>::new();
         for colex in 0..sbwt_len {
             let set = &bm[colex*n_colors .. colex*(n_colors+1)];
             if !distinct_sets.contains(set) {
@@ -164,11 +224,9 @@ impl ColorSets<'_> {
                 if is_dense(set) {
                     bitvec_data.extend_from_bitslice(set);
                     let new_bits = &bitvec_data[bitvec_data.len() - n_colors .. bitvec_data.len()];
-                    distinct_sets_encoded.push(ColorSet::Dense(new_bits));
                 } else {
                     let old_end = intvec_data.len();
                     intvec_data.extend(set.iter_ones());
-                    distinct_sets_encoded.push
                 }
             }
         }
