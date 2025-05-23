@@ -154,7 +154,7 @@ fn walk_unitig_from(dbg: &Dbg<SubsetMatrix>, mut v: Node, out_labels_buf: &mut V
     (nodes, label)
 }
 
-fn pick_sampled_kmers(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> bitvec::vec::BitVec {
+fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> bitvec::vec::BitVec {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
@@ -210,32 +210,42 @@ impl ColorSets<'_> {
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
 
-        let mut is_dense_marks = bitvec::vec::BitVec::new();
+        let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
         is_dense_marks.resize(sbwt_len, false);
 
-        let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
-        let mut bitvec_data = bitvec::vec::BitVec::new();
+        let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt);
 
-        let mut distinct_sets = std::collections::HashSet::<&BitSlice>::new();
+        let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
+        let mut bitvec_data = bitvec::vec::BitVec::<usize, Lsb0>::new();
+
+        let mut intvec_data_ends = vec![0_usize];
+
+        let mut distinct_sets = std::collections::HashMap::<&BitSlice, usize>::new(); // Set -> id
         for colex in 0..sbwt_len {
             let set = &bm[colex*n_colors .. colex*(n_colors+1)];
-            if !distinct_sets.contains(set) {
-                distinct_sets.insert(set);
+            if !distinct_sets.contains_key(set) {
+                distinct_sets.insert(set, distinct_sets.len());
                 if is_dense(set) {
                     bitvec_data.extend_from_bitslice(set);
-                    let new_bits = &bitvec_data[bitvec_data.len() - n_colors .. bitvec_data.len()];
                 } else {
-                    let old_end = intvec_data.len();
                     intvec_data.extend(set.iter_ones());
+                    intvec_data_ends.push(intvec_data.len());
                 }
             }
         }
 
-        drop(distinct_sets); // Save memory
-
-        // Encode distinct sets
-        for set_idx in 0..n_distinct {
-            let slice = distinct_sets[set_idx];
+        // Store color set pointers only for the sampled nodes
+        let color_set_id_bit_width = distinct_sets.len().next_power_of_two().trailing_zeros() as usize;
+        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
+        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
+        let mut n_ids_stored = 0_usize;
+        for colex in 0..sbwt_len {
+            if sampling_marks[colex] {
+                let set = &bm[colex*n_colors .. colex*(n_colors+1)];
+                let id = distinct_sets[set]; // Should exist in the hash map. Panics if does not exist.
+                sampled_color_set_ids.set(n_ids_stored, id as u64);
+                n_ids_stored += 1;
+            }
         }
 
         todo!();
