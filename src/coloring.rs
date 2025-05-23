@@ -109,7 +109,7 @@ impl BitMaps {
 
 
 
-struct ColorSets<'a> {
+pub struct ColorSets<'a> {
     //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
     bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
     intvecs: IntVecs, // Concatenation of sparse sets as int vecs
@@ -174,7 +174,7 @@ fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<
 }
 
 impl ColorSets<'_> {
-    fn get(&self, colex: usize) -> ColorSet {
+    pub fn get(&self, colex: usize) -> ColorSet {
         if self.sampling.get(colex) {
             // This set is stored
             if self.is_dense_marks.get(colex) {
@@ -203,7 +203,7 @@ impl ColorSets<'_> {
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
     /// - sample_distance: max walk length to the next sampled color set in a unitig 
-    fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
+    pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
         assert_eq!(bm.len() % n_colors, 0);
         let sbwt_len = bm.len() % n_colors;
         assert_eq!(sbwt_len, sbwt.n_sets());

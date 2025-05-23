@@ -270,7 +270,16 @@ pub enum Subcommands {
 
         #[arg(long = "print-kmers", short = 'p', help = "Also print the k-mers on each line")]
         print_kmers: bool,
-    }
+    },
+
+    #[command(arg_required_else_help = true, name = "compress-colors")]
+    CompressColors {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "0")]
+        sample_distance: usize,
+    },
 
 }
 
@@ -483,6 +492,13 @@ fn main() {
                     println!("{}", bitstring);
                 }
             }
+        }
+
+        Subcommands::CompressColors { index: index_path, sample_distance } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            log::info!("Compressing colors");
+            index.compress_colors(sample_distance);
         }
     } 
 }

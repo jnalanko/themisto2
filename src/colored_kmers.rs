@@ -6,7 +6,7 @@ use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, Streaming
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
-use crate::themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index};
+use crate::{coloring::ColorSets, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
 
 #[derive(Debug)]
 pub struct ColoredKmers {
@@ -263,6 +263,10 @@ impl ColoredKmers {
         let max_distinguishing_hits = distinguishing_hit_counts.iter().max().unwrap();
         distinguishing_hit_counts.iter().enumerate().filter(|(_, hits)| **hits > 0).map(|(color, hits)| (color, *hits as f64 / *max_distinguishing_hits as f64)).collect()
 
+    }
+
+    pub fn compress_colors(&self, sample_distance: usize) -> ColorSets {
+        ColorSets::new_from_bitmaps(&self.distinct_color_sets, self.n_colors, sample_distance, &self.kmers)
     }
 }
 
