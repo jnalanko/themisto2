@@ -1,8 +1,9 @@
-use bitvec::{order::Lsb0, slice::BitSlice};
+use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
+use std::hash::{Hash, Hasher};
 
 // This enum is only for passing references to individual sets around.
 enum ColorSet<'a> {
@@ -175,6 +176,26 @@ fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<
     marks
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct BitKey<'a> {
+    pub bits: &'a BitSlice,
+}
+
+impl<'a> Hash for BitKey<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let len = self.bits.len();
+        assert!(
+            len <= usize::BITS as usize,
+            "BitSlice too long to load into usize"
+        );
+
+        let word: usize = self.bits.load();
+        word.hash(state); // hash as an integer
+        len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
+    }
+}
+
+
 impl ColorSets<'_> {
     pub fn get(&self, colex: usize) -> ColorSet {
         if self.sampling.get(colex) {
@@ -197,7 +218,6 @@ impl ColorSets<'_> {
             panic!("Bug in color set sampling: dead end in SBWT graph");
         }
     }
-
 
 
 
@@ -224,12 +244,13 @@ impl ColorSets<'_> {
 
         let mut intvec_data_ends = vec![0_usize];
 
-        let mut distinct_sets = std::collections::HashMap::<&BitSlice, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+        let mut distinct_sets = std::collections::HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
         let bar = indicatif::ProgressBar::new(sbwt_len as u64);
         for colex in 0..sbwt_len {
             let set = &bm[colex*n_colors .. colex*(n_colors+1)];
-            if !distinct_sets.contains_key(set) {
-                distinct_sets.insert(set, distinct_sets.len());
+            let key = BitKey{bits: set};
+            if !distinct_sets.contains_key(&key) {
+                distinct_sets.insert(key, distinct_sets.len());
                 if is_dense(set) {
                     bitvec_data.extend_from_bitslice(set);
                 } else {
@@ -256,7 +277,8 @@ impl ColorSets<'_> {
         for colex in 0..sbwt_len {
             if sampling_marks[colex] {
                 let set = &bm[colex*n_colors .. colex*(n_colors+1)];
-                let id = distinct_sets[set]; // Should exist in the hash map. Panics if does not exist.
+                let key = BitKey{bits: set};
+                let id = distinct_sets[&key]; // Should exist in the hash map. Panics if does not exist.
                 sampled_color_set_ids.set(n_ids_stored, id as u64);
                 n_ids_stored += 1;
             }
