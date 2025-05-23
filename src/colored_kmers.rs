@@ -265,7 +265,8 @@ impl ColoredKmers {
 
     }
 
-    pub fn compress_colors(&self, sample_distance: usize) -> ColorSets {
+    pub fn compress_colors(&mut self, sample_distance: usize) -> ColorSets {
+        self.kmers.build_select();
         ColorSets::new_from_bitmaps(&self.distinct_color_sets, self.n_colors, sample_distance, &self.kmers)
     }
 }

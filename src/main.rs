@@ -496,7 +496,7 @@ fn main() {
 
         Subcommands::CompressColors { index: index_path, sample_distance } => {
             log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
             index.compress_colors(sample_distance);
         }

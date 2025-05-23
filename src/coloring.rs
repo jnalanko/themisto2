@@ -203,6 +203,7 @@ impl ColorSets<'_> {
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
     /// - sample_distance: max walk length to the next sampled color set in a unitig 
+    /// Sbwt needs to have select support!
     pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
         assert_eq!(bm.len() % n_colors, 0);
         let sbwt_len = bm.len() / n_colors;
