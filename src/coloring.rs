@@ -177,12 +177,13 @@ fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct BitKey<'a> {
+pub struct BitKey<'a> { // Bitslice with a custom hash function
     pub bits: &'a BitSlice,
 }
 
 impl Hash for BitKey<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash 64 bits at a time
         let len = self.bits.len();
         let n_words = len.div_ceil(64);
         for i in 0..n_words {
