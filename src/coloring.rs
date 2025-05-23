@@ -205,7 +205,7 @@ impl ColorSets<'_> {
     /// - sample_distance: max walk length to the next sampled color set in a unitig 
     pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
         assert_eq!(bm.len() % n_colors, 0);
-        let sbwt_len = bm.len() % n_colors;
+        let sbwt_len = bm.len() / n_colors;
         assert_eq!(sbwt_len, sbwt.n_sets());
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
