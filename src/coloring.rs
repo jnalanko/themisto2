@@ -240,10 +240,9 @@ impl ColorSets {
     ///   color j is present in set i.
     /// - sample_distance: max walk length to the next sampled color set in a unitig 
     /// Sbwt needs to have select support!
-    pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, map: &ColexToColorSetMap) -> Self {
+    pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize) -> Self {
         assert_eq!(bm.len() % n_colors, 0);
-        let sbwt_len = bm.len() / n_colors;
-        assert_eq!(sbwt_len, map.sbwt_len());
+        let n_sets = bm.len() / n_colors;
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
 
@@ -257,8 +256,8 @@ impl ColorSets {
         let mut intvec_data_ends = vec![0_usize];
 
         let mut distinct_sets = std::collections::HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
-        let bar = indicatif::ProgressBar::new(sbwt_len as u64);
-        for colex in 0..sbwt_len {
+        let bar = indicatif::ProgressBar::new(n_sets as u64);
+        for colex in 0..n_sets {
             let set = &bm[colex*n_colors .. (colex+1)*n_colors];
             let key = BitKey{bits: set};
             if !distinct_sets.contains_key(&key) {
