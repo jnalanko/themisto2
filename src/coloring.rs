@@ -224,6 +224,19 @@ impl<'a> CompactColexColoring<'a> {
 
         Self {sets, map: colex_map}
     }
+
+    pub fn colex_to_set_id(&self, colex: usize) -> usize {
+        self.map.colex_to_color_set_id(colex)
+    }
+
+    pub fn set_id_to_set(&self, id: usize) -> ColorSet<'_>  {
+        self.sets.get(id)
+    }
+
+    pub fn colex_to_set(&self, colex: usize) -> ColorSet<'_> {
+        self.set_id_to_set(self.colex_to_set_id(colex))
+    }
+
 }
 
 #[derive(Debug, Eq, PartialEq)]
