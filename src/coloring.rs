@@ -1,6 +1,6 @@
 use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::AccessRaw};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault};
 use std::hash::{Hash, Hasher};
@@ -246,7 +246,7 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
 
     let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
 
-    let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
+    let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
     log::info!("Hashing distinct color sets");
 
@@ -264,24 +264,39 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
             distinct_sets.insert(key, distinct_sets.len());
             if is_dense(set) {
                 bitvec_data.extend_from_bitslice(set);
-                is_dense_marks.push(true);
+                is_dense_marks.push_bit(true);
             } else {
                 intvec_data.extend(set.iter_ones());
                 intvec_data_ends.push(intvec_data.len());
-                is_dense_marks.push(false);
+                is_dense_marks.push_bit(false);
             }
         }
         if colex % 100 == 0 {
             bar.inc(100);
         }
     }
-    is_dense_marks.shrink_to_fit();
     bar.finish();
+
+    // Add rank support to dense marks
+    log::info!("Building rank support for dense marks");
+    let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+    is_dense_marks.enable_rank();
 
     log::info!("{} distinct color sets found", distinct_sets.len());
     log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
 
-    todo!();
+    let colorsets = ColorSets {
+        is_dense_marks, 
+        bitmaps: BitMaps { 
+            bitmap_data: bitvec_data, 
+            individual_length: n_colors 
+        }, intvecs: IntVecs { 
+            intvec_data, 
+            ends: intvec_data_ends 
+        }
+    };
+
+    (colorsets, distinct_sets)
 }
 
 /*
