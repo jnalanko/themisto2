@@ -230,10 +230,10 @@ impl ColorSets {
     pub fn get(&self, id: usize) -> ColorSet {
         if self.is_dense_marks.get(id) {
             let set_idx = self.is_dense_marks.rank(id);
-            return ColorSet::Dense(&self.bitmaps.get(set_idx));
+            ColorSet::Dense(self.bitmaps.get(set_idx))
         } else {
             let set_idx = self.is_dense_marks.rank_zero(id);
-            return ColorSet::Sparse(self.intvecs.get(set_idx));
+            ColorSet::Sparse(self.intvecs.get(set_idx))
         }
     }
 
