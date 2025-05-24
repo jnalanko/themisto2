@@ -176,7 +176,7 @@ impl<'a> ColexToColorSetMap<'a> {
     fn colex_to_color_set_id(&self, colex: usize) -> usize {
         if self.sampling.get(colex) {
             // This set is stored
-            self.sampling.rank(colex)
+            self.color_set_ids.get(self.sampling.rank(colex)) as usize
         } else {
             // This set is not stored -> walk forward in the de Bruijn graph
             for char_idx in 0..self.sbwt.alphabet().len() {
@@ -261,6 +261,9 @@ impl Hash for BitKey<'_> {
 
 impl ColorSets {
     pub fn get(&self, id: usize) -> ColorSet {
+        eprintln!("id: {}", id);
+        eprintln!("Dense marks length: {}", self.is_dense_marks.len());
+
         if self.is_dense_marks.get(id) {
             let set_idx = self.is_dense_marks.rank(id);
             ColorSet::Dense(self.dense_sets.get(set_idx))
