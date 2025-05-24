@@ -135,7 +135,6 @@ pub struct ColexToColorSetMap<'a> {
     color_set_ids: IntVector, // One color set id for every 1-bit in the sampling
 }
 
-
 impl<'a> ColexToColorSetMap<'a> {
 
     // sets maps from color set to its index in the distinct color sets
@@ -197,6 +196,11 @@ pub struct ColorSets {
     bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
     intvecs: IntVecs, // Concatenation of sparse sets as int vecs
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
+}
+
+pub struct CompactColoring<'a> {
+    sets: ColorSets, // Distinct color sets
+    map: ColexToColorSetMap<'a>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
