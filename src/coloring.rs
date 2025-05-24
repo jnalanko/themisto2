@@ -105,6 +105,10 @@ impl IntVecs {
     fn get(&self, vec_idx: usize) -> IntVecSlice {
         IntVecSlice{vec: &self.intvec_data, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
     }
+
+    fn n_sets(&self) -> usize {
+        self.ends.len() - 1 // minus 1 because there is a 0 at the start of ends
+    }
 }
 
 struct BitMaps {
@@ -128,6 +132,10 @@ impl BitMaps {
 
     fn get(&self, bitmap_idx: usize) -> &BitSlice {
         &self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
+    }
+
+    fn n_sets(&self) -> usize {
+        self.bitmap_data.len() / self.individual_length
     }
 }
 
@@ -275,13 +283,17 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
     }
     bar.finish();
 
+    log::info!("{} distinct color sets found", distinct_sets.len());
+
+    sparse_sets.shrink_to_fit();
+    dense_sets.shrink_to_fit();
+
+    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64);
+
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
     let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
     is_dense_marks.enable_rank();
-
-    log::info!("{} distinct color sets found", distinct_sets.len());
-    log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
 
     let colorsets = ColorSets {
         is_dense_marks, 
