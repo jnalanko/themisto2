@@ -276,8 +276,8 @@ impl ColoredKmers {
     // a mutable borrow, which makes the sbwt reference in the return value also
     // a mutable borrow, which causes problems. I could not find a way to return an
     // immutable borrow.
-    pub fn compress_colors(&self, sample_distance: usize) -> CompactColexColoring {
-        CompactColexColoring::new(&self.kmers, &self.distinct_color_sets, self.n_colors, sample_distance)
+    pub fn compress_colors(&self, sample_distance: usize, n_threads: usize) -> CompactColexColoring {
+        CompactColexColoring::new(&self.kmers, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
     }
 }
 

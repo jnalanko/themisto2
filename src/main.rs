@@ -280,6 +280,9 @@ pub enum Subcommands {
         #[arg(long = "sample-distance", short = 'd', default_value = "0")]
         sample_distance: usize,
 
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
         #[arg(long = "validation-queries", help = "For debugging: checks that the compressed colors match the original colors for all k-mers in the input file.")]
         validation_queries: Option<PathBuf>,
     },
@@ -498,12 +501,12 @@ fn main() {
             }
         }
 
-        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries} => {
+        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads} => {
             log::info!("Loading index");
             let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
             index.build_sbwt_select_support();
-            let compressed = index.compress_colors(sample_distance);
+            let compressed = index.compress_colors(sample_distance, n_threads);
 
             if let Some(validation_queries) = validation_queries {
                 log::info!("Validating compressed colors for {}", validation_queries.display());

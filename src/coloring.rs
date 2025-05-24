@@ -28,7 +28,7 @@ impl ColorSet<'_> {
     }
 }
 
-pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) -> simple_sds_sbwt::bit_vector::BitVector {
+pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
@@ -45,10 +45,10 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
     };
 
     log::info!("Initializing the de Bruijn graph");
-    let dbg = sbwt::dbg::Dbg::new(sbwt, None, 1); // Todo: n_threads
+    let dbg = sbwt::dbg::Dbg::new(sbwt, None, n_threads);
 
     log::info!("Iterating unitigs");
-    dbg.iter_unitigs_with_callback(callback, 1); // Todo: n_threads
+    dbg.iter_unitigs_with_callback(callback, n_threads);
 
     let marks = marks_mutex.into_inner().unwrap();
     let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
@@ -158,10 +158,10 @@ pub struct ColexToColorSetMap<'a> {
 impl<'a> ColexToColorSetMap<'a> {
 
     // sets maps from color set to its index in the distinct color sets
-    fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize) -> Self {
+    fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
         log::info!("Building mapping from colex to color set id");
 
-        let mut sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, sets);
+        let mut sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, sets, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -224,9 +224,9 @@ impl<'a> CompactColexColoring<'a> {
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize) -> Self {
+    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
         let (sets, hashmap) = hash_and_encode_distinct_sets(bm, n_colors);
-        let colex_map = ColexToColorSetMap::new(sbwt, sample_distance, bm, &hashmap, n_colors);
+        let colex_map = ColexToColorSetMap::new(sbwt, sample_distance, bm, &hashmap, n_colors, n_threads);
 
         Self {sets, map: colex_map}
     }
