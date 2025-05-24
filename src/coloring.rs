@@ -28,7 +28,7 @@ impl ColorSet<'_> {
     }
 }
 
-pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
+pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, bitmaps: &BitSlice, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
@@ -39,8 +39,22 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
 
     let callback = |nodes: &[Node], _: &[u8]| {
         let mut marks = marks_mutex_borrow.lock().unwrap();
-        for node in nodes {
-            marks.set_bit(node.id, true);
+
+        let mut prev_set: Option<&BitSlice> = None;
+        let mut prev_sample_pos = usize::MAX;
+        for (v_pos, v) in nodes.iter().enumerate().rev() {
+            let colex = v.id; 
+            let cur_set = &bitmaps[colex*n_colors..(colex+1)*n_colors];
+
+            // Sample this node if any of the following are true:
+            // - v is the last node of the unitig
+            // - v has a different color set than the previous node in iteration order 
+            // - v is far enough for the previous sampled node 
+            if prev_set.is_none() || cur_set != prev_set.unwrap() || prev_sample_pos - v_pos >= sample_distance {
+                marks.set_bit(colex, true);
+                prev_sample_pos = v_pos;
+            }
+            prev_set = Some(cur_set);
         }
     };
 
@@ -161,7 +175,7 @@ impl<'a> ColexToColorSetMap<'a> {
     fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
         log::info!("Building mapping from colex to color set id");
 
-        let mut sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, sets, n_threads);
+        let mut sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, sets, color_bitmap, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order

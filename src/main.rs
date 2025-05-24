@@ -277,7 +277,7 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "sample-distance", short = 'd', default_value = "0")]
+        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
         sample_distance: usize,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
