@@ -290,7 +290,8 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
         bitmaps: BitMaps { 
             bitmap_data: bitvec_data, 
             individual_length: n_colors 
-        }, intvecs: IntVecs { 
+        }, 
+        intvecs: IntVecs { 
             intvec_data, 
             ends: intvec_data_ends 
         }
