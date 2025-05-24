@@ -28,6 +28,25 @@ impl ColorSet<'_> {
     }
 }
 
+pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, color_bitmap: &bitvec::vec::BitVec) -> bitvec::vec::BitVec {
+    // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
+    
+    // TODO: for now, just mark every non-dummy node.
+    log::info!("WARNING: unitig sampling not implement, marking all nodes instead");
+
+    let dbg = sbwt::dbg::Dbg::new(&sbwt, None, 1); // Todo: n_threads
+
+    let mut marks = bitvec::vec::BitVec::new();
+    marks.resize(sbwt.n_sets(), false);
+    for node in dbg.node_iterator() {
+        marks.set(node.id, true);
+    }
+
+    log::info!("Unitig sampling finished");
+
+    marks
+}
+
 fn is_dense(bv: &BitSlice) -> bool {
     let n_colors = bv.len();
     let n_elements = bv.count_ones();
@@ -157,24 +176,6 @@ fn walk_unitig_from(dbg: &Dbg<SubsetMatrix>, mut v: Node, out_labels_buf: &mut V
     (nodes, label)
 }
 
-fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> bitvec::vec::BitVec {
-    // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
-    
-    // TODO: for now, just mark every non-dummy node.
-    log::info!("WARNING: unitig sampling not implement, marking all nodes instead");
-
-    let dbg = sbwt::dbg::Dbg::new(&sbwt, None, 1); // Todo: n_threads
-
-    let mut marks = bitvec::vec::BitVec::new();
-    marks.resize(sbwt.n_sets(), false);
-    for node in dbg.node_iterator() {
-        marks.set(node.id, true);
-    }
-
-    log::info!("Unitig sampling finished");
-
-    marks
-}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct BitKey<'a> { // Bitslice with a custom hash function
@@ -237,7 +238,7 @@ impl ColorSets<'_> {
         let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
         is_dense_marks.resize(sbwt_len, false);
 
-        let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt);
+        let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, bm);
         log::info!("Hashing distinct color sets");
 
         let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();

@@ -279,6 +279,9 @@ pub enum Subcommands {
 
         #[arg(long = "sample-distance", short = 'd', default_value = "0")]
         sample_distance: usize,
+
+        #[arg(long = "validation-queries", help = "For debugging: checks that the compressed colors match the original colors for all k-mers in the input file.")]
+        validation_queries: Option<PathBuf>,
     },
 
 }
@@ -494,11 +497,19 @@ fn main() {
             }
         }
 
-        Subcommands::CompressColors { index: index_path, sample_distance } => {
+        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries} => {
             log::info!("Loading index");
             let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
             index.compress_colors(sample_distance);
+
+            if let Some(validation_queries) = validation_queries {
+                log::info!("Validating compressed colors for {}", validation_queries.display());
+                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
+                while let Some(rec) = reader.read_next().unwrap() {
+                    todo!(); // WIP 
+                }
+            }
         }
     } 
 }
