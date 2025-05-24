@@ -501,14 +501,27 @@ fn main() {
             log::info!("Loading index");
             let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
-            index.compress_colors(sample_distance);
+            index.build_sbwt_select_support();
+            let compressed = index.compress_colors(sample_distance);
 
             if let Some(validation_queries) = validation_queries {
                 log::info!("Validating compressed colors for {}", validation_queries.display());
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
                 while let Some(rec) = reader.read_next().unwrap() {
-                    todo!(); // WIP 
+                    for kmer in rec.seq.windows(index.get_k()) {
+                        let old_set: Vec<usize> = index.get_color_set(kmer).iter_ones().collect();
+
+                        let colex_range = index.sbwt().search(kmer);
+                        let mut new_set = Vec::<usize>::new();
+                        if let Some(colex_range) = colex_range {
+                            assert!(colex_range.len() == 1);
+                            compressed.colex_to_set(colex_range.start).push_colors(&mut new_set)
+                        }
+
+                        assert_eq!(old_set, new_set);
+                    }
                 }
+                log::info!("All sets match");
             }
         }
     } 

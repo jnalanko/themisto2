@@ -7,13 +7,13 @@ use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault};
 use std::hash::{Hash, Hasher};
 
 // This enum is only for passing references to individual sets around.
-enum ColorSet<'a> {
+pub enum ColorSet<'a> {
     Dense(&'a BitSlice),
     Sparse(IntVecSlice<'a>),
 }
 
 impl ColorSet<'_> {
-    fn push_colors(&self, buf: &mut Vec<usize>) {
+    pub fn push_colors(&self, buf: &mut Vec<usize>) {
         match self {
             ColorSet::Dense(bv) => {
                 for i in bv.iter_ones() {

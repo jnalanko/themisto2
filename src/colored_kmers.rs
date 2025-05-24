@@ -1,4 +1,4 @@
-use std::{io::BufRead, ops::DerefMut, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{io::BufRead, ops::{DerefMut, Sub}, path::{Path, PathBuf}, sync::{Arc, Mutex}};
 
 use clap::builder::styling::Color;
 use crossbeam::channel::{Receiver, RecvError, Sender};
@@ -265,8 +265,20 @@ impl ColoredKmers {
 
     }
 
-    pub fn compress_colors(&mut self, sample_distance: usize) -> CompactColexColoring {
+    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
+        &self.kmers
+    }
+
+    pub fn build_sbwt_select_support(&mut self) {
         self.kmers.build_select();
+    }
+
+    // Requires that build_sbwt_select_support has been called before.
+    // We can't call it here because then then we would need to take self as
+    // a mutable borrow, which makes the sbwt reference in the return value also
+    // a mutable borrow, which causes problems. I could not find a way to return an
+    // immutable borrow.
+    pub fn compress_colors(&self, sample_distance: usize) -> CompactColexColoring {
         CompactColexColoring::new(&self.kmers, &self.distinct_color_sets, self.n_colors, sample_distance)
     }
 }
