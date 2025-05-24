@@ -198,7 +198,7 @@ pub struct ColorSets {
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
 }
 
-pub struct CompactColoring<'a> {
+pub struct CompactColexColoring<'a> {
     sets: ColorSets, // Distinct color sets
     map: ColexToColorSetMap<'a>,
 }
