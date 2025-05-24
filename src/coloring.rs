@@ -49,7 +49,7 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
             // Sample this node if any of the following are true:
             // - v is the last node of the unitig
             // - v has a different color set than the previous node in iteration order 
-            // - v is far enough for the previous sampled node 
+            // - v is far enough from the previous sampled node 
             if prev_set.is_none() || cur_set != prev_set.unwrap() || prev_sample_pos - v_pos >= sample_distance {
                 marks.set_bit(colex, true);
                 prev_sample_pos = v_pos;
