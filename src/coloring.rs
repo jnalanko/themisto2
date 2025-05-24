@@ -1,6 +1,6 @@
-use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
+use bitvec::{field::BitField, order::Lsb0, slice::BitSlice, vec::BitVec};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
 use std::{cmp::min, hash::BuildHasherDefault};
 use std::hash::{Hash, Hasher};
@@ -28,7 +28,7 @@ impl ColorSet<'_> {
     }
 }
 
-pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, color_bitmap: &bitvec::vec::BitVec) -> bitvec::vec::BitVec {
+pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &std::collections::HashMap<&BitSlice, usize>) -> simple_sds_sbwt::bit_vector::BitVector {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
@@ -36,12 +36,12 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
 
     let dbg = sbwt::dbg::Dbg::new(&sbwt, None, 1); // Todo: n_threads
 
-    let mut marks = bitvec::vec::BitVec::new();
-    marks.resize(sbwt.n_sets(), false);
+    let mut marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
     for node in dbg.node_iterator() {
-        marks.set(node.id, true);
+        marks.set_bit(node.id, true);
     }
 
+    let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
     log::info!("Unitig sampling finished");
 
     marks
@@ -131,10 +131,40 @@ impl BitMaps {
 
 pub struct ColexToColorSetMap<'a> {
     sbwt: &'a SbwtIndex<SubsetMatrix>,
-    sampling: simple_sds_sbwt::bit_vector::BitVector // Marks colex ranks that have a color set stored. Has rank support.
+    sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
+    color_set_ids: IntVector, // One color set id for every 1-bit in the sampling
 }
 
-impl ColexToColorSetMap<'_> {
+
+impl<'a> ColexToColorSetMap<'a> {
+
+    // sets maps from color set to its index in the distinct color sets
+    fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &std::collections::HashMap<&BitKey, usize>, n_colors: usize) -> Self {
+        log::info!("Building mapping from colex to color set id");
+
+        let mut sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, sets);
+
+        let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
+        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
+        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
+        let mut n_ids_stored = 0_usize;
+        for colex in 0..sbwt.n_sets() {
+            if sampling_marks[colex] {
+                let set = &color_bitmap[colex*n_colors .. (colex+1)*n_colors];
+                let key = BitKey{bits: set};
+                let id = sets[&key]; // Should exist in the hash map. Panics if does not exist.
+                sampled_color_set_ids.set(n_ids_stored, id as u64);
+                n_ids_stored += 1;
+            }
+        }
+
+        log::info!("Building rank support for marks");
+        sampling_marks.enable_rank();
+
+
+        Self{sbwt, sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
+    }
+
     fn colex_to_color_set_id(&self, colex: usize) -> usize {
         if self.sampling.get(colex) {
             // This set is stored
@@ -248,23 +278,6 @@ impl ColorSets {
 
         log::info!("{} distinct color sets found", distinct_sets.len());
         log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
-
-        log::info!("Storing color set pointers for sampled nodes");
-
-        // Store color set pointers only for the sampled nodes
-        let color_set_id_bit_width = distinct_sets.len().next_power_of_two().trailing_zeros() as usize;
-        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
-        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
-        let mut n_ids_stored = 0_usize;
-        for colex in 0..sbwt_len {
-            if sampling_marks[colex] {
-                let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-                let key = BitKey{bits: set};
-                let id = distinct_sets[&key]; // Should exist in the hash map. Panics if does not exist.
-                sampled_color_set_ids.set(n_ids_stored, id as u64);
-                n_ids_stored += 1;
-            }
-        }
 
         log::info!("Color compression finished");
         todo!();
