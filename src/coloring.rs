@@ -1,4 +1,5 @@
 use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
+use clap::error::KindFormatter;
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
@@ -90,9 +91,10 @@ impl IntVecs {
         IntVecs{intvec_data: IntVector::new(bit_width).unwrap(), ends: vec![0]}
     }
 
-    fn push(&mut self, vec: &IntVector) {
-        assert_eq!(vec.width(), self.intvec_data.width());
-        self.intvec_data.extend(vec.iter());
+    fn push(&mut self, set: impl IntoIterator<Item = usize>) { // Pushes a new set of integers
+        for x in set {
+            self.intvec_data.push(x as u64);
+        }
         self.ends.push(self.intvec_data.len());
     }
 
@@ -115,7 +117,7 @@ impl BitMaps {
         BitMaps{bitmap_data: bitvec::vec::BitVec::new(), individual_length}
     }
 
-    fn push(&mut self, bv: bitvec::vec::BitVec) {
+    fn push(&mut self, bv: &bitvec::slice::BitSlice) {
         assert_eq!(bv.len(), self.individual_length);
         self.bitmap_data.extend_from_bitslice(&bv);
     }
@@ -250,11 +252,8 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
 
     log::info!("Hashing distinct color sets");
 
-    let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
-    let mut bitvec_data = bitvec::vec::BitVec::<usize, Lsb0>::new();
-
-    let mut intvec_data_ends = vec![0_usize];
-
+    let mut sparse_sets = IntVecs::new(color_id_bit_width);
+    let mut dense_sets = BitMaps::new(n_colors);
     let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
     let bar = indicatif::ProgressBar::new(n_sets as u64);
     for colex in 0..n_sets {
@@ -263,11 +262,10 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
         if !distinct_sets.contains_key(&key) {
             distinct_sets.insert(key, distinct_sets.len());
             if is_dense(set) {
-                bitvec_data.extend_from_bitslice(set);
+                dense_sets.push(&set);
                 is_dense_marks.push_bit(true);
             } else {
-                intvec_data.extend(set.iter_ones());
-                intvec_data_ends.push(intvec_data.len());
+                sparse_sets.push(set.iter_ones());
                 is_dense_marks.push_bit(false);
             }
         }
