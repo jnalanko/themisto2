@@ -31,8 +31,6 @@ impl ColorSet<'_> {
 pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, bitmaps: &BitSlice, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
-    // TODO: for now, just mark every non-dummy node.
-    log::info!("WARNING: unitig sampling not implemented, marking all nodes instead");
     let marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
     let marks_mutex = Mutex::new(marks); // Need thread-safe modifications
     let marks_mutex_borrow = &marks_mutex; // Passed into the callback
