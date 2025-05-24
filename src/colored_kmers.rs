@@ -1,12 +1,10 @@
-use std::{io::BufRead, ops::{DerefMut, Sub}, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
 
-use clap::builder::styling::Color;
 use crossbeam::channel::{Receiver, RecvError, Sender};
-use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, SubsetSeq};
+use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
-use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
-use crate::{coloring::{ColorSets, CompactColexColoring}, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
+use crate::{coloring::CompactColexColoring, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
 
 #[derive(Debug)]
 pub struct ColoredKmers {
@@ -461,7 +459,7 @@ mod tests {
         let red_and_blue_and_green_seq: &[u8] = b"CCGTTATCGGCCTATACTATCGACTACGTAGC";
         let k = 12; // Let's hope I didn't accidentally repeat any kmers
 
-        let all_seqs: &[&[u8]] = &[&red_seq, &blue_seq, &green_seq, &uncolored_seq, &red_and_blue_seq, &red_and_blue_and_green_seq];
+        let all_seqs: &[&[u8]] = &[red_seq, blue_seq, green_seq, uncolored_seq, red_and_blue_seq, red_and_blue_and_green_seq];
         let distinct_color_sets = bitvec![0,0,0, 1,0,0, 0,1,0, 0,0,1, 1,1,0, 1,1,1];
         let seq_color_set_ids: Vec<usize> = vec![1, 2, 3, 0, 4, 5];
 

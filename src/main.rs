@@ -1,8 +1,8 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{cmp::max, fs::File, io::{BufRead, BufReader, BufWriter}, ops::Sub, path::PathBuf, str::FromStr};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf};
 use bitvec::prelude::*;
-use clap::{builder::PossibleValuesParser, Parser, Subcommand, ValueEnum};
+use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 use compatibility_criteria::unique_support_combination_method;
 
@@ -395,6 +395,7 @@ fn main() {
 
             let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
+            #[allow(clippy::type_complexity)] // Is fine, stop complaining
             let likelihood_function: Box<dyn Fn(&[f64]) -> Vec<f64>> = match likelihood_type.as_str() { // Takes a row of scores, returns a row of likelihoods. That is, f: R^n -> R^n, where n is the number of colors
                 "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
                 "99p" => Box::new(|v: &[f64]| {

@@ -1,7 +1,6 @@
-use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
-use clap::error::KindFormatter;
-use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
+use bitvec::{field::BitField, slice::BitSlice};
+use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault};
 use std::hash::{Hash, Hasher};
@@ -123,7 +122,7 @@ impl BitMaps {
 
     fn push(&mut self, bv: &bitvec::slice::BitSlice) {
         assert_eq!(bv.len(), self.individual_length);
-        self.bitmap_data.extend_from_bitslice(&bv);
+        self.bitmap_data.extend_from_bitslice(bv);
     }
 
     fn shrink_to_fit(&mut self) {
@@ -134,6 +133,7 @@ impl BitMaps {
         &self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
     }
 
+    #[allow(dead_code)]
     fn n_sets(&self) -> usize {
         self.bitmap_data.len() / self.individual_length
     }
@@ -187,10 +187,6 @@ impl<'a> ColexToColorSetMap<'a> {
             }
             panic!("Bug in color set sampling: dead end in SBWT graph");
         }
-    }
-
-    fn sbwt_len(&self) -> usize {
-        self.sbwt.n_sets()
     }
 
     fn serialize(&self, out: &mut impl std::io::Write) {
@@ -274,6 +270,7 @@ impl ColorSets {
 /// Input: 
 /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
 ///   color j is present in set i.
+/// 
 /// Output:
 /// - Distinct color sets encoded as ColorSets
 /// - HashMap from color set to its index in ColorSets
@@ -297,7 +294,7 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
         if !distinct_sets.contains_key(&key) {
             distinct_sets.insert(key, distinct_sets.len());
             if is_dense(set) {
-                dense_sets.push(&set);
+                dense_sets.push(set);
                 is_dense_marks.push_bit(true);
             } else {
                 sparse_sets.push(set.iter_ones());
