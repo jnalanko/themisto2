@@ -129,17 +129,45 @@ impl BitMaps {
     }
 }
 
-
-
-pub struct ColorSets<'a> {
-    //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
-    bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
-    intvecs: IntVecs, // Concatenation of sparse sets as int vecs
-    is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
+pub struct ColexToColorSetMap<'a> {
     sbwt: &'a SbwtIndex<SubsetMatrix>,
     sampling: simple_sds_sbwt::bit_vector::BitVector // Marks colex ranks that have a color set stored. Has rank support.
 }
 
+impl ColexToColorSetMap<'_> {
+    fn colex_to_color_set_id(&self, colex: usize) -> usize {
+        if self.sampling.get(colex) {
+            // This set is stored
+            self.sampling.rank(colex)
+        } else {
+            // This set is not stored -> walk forward in the de Bruijn graph
+            for char_idx in 0..self.sbwt.alphabet().len() {
+                if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
+                    let new_colex = self.sbwt.lf_step(colex, char_idx);
+                    return self.colex_to_color_set_id(new_colex); // Todo: no recursion
+                }
+            }
+            panic!("Bug in color set sampling: dead end in SBWT graph");
+        }
+    }
+
+    fn serialize(&self, out: &mut impl std::io::Write) {
+        todo!();
+    }
+
+    fn load(&self, input: &mut impl std::io::Read, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
+        todo!();
+    }
+}
+
+pub struct ColorSets {
+    //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
+    bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
+    intvecs: IntVecs, // Concatenation of sparse sets as int vecs
+    is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
+}
+
+/*
 fn is_first_kmer_of_unitig(dbg: &Dbg<SubsetMatrix>, v: Node) -> bool {
     if dbg.indegree(v) > 1 {
         return true;
@@ -175,7 +203,7 @@ fn walk_unitig_from(dbg: &Dbg<SubsetMatrix>, mut v: Node, out_labels_buf: &mut V
 
     (nodes, label)
 }
-
+*/
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct BitKey<'a> { // Bitslice with a custom hash function
@@ -198,30 +226,16 @@ impl Hash for BitKey<'_> {
 }
 
 
-impl ColorSets<'_> {
-    pub fn get(&self, colex: usize) -> ColorSet {
-        if self.sampling.get(colex) {
-            // This set is stored
-            if self.is_dense_marks.get(colex) {
-                let set_idx = self.is_dense_marks.rank(colex);
-                return ColorSet::Dense(&self.bitmaps.get(set_idx));
-            } else {
-                let set_idx = self.is_dense_marks.rank_zero(colex);
-                return ColorSet::Sparse(self.intvecs.get(set_idx));
-            }
+impl ColorSets {
+    pub fn get(&self, id: usize) -> ColorSet {
+        if self.is_dense_marks.get(id) {
+            let set_idx = self.is_dense_marks.rank(id);
+            return ColorSet::Dense(&self.bitmaps.get(set_idx));
         } else {
-            // This set is not stored -> walk forward in the de Bruijn graph
-            for char_idx in 0..self.sbwt.alphabet().len() {
-                if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
-                    let new_colex = self.sbwt.lf_step(colex, char_idx);
-                    return self.get(new_colex);
-                }
-            }
-            panic!("Bug in color set sampling: dead end in SBWT graph");
+            let set_idx = self.is_dense_marks.rank_zero(id);
+            return ColorSet::Sparse(self.intvecs.get(set_idx));
         }
     }
-
-
 
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
@@ -237,6 +251,7 @@ impl ColorSets<'_> {
 
         let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
         is_dense_marks.resize(sbwt_len, false);
+        todo!(); // is_dense marks should have length equal to number of distince sets
 
         let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, bm);
         log::info!("Hashing distinct color sets");
