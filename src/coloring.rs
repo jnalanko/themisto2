@@ -80,7 +80,7 @@ struct IntVecs {
     ends: Vec<usize>, 
 }
 
-struct IntVecSlice<'a> {
+pub struct IntVecSlice<'a> {
     vec: &'a IntVector,
     start: usize,
     end: usize, // Exclusive end
