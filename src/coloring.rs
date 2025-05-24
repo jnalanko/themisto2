@@ -66,6 +66,10 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
 
     let marks = marks_mutex.into_inner().unwrap();
     let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
+
+    let n_sampled = marks.count_ones();
+    log::info!("Sampled {} out of {} k-mers ({:.2}%)", n_sampled, sbwt.n_kmers(), n_sampled as f64 / sbwt.n_kmers() as f64 * 100.0);
+
     log::info!("Unitig sampling finished");
 
     marks
