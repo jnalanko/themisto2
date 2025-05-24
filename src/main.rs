@@ -519,7 +519,7 @@ fn main() {
                         let mut new_set = Vec::<usize>::new();
                         if let Some(colex_range) = colex_range {
                             assert!(colex_range.len() == 1);
-                            compressed.colex_to_set(colex_range.start).push_colors(&mut new_set)
+                            compressed.colex_to_set(colex_range.start).extract_and_push_colors_to(&mut new_set)
                         }
 
                         assert_eq!(old_set, new_set);
