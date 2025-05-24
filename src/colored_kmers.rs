@@ -6,7 +6,7 @@ use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, Streaming
 use bitvec::prelude::*;
 use simple_sds_sbwt::{self, raw_vector::AccessRaw};
 
-use crate::{coloring::ColorSets, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
+use crate::{coloring::{ColorSets, CompactColexColoring}, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
 
 #[derive(Debug)]
 pub struct ColoredKmers {
@@ -265,9 +265,9 @@ impl ColoredKmers {
 
     }
 
-    pub fn compress_colors(&mut self, sample_distance: usize) -> ColorSets {
+    pub fn compress_colors(&mut self, sample_distance: usize) -> CompactColexColoring {
         self.kmers.build_select();
-        ColorSets::new_from_bitmaps(&self.distinct_color_sets, self.n_colors, sample_distance, &self.kmers)
+        CompactColexColoring::new(&self.kmers, &self.distinct_color_sets, self.n_colors, sample_distance)
     }
 }
 

@@ -218,7 +218,7 @@ impl<'a> CompactColexColoring<'a> {
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize) -> Self {
+    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize) -> Self {
         let (sets, hashmap) = hash_and_encode_distinct_sets(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt, sample_distance, bm, &hashmap, n_colors);
 
