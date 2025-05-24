@@ -1,4 +1,4 @@
-use bitvec::{field::BitField, order::Lsb0, slice::BitSlice, vec::BitVec};
+use bitvec::{field::BitField, order::Lsb0, slice::BitSlice};
 use sbwt::{dbg::{Dbg, Node}, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Pack, Push, Rank, Resize, Vector}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
@@ -149,7 +149,7 @@ impl<'a> ColexToColorSetMap<'a> {
         sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
         let mut n_ids_stored = 0_usize;
         for colex in 0..sbwt.n_sets() {
-            if sampling_marks[colex] {
+            if sampling_marks.get(colex) {
                 let set = &color_bitmap[colex*n_colors .. (colex+1)*n_colors];
                 let key = BitKey{bits: set};
                 let id = sets[&key]; // Should exist in the hash map. Panics if does not exist.
