@@ -261,9 +261,6 @@ impl Hash for BitKey<'_> {
 
 impl ColorSets {
     pub fn get(&self, id: usize) -> ColorSet {
-        eprintln!("id: {}", id);
-        eprintln!("Dense marks length: {}", self.is_dense_marks.len());
-
         if self.is_dense_marks.get(id) {
             let set_idx = self.is_dense_marks.rank(id);
             ColorSet::Dense(self.dense_sets.get(set_idx))
