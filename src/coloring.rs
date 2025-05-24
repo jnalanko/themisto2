@@ -28,7 +28,7 @@ impl ColorSet<'_> {
     }
 }
 
-pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &std::collections::HashMap<&BitSlice, usize>) -> simple_sds_sbwt::bit_vector::BitVector {
+pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, sets: &std::collections::HashMap<&BitKey, usize>) -> simple_sds_sbwt::bit_vector::BitVector {
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
@@ -158,9 +158,8 @@ impl<'a> ColexToColorSetMap<'a> {
             }
         }
 
-        log::info!("Building rank support for marks");
+        log::info!("Building rank support for sampling marks");
         sampling_marks.enable_rank();
-
 
         Self{sbwt, sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
     }
