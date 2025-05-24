@@ -302,7 +302,7 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
     sparse_sets.shrink_to_fit();
     dense_sets.shrink_to_fit();
 
-    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64);
+    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64 * 100.0);
 
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
