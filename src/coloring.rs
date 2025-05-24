@@ -248,8 +248,9 @@ impl ColorSets {
 /// Input: 
 /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
 ///   color j is present in set i.
-/// - sample_distance: max walk length to the next sampled color set in a unitig 
-/// Sbwt needs to have select support!
+/// Output:
+/// - Distinct color sets encoded as ColorSets
+/// - HashMap from color set to its index in ColorSets
 pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) -> (ColorSets, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
     assert_eq!(bm.len() % n_colors, 0);
     let n_sets = bm.len() / n_colors;
