@@ -259,6 +259,10 @@ impl<'a> CompactColexColoring<'a> {
         self.set_id_to_set(self.colex_to_set_id(colex))
     }
 
+    pub fn merge<'b>(left: CompactColexColoring<'a>, right: CompactColexColoring<'a>) -> (CompactColexColoring<'b>, SbwtIndex<SubsetMatrix>) {
+        todo!();
+    }
+
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -354,5 +358,4 @@ impl ColorSets {
 
         (colorsets, distinct_sets)
     }
-
 }
