@@ -1,8 +1,8 @@
 use bitvec::{field::BitField, slice::BitSlice};
-use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
+use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
-use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault};
+use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
 // This enum is only for passing references to individual sets around.
@@ -32,15 +32,25 @@ pub fn pick_sampled_kmers(n_colors: usize, sample_distance: usize, sbwt: &SbwtIn
     // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
     
     // TODO: for now, just mark every non-dummy node.
-    log::info!("WARNING: unitig sampling not implement, marking all nodes instead");
+    log::info!("WARNING: unitig sampling not implemented, marking all nodes instead");
+    let marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
+    let marks_mutex = Mutex::new(marks); // Need thread-safe modifications
+    let marks_mutex_borrow = &marks_mutex; // Passed into the callback
 
-    let dbg = sbwt::dbg::Dbg::new(&sbwt, None, 1); // Todo: n_threads
+    let callback = |nodes: &[Node], _: &[u8]| {
+        let mut marks = marks_mutex_borrow.lock().unwrap();
+        for node in nodes {
+            marks.set_bit(node.id, true);
+        }
+    };
 
-    let mut marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
-    for node in dbg.node_iterator() {
-        marks.set_bit(node.id, true);
-    }
+    log::info!("Initializing the de Bruijn graph");
+    let dbg = sbwt::dbg::Dbg::new(sbwt, None, 1); // Todo: n_threads
 
+    log::info!("Iterating unitigs");
+    dbg.iter_unitigs_with_callback(callback, 1); // Todo: n_threads
+
+    let marks = marks_mutex.into_inner().unwrap();
     let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
     log::info!("Unitig sampling finished");
 

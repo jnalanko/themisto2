@@ -544,6 +544,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbd780fe5cc30f81464441920d82ac8740e2e46b29a6fad543ddd075229ce37e"
 
 [[package]]
+name = "human_bytes"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91f255a4535024abf7640cb288260811fc14794f62b063652ed349f9a6c2348e"
+
+[[package]]
 name = "humantime"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1177,9 +1183,9 @@ dependencies = [
 
 [[package]]
 name = "sbwt"
-version = "0.3.7"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e219311585d5daa4b8ab7d29b3e5623f54b68b3bfefb704ecf7eb2fbfc76f1a"
+checksum = "4cfb040f5e152ba6729c2a239bc53b8dcf45a06d2f7c07996275f39ec325fbe0"
 dependencies = [
  "bitvec",
  "byteorder",
@@ -1188,12 +1194,14 @@ dependencies = [
  "crossbeam 0.5.0",
  "embed-doc-image",
  "env_logger 0.10.2",
+ "human_bytes",
  "jseqio",
  "log",
  "num",
  "rand 0.7.3",
  "rayon",
  "read_exact",
+ "serde",
  "simple-sds-sbwt",
  "test-log",
  "unitig_flipper",
