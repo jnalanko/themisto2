@@ -151,6 +151,10 @@ impl ColexToColorSetMap<'_> {
         }
     }
 
+    fn sbwt_len(&self) -> usize {
+        self.sbwt.n_sets()
+    }
+
     fn serialize(&self, out: &mut impl std::io::Write) {
         todo!();
     }
@@ -161,10 +165,110 @@ impl ColexToColorSetMap<'_> {
 }
 
 pub struct ColorSets {
-    //sets: Vec<ColorSet<'a>>, // Lifetime 'a points to bitmap_data and intvec_data
     bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
     intvecs: IntVecs, // Concatenation of sparse sets as int vecs
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct BitKey<'a> { // Bitslice with a custom hash function
+    pub bits: &'a BitSlice,
+}
+
+impl Hash for BitKey<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash 64 bits at a time
+        let len = self.bits.len();
+        let n_words = len.div_ceil(64);
+        for i in 0..n_words {
+            let start = 64*i;
+            let end = min(64*(i+1), len);
+            let word: u64 = self.bits[start..end].load();
+            word.hash(state);
+        }
+        len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
+    }
+}
+
+
+impl ColorSets {
+    pub fn get(&self, id: usize) -> ColorSet {
+        if self.is_dense_marks.get(id) {
+            let set_idx = self.is_dense_marks.rank(id);
+            ColorSet::Dense(self.bitmaps.get(set_idx))
+        } else {
+            let set_idx = self.is_dense_marks.rank_zero(id);
+            ColorSet::Sparse(self.intvecs.get(set_idx))
+        }
+    }
+
+    /// Input: 
+    /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
+    ///   color j is present in set i.
+    /// - sample_distance: max walk length to the next sampled color set in a unitig 
+    /// Sbwt needs to have select support!
+    pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, map: &ColexToColorSetMap) -> Self {
+        assert_eq!(bm.len() % n_colors, 0);
+        let sbwt_len = bm.len() / n_colors;
+        assert_eq!(sbwt_len, map.sbwt_len());
+
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+
+        let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
+
+        log::info!("Hashing distinct color sets");
+
+        let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
+        let mut bitvec_data = bitvec::vec::BitVec::<usize, Lsb0>::new();
+
+        let mut intvec_data_ends = vec![0_usize];
+
+        let mut distinct_sets = std::collections::HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+        let bar = indicatif::ProgressBar::new(sbwt_len as u64);
+        for colex in 0..sbwt_len {
+            let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+            let key = BitKey{bits: set};
+            if !distinct_sets.contains_key(&key) {
+                distinct_sets.insert(key, distinct_sets.len());
+                if is_dense(set) {
+                    bitvec_data.extend_from_bitslice(set);
+                    is_dense_marks.push(true);
+                } else {
+                    intvec_data.extend(set.iter_ones());
+                    intvec_data_ends.push(intvec_data.len());
+                    is_dense_marks.push(false);
+                }
+            }
+            if colex % 100 == 0 {
+                bar.inc(100);
+            }
+        }
+        is_dense_marks.shrink_to_fit();
+        bar.finish();
+
+        log::info!("{} distinct color sets found", distinct_sets.len());
+        log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
+
+        log::info!("Storing color set pointers for sampled nodes");
+
+        // Store color set pointers only for the sampled nodes
+        let color_set_id_bit_width = distinct_sets.len().next_power_of_two().trailing_zeros() as usize;
+        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
+        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
+        let mut n_ids_stored = 0_usize;
+        for colex in 0..sbwt_len {
+            if sampling_marks[colex] {
+                let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+                let key = BitKey{bits: set};
+                let id = distinct_sets[&key]; // Should exist in the hash map. Panics if does not exist.
+                sampled_color_set_ids.set(n_ids_stored, id as u64);
+                n_ids_stored += 1;
+            }
+        }
+
+        log::info!("Color compression finished");
+        todo!();
+    }
 }
 
 /*
@@ -204,104 +308,3 @@ fn walk_unitig_from(dbg: &Dbg<SubsetMatrix>, mut v: Node, out_labels_buf: &mut V
     (nodes, label)
 }
 */
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct BitKey<'a> { // Bitslice with a custom hash function
-    pub bits: &'a BitSlice,
-}
-
-impl Hash for BitKey<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // Hash 64 bits at a time
-        let len = self.bits.len();
-        let n_words = len.div_ceil(64);
-        for i in 0..n_words {
-            let start = 64*i;
-            let end = min(64*(i+1), len);
-            let word: u64 = self.bits[start..end].load();
-            word.hash(state);
-        }
-        len.hash(state);  // include length to distinguish e.g. 0b1 from 0b10
-    }
-}
-
-
-impl ColorSets {
-    pub fn get(&self, id: usize) -> ColorSet {
-        if self.is_dense_marks.get(id) {
-            let set_idx = self.is_dense_marks.rank(id);
-            ColorSet::Dense(self.bitmaps.get(set_idx))
-        } else {
-            let set_idx = self.is_dense_marks.rank_zero(id);
-            ColorSet::Sparse(self.intvecs.get(set_idx))
-        }
-    }
-
-    /// Input: 
-    /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
-    ///   color j is present in set i.
-    /// - sample_distance: max walk length to the next sampled color set in a unitig 
-    /// Sbwt needs to have select support!
-    pub fn new_from_bitmaps(bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
-        assert_eq!(bm.len() % n_colors, 0);
-        let sbwt_len = bm.len() / n_colors;
-        assert_eq!(sbwt_len, sbwt.n_sets());
-
-        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-        let mut is_dense_marks = bitvec::vec::BitVec::<usize, Lsb0>::new();
-        is_dense_marks.resize(sbwt_len, false);
-        todo!(); // is_dense marks should have length equal to number of distince sets
-
-        let sampling_marks = pick_sampled_kmers(n_colors, sample_distance, sbwt, bm);
-        log::info!("Hashing distinct color sets");
-
-        let mut intvec_data = IntVector::new(color_id_bit_width).unwrap();
-        let mut bitvec_data = bitvec::vec::BitVec::<usize, Lsb0>::new();
-
-        let mut intvec_data_ends = vec![0_usize];
-
-        let mut distinct_sets = std::collections::HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
-        let bar = indicatif::ProgressBar::new(sbwt_len as u64);
-        for colex in 0..sbwt_len {
-            let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-            let key = BitKey{bits: set};
-            if !distinct_sets.contains_key(&key) {
-                distinct_sets.insert(key, distinct_sets.len());
-                if is_dense(set) {
-                    bitvec_data.extend_from_bitslice(set);
-                } else {
-                    intvec_data.extend(set.iter_ones());
-                    intvec_data_ends.push(intvec_data.len());
-                }
-            }
-            if colex % 100 == 0 {
-                bar.inc(100);
-            }
-        }
-        bar.finish();
-
-        log::info!("{} distinct color sets found", distinct_sets.len());
-        log::info!("{} of the sets are sparse ({}%)", intvec_data_ends.len() - 1, (intvec_data_ends.len() - 1) as f64 / distinct_sets.len() as f64 * 100.0 );
-
-        log::info!("Storing color set pointers for sampled nodes");
-
-        // Store color set pointers only for the sampled nodes
-        let color_set_id_bit_width = distinct_sets.len().next_power_of_two().trailing_zeros() as usize;
-        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
-        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
-        let mut n_ids_stored = 0_usize;
-        for colex in 0..sbwt_len {
-            if sampling_marks[colex] {
-                let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-                let key = BitKey{bits: set};
-                let id = distinct_sets[&key]; // Should exist in the hash map. Panics if does not exist.
-                sampled_color_set_ids.set(n_ids_stored, id as u64);
-                n_ids_stored += 1;
-            }
-        }
-
-        log::info!("Color compression finished");
-        todo!();
-    }
-}
