@@ -107,7 +107,7 @@ impl IntVecs {
     }
 
     fn n_sets(&self) -> usize {
-        self.ends.len() - 1 // minus 1 because there is a 0 at the start of ends
+        self.ends.len() - 1 // Minus 1 because there is a 0 at the start of ends
     }
 }
 
@@ -203,8 +203,8 @@ impl<'a> ColexToColorSetMap<'a> {
 }
 
 pub struct ColorSets {
-    bitmaps: BitMaps,// Concatenation of dense sets as bitmaps
-    intvecs: IntVecs, // Concatenation of sparse sets as int vecs
+    dense_sets: BitMaps,
+    sparse_sets: IntVecs,
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
 }
 
@@ -237,10 +237,10 @@ impl ColorSets {
     pub fn get(&self, id: usize) -> ColorSet {
         if self.is_dense_marks.get(id) {
             let set_idx = self.is_dense_marks.rank(id);
-            ColorSet::Dense(self.bitmaps.get(set_idx))
+            ColorSet::Dense(self.dense_sets.get(set_idx))
         } else {
             let set_idx = self.is_dense_marks.rank_zero(id);
-            ColorSet::Sparse(self.intvecs.get(set_idx))
+            ColorSet::Sparse(self.sparse_sets.get(set_idx))
         }
     }
 }
@@ -297,14 +297,8 @@ pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) 
 
     let colorsets = ColorSets {
         is_dense_marks, 
-        bitmaps: BitMaps { 
-            bitmap_data: bitvec_data, 
-            individual_length: n_colors 
-        }, 
-        intvecs: IntVecs { 
-            intvec_data, 
-            ends: intvec_data_ends 
-        }
+        sparse_sets,
+        dense_sets
     };
 
     (colorsets, distinct_sets)
