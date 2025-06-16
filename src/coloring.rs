@@ -95,7 +95,7 @@ impl ColorSet<'_> {
                 (*bv).into()
             },
             ColorSet::Sparse(iv) => {
-                let bv = bitvec![0; self.len()];
+                let mut bv = bitvec![0; self.len()];
                 for i in iv.start..iv.end {
                     bv.set(iv.vec.get(i) as usize, true);
                 }
