@@ -3,6 +3,7 @@ use bitvec::bitvec;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
+use std::cmp::max;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
@@ -397,7 +398,7 @@ impl ColorSets {
     }
 }
 
-fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) {
+fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring {
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::merge::MergeInterleaving::new(coloring1.map.sbwt, coloring2.map.sbwt, optimize_peak_ram, n_threads);
 
@@ -460,8 +461,11 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
         colex1 += merge_plan.s1[merged_colex] as usize;
         colex2 += merge_plan.s1[merged_colex] as usize;
-
     }
+
+    let color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
+    let n_sampled = color_set_sample_marks.count_ones();
+    log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Constructing distinct merged color sets");
     let mut id_pairs: Vec<_> = distinct_ids.into_iter().collect();
@@ -558,10 +562,18 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
         n_colors
     };
 
+    log::info!("Interleaving SBWTs");
+    let precalc_len = max(coloring1.map.sbwt.get_lookup_table().prefix_length, coloring2.map.sbwt.get_lookup_table().prefix_length);
+    let sbwt1 = coloring1.map.sbwt.clone(); // Todo: avoid clone. Currently unavoidable because we have just a reference to the SBWT. 
+    drop(coloring1);
 
-    //let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
-    //let n_sampled = marks.count_ones();
-    //log::info!("Sampled {} out of {} k-mers ({:.2}%)", n_sampled, sbwt.n_kmers(), n_sampled as f64 / sbwt.n_kmers() as f64 * 100.0);
-    //log::info!("Unitig sampling finished");
+    let sbwt2 = coloring2.map.sbwt.clone(); // Todo: avoid clone
+    drop(coloring2);
+
+    let merged_sbwt = SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
+    let new_color_set_ids = IntVector::new(64).unwrap(); // TODO
+    todo!(); // See line above
+
+    CompactColexColoring { sets: colorsets, map: ColexToColorSetMap{sbwt: &merged_sbwt, sampling: color_set_sample_marks, color_set_ids: new_color_set_ids} }
 
 }
