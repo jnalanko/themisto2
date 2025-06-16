@@ -431,7 +431,9 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
     let mut id_pairs: Vec<_> = distinct_ids.into_iter().collect();
     id_pairs.sort_unstable();
 
-    let n_colors = coloring1.sets.n_colors + coloring2.sets.n_colors;
+    let n_colors_1 = coloring1.sets.n_colors;
+    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors = n_colors_1 + n_colors_2;
     let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
 
     let mut sparse_sets = IntVecs::new(bits_per_color);
@@ -447,10 +449,10 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
                 if n_elements * bits_per_color > n_colors {
                     // Dense set -> encode as bitmap
-                    let mut bv = bitvec::vec::BitVec::with_capacity(n_colors);
-                    bv.extend_from_bitslice(&set1.as_bitvec());
-                    bv.extend_from_bitslice(&set2.as_bitvec());
-                    dense_sets.push(&bv);
+                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
+                    concat.extend_from_bitslice(&set1.as_bitvec());
+                    concat.extend_from_bitslice(&set2.as_bitvec());
+                    dense_sets.push(&concat);
                     is_dense_marks.push_bit(true);
                 } else {
                     // Sparse set -> encode as integers
@@ -458,37 +460,44 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
                     concat.extend(set1.as_intvec());
 
                     // Offset the colors of the second set by the number of colors in the first
-                    concat.extend(set2.as_intvec().iter().map(|x| x + coloring1.sets.n_colors));
+                    concat.extend(set2.as_intvec().iter().map(|x| x + n_colors_1));
 
                     sparse_sets.push(concat);
                     is_dense_marks.push_bit(false);
                 }
             },
             (Some(x), None) => {
-                let set = coloring1.set_id_to_set(x);
-                let n_elements = set.len();
+                let set1 = coloring1.set_id_to_set(x);
+                let n_elements = set1.len();
                 if n_elements * bits_per_color > n_colors {
                     // Dense
-                    dense_sets.push(&set.as_bitvec());
+                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
+                    concat.extend_from_bitslice(&set1.as_bitvec());
+                    concat.extend_from_bitslice(&bitvec![0; n_colors_2]);
+
+                    dense_sets.push(&concat);
                     is_dense_marks.push_bit(true);
                 } else {
                     // Sparse
-                    sparse_sets.push(set.as_intvec());
+                    sparse_sets.push(set1.as_intvec());
                     is_dense_marks.push_bit(false);
                 }
 
             },
             (None, Some(y)) => {
-                // This repeats most code from the previous match arm but whatever
-                let set = coloring2.set_id_to_set(y);
-                let n_elements = set.len();
+                let set2 = coloring2.set_id_to_set(y);
+                let n_elements = set2.len();
                 if n_elements * bits_per_color > n_colors {
                     // Dense
-                    dense_sets.push(&set.as_bitvec());
+                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
+                    concat.extend_from_bitslice(&bitvec![0; n_colors_1]);
+                    concat.extend_from_bitslice(&set2.as_bitvec());
+
+                    dense_sets.push(&concat);
                     is_dense_marks.push_bit(true);
                 } else {
                     // Sparse
-                    sparse_sets.push(set.as_intvec().iter().map(|x| x + coloring1.sets.n_colors));
+                    sparse_sets.push(set2.as_intvec().iter().map(|x| x + n_colors_1));
                     is_dense_marks.push_bit(false);
                 }
             }
