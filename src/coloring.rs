@@ -505,5 +505,23 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
         }
     }
 
+    sparse_sets.shrink_to_fit();
+    dense_sets.shrink_to_fit();
+
+    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
+
+    // Add rank support to dense marks
+    log::info!("Building rank support for dense marks");
+    let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+    is_dense_marks.enable_rank();
+
+    let colorsets = ColorSets {
+        is_dense_marks, 
+        sparse_sets,
+        dense_sets,
+        n_colors
+    };
+
+    // Todo: unitig sampling
 
 }
