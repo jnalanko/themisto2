@@ -447,7 +447,8 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
                 if n_elements * bits_per_color > n_colors {
                     // Dense set -> encode as bitmap
-                    let mut bv = set1.as_bitvec();
+                    let mut bv = bitvec::vec::BitVec::with_capacity(n_colors);
+                    bv.extend_from_bitslice(&set1.as_bitvec());
                     bv.extend_from_bitslice(&set2.as_bitvec());
                     dense_sets.push(&bv);
                     is_dense_marks.push_bit(true);
