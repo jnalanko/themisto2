@@ -97,7 +97,7 @@ impl ColorSet<'_> {
             ColorSet::Sparse(iv) => {
                 let bv = bitvec![0; self.len()];
                 for i in iv.start..iv.end {
-                    bv[iv.vec.get(i) as usize] = 1;
+                    bv.set(iv.vec.get(i) as usize, true);
                 }
                 bv
             },
@@ -408,23 +408,59 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
     let mut distinct_ids = std::collections::HashSet::<(Option<usize>, Option<usize>)>::new();
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
+
+    let mut color_set_sample_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(merged_len, false);
+    let dbg1 = sbwt::dbg::Dbg::new(coloring1.map.sbwt, None, n_threads);
+    let dbg2 = sbwt::dbg::Dbg::new(coloring2.map.sbwt, None, n_threads);
+    let mut outlabel_buf_1 = Vec::<u8>::new();
+    let mut outlabel_buf_2 = Vec::<u8>::new();
+
     for merged_colex in 0..merged_len {
-        let color_set_id_1 = if merge_plan.s1[merged_colex] {
+        let color_set_id_1 = if merge_plan.s1[merged_colex] &&  coloring1.map.sampling.get(colex1){
             Some(coloring1.colex_to_set_id(colex1))
         } else {
             None
         };
 
-        let color_set_id_2 = if merge_plan.s2[merged_colex] {
+        let color_set_id_2 = if merge_plan.s2[merged_colex] &&  coloring2.map.sampling.get(colex2){
             Some(coloring2.colex_to_set_id(colex2))
         } else {
             None
         };
 
-        distinct_ids.insert((color_set_id_1, color_set_id_2));
+        if color_set_id_1.is_some() || color_set_id_2.is_some() {
+            distinct_ids.insert((color_set_id_1, color_set_id_2));
+            color_set_sample_marks.set_bit(merged_colex, true);
+        } else if merge_plan.s1[merged_colex] && merge_plan.s2[merged_colex] {
+            // K-mer is in both SBWTs but its not sampled in either one.
+            // Since it is not sampled in either SBWT, the outdegree of this k-mer
+            // is 1 in both. But we might still need to sample it in the merged graph.
+            // There are two cases:
+            // 1) The outneighbor k-mers are the same k-mer. Then the outdegree in the merged graph 
+            //    will be 1, and that outneighbor will have the same color set id pair as this
+            //    one -> this node does not need to be sampled
+            // 2) The outneighbor k-mers are different. Now we have a new outgoing branch at this 
+            //    node. Which means this node needs to be sampled.
+
+            outlabel_buf_1.clear();
+            outlabel_buf_2.clear();
+            dbg1.push_outlabels(Node{id: colex1}, &mut outlabel_buf_1);
+            dbg2.push_outlabels(Node{id: colex2}, &mut outlabel_buf_2);
+            assert_eq!(outlabel_buf_1.len(), 1);
+            assert_eq!(outlabel_buf_2.len(), 1);
+            match (outlabel_buf_1.first(), outlabel_buf_2.first()) {
+                (Some(a), Some(b)) => {
+                    if a != b { // Case 2 in the comment above
+                        color_set_sample_marks.set_bit(merged_colex, true);
+                    } // The else-branch would be case 1 but then there is nothing to do
+                }
+                _ => panic!("Bug at computing color set samples bit vector in merge") // Both should have outdegree > 0
+            }
+        }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
         colex2 += merge_plan.s1[merged_colex] as usize;
+
     }
 
     log::info!("Constructing distinct merged color sets");
@@ -522,6 +558,10 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
         n_colors
     };
 
-    // Todo: unitig sampling
+
+    //let marks = simple_sds_sbwt::bit_vector::BitVector::from(marks);
+    //let n_sampled = marks.count_ones();
+    //log::info!("Sampled {} out of {} k-mers ({:.2}%)", n_sampled, sbwt.n_kmers(), n_sampled as f64 / sbwt.n_kmers() as f64 * 100.0);
+    //log::info!("Unitig sampling finished");
 
 }
