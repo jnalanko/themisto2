@@ -61,6 +61,7 @@ pub enum ColorSet<'a> {
 }
 
 impl ColorSet<'_> {
+
     pub fn extract_and_push_colors_to(&self, buf: &mut Vec<usize>) {
         match self {
             ColorSet::Dense(bv) => {
@@ -446,16 +447,48 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
                 if n_elements * bits_per_color > n_colors {
                     // Dense set -> encode as bitmap
-                    dense_sets.push(...)
+                    let mut bv = set1.as_bitvec();
+                    bv.extend_from_bitslice(&set2.as_bitvec());
+                    dense_sets.push(&bv);
                     is_dense_marks.push_bit(true);
                 } else {
-                    sparse_sets.push(set.iter_ones());
+                    // Sparse set -> encode as integers
+                    let mut concat = Vec::<usize>::with_capacity(set1.len() + set2.len());
+                    concat.extend(set1.as_intvec());
+                    concat.extend(set2.as_intvec());
+                    sparse_sets.push(concat);
                     is_dense_marks.push_bit(false);
                 }
             },
-            (Some(x), None) => (),
-            (None, Some(y)) => (),
-            (None, None) => (),
+            (Some(x), None) => {
+                let set = coloring1.set_id_to_set(x);
+                let n_elements = set.len();
+                if n_elements * bits_per_color > n_colors {
+                    // Dense
+                    dense_sets.push(&set.as_bitvec());
+                    is_dense_marks.push_bit(true);
+                } else {
+                    // Sparse
+                    sparse_sets.push(set.as_intvec());
+                    is_dense_marks.push_bit(false);
+                }
+
+            },
+            (None, Some(y)) => {
+                // This repeats code from the previous match arm but whatever
+                let set = coloring2.set_id_to_set(y);
+                let n_elements = set.len();
+                if n_elements * bits_per_color > n_colors {
+                    // Dense
+                    dense_sets.push(&set.as_bitvec());
+                    is_dense_marks.push_bit(true);
+                } else {
+                    // Sparse
+                    sparse_sets.push(set.as_intvec());
+                    is_dense_marks.push_bit(false);
+                }
+            }
+            (None, None) => panic!("Nonexisting color set id pair")
         }
     }
 
