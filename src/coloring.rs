@@ -456,7 +456,10 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
                     // Sparse set -> encode as integers
                     let mut concat = Vec::<usize>::with_capacity(set1.len() + set2.len());
                     concat.extend(set1.as_intvec());
-                    concat.extend(set2.as_intvec());
+
+                    // Offset the colors of the second set by the number of colors in the first
+                    concat.extend(set2.as_intvec().iter().map(|x| x + coloring1.sets.n_colors));
+
                     sparse_sets.push(concat);
                     is_dense_marks.push_bit(false);
                 }
