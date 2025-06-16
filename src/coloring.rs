@@ -359,3 +359,8 @@ impl ColorSets {
         (colorsets, distinct_sets)
     }
 }
+
+fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring) {
+    log::info!("Computing the sbwt merge plan");
+
+}

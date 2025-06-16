@@ -1,0 +1,4 @@
+[submodule "sbwt-rs-cli"]
+	path = sbwt-rs-cli
+	url = https://github.com/jnalanko/sbwt-rs-cli
+	branch = sbwt-merge-segmentation
