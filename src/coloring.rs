@@ -1,4 +1,5 @@
 use bitvec::{field::BitField, slice::BitSlice};
+use bitvec::bitvec;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
@@ -18,6 +19,7 @@ pub struct CompactColexColoring<'a> {
 pub struct ColorSets {
     dense_sets: BitMaps,
     sparse_sets: IntVecs,
+    n_colors: usize,
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
 }
 
@@ -72,6 +74,39 @@ impl ColorSet<'_> {
                 }
             },
         }
+    }
+
+    // Number of elements in the set
+    pub fn len(&self) -> usize {
+        match self {
+            ColorSet::Dense(bv) => {
+                bv.count_ones()
+            },
+            ColorSet::Sparse(iv) => {
+                iv.end - iv.start
+            },
+        }
+    }
+
+    pub fn as_bitvec(&self) -> bitvec::vec::BitVec {
+        match self {
+            ColorSet::Dense(bv) => {
+                (*bv).into()
+            },
+            ColorSet::Sparse(iv) => {
+                let bv = bitvec![0; self.len()];
+                for i in iv.start..iv.end {
+                    bv[iv.vec.get(i) as usize] = 1;
+                }
+                bv
+            },
+        }
+    }
+
+    pub fn as_intvec(&self) -> Vec<usize> {
+        let mut buf = Vec::<usize>::with_capacity(self.len());
+        self.extract_and_push_colors_to(&mut buf);
+        buf
     }
 }
 
@@ -353,14 +388,76 @@ impl ColorSets {
         let colorsets = ColorSets {
             is_dense_marks, 
             sparse_sets,
-            dense_sets
+            dense_sets,
+            n_colors
         };
 
         (colorsets, distinct_sets)
     }
 }
 
-fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring) {
+fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) {
     log::info!("Computing the sbwt merge plan");
+    let merge_plan = sbwt::merge::MergeInterleaving::new(coloring1.map.sbwt, coloring2.map.sbwt, optimize_peak_ram, n_threads);
+
+    assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
+    let merged_len = merge_plan.s1.len();    
+
+    log::info!("Hashing distinct color set id pairs");
+    let mut distinct_ids = std::collections::HashSet::<(Option<usize>, Option<usize>)>::new();
+    let mut colex1 = 0_usize;
+    let mut colex2 = 0_usize;
+    for merged_colex in 0..merged_len {
+        let color_set_id_1 = if merge_plan.s1[merged_colex] {
+            Some(coloring1.colex_to_set_id(colex1))
+        } else {
+            None
+        };
+
+        let color_set_id_2 = if merge_plan.s2[merged_colex] {
+            Some(coloring2.colex_to_set_id(colex2))
+        } else {
+            None
+        };
+
+        distinct_ids.insert((color_set_id_1, color_set_id_2));
+
+        colex1 += merge_plan.s1[merged_colex] as usize;
+        colex2 += merge_plan.s1[merged_colex] as usize;
+    }
+
+    log::info!("Constructing distinct merged color sets");
+    let mut id_pairs: Vec<_> = distinct_ids.into_iter().collect();
+    id_pairs.sort_unstable();
+
+    let n_colors = coloring1.sets.n_colors + coloring2.sets.n_colors;
+    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+
+    let mut sparse_sets = IntVecs::new(bits_per_color);
+    let mut dense_sets = BitMaps::new(n_colors);
+    let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
+
+    for (left, right) in id_pairs.into_iter() {
+        match (left,right) {
+            (Some(x), Some(y)) => {
+                let set1 = coloring1.set_id_to_set(x);
+                let set2 = coloring2.set_id_to_set(y);
+                let n_elements = set1.len() + set2.len();
+
+                if n_elements * bits_per_color > n_colors {
+                    // Dense set -> encode as bitmap
+                    dense_sets.push(...)
+                    is_dense_marks.push_bit(true);
+                } else {
+                    sparse_sets.push(set.iter_ones());
+                    is_dense_marks.push_bit(false);
+                }
+            },
+            (Some(x), None) => (),
+            (None, Some(y)) => (),
+            (None, None) => (),
+        }
+    }
+
 
 }
