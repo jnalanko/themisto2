@@ -479,7 +479,7 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
             },
             (None, Some(y)) => {
-                // This repeats code from the previous match arm but whatever
+                // This repeats most code from the previous match arm but whatever
                 let set = coloring2.set_id_to_set(y);
                 let n_elements = set.len();
                 if n_elements * bits_per_color > n_colors {
@@ -488,7 +488,7 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
                     is_dense_marks.push_bit(true);
                 } else {
                     // Sparse
-                    sparse_sets.push(set.as_intvec());
+                    sparse_sets.push(set.as_intvec().iter().map(|x| x + coloring1.sets.n_colors));
                     is_dense_marks.push_bit(false);
                 }
             }
