@@ -1,6 +1,7 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
+use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
 use std::cmp::max;
@@ -115,6 +116,7 @@ impl ColorSet<'_> {
         self.extract_and_push_colors_to(&mut buf);
         buf
     }
+
 }
 
 fn is_dense(bv: &BitSlice) -> bool {
@@ -150,6 +152,21 @@ impl IntVecs {
     fn n_sets(&self) -> usize {
         self.ends.len() - 1 // Minus 1 because there is a 0 at the start of ends
     }
+
+    fn serialize(&self, out: &mut impl std::io::Write) {
+        // Serialize using bincode
+        self.intvec_data.serialize(out).unwrap();
+        bincode::serialize_into(out, &self.ends).unwrap();
+    }
+
+    fn load(input: &mut impl std::io::Read) -> Self {
+        // Deserialize using bincode
+        let intvec_data = IntVector::load(input).unwrap();
+        let ends: Vec<usize> = bincode::deserialize_from(input).unwrap();
+        assert!(!ends.is_empty() && ends[0] == 0); // The first end must be 0
+        IntVecs{intvec_data, ends}
+    }
+
 }
 
 
@@ -174,6 +191,20 @@ impl BitMaps {
     #[allow(dead_code)]
     fn n_sets(&self) -> usize {
         self.bitmap_data.len() / self.individual_length
+    }
+
+    pub fn serialize(&self, out: &mut impl std::io::Write) {
+        // Serialize using bincode
+        bincode::serialize_into(out.by_ref(), &self.bitmap_data).unwrap();
+        bincode::serialize_into(out.by_ref(), &self.individual_length).unwrap();
+    }
+
+    pub fn load(input: &mut impl std::io::Read) -> Self {
+        // Deserialize using bincode
+        let bitmap_data: bitvec::vec::BitVec = bincode::deserialize_from(input.by_ref()).unwrap();
+        let individual_length: usize = bincode::deserialize_from(input.by_ref()).unwrap();
+        assert!(individual_length > 0);
+        BitMaps{bitmap_data, individual_length}
     }
 }
 
@@ -221,12 +252,19 @@ impl ColexToColorSetMap {
         }
     }
 
-    fn serialize(&self, out: &mut impl std::io::Write) {
-        todo!();
+    pub fn serialize(&self, out: &mut impl std::io::Write) {
+        self.sampling.serialize(out).unwrap();
+        self.color_set_ids.serialize(out).unwrap();
     }
 
-    fn load(&self, input: &mut impl std::io::Read, sbwt: &SbwtIndex<SubsetMatrix>) -> Self {
-        todo!();
+    pub fn load(input: &mut impl std::io::Read, sbwt: Arc<SbwtIndex<SubsetMatrix>>) -> Self {
+        let sampling = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
+        let color_set_ids = IntVector::load(input).unwrap();
+
+        assert_eq!(sampling.len(), sbwt.n_sets());
+        assert_eq!(color_set_ids.len(), sampling.count_ones());
+
+        Self{sbwt: sbwt.clone(), sampling, color_set_ids}
     }
 
     /// Utility function used in construction
@@ -299,6 +337,17 @@ impl CompactColexColoring {
 
     pub fn colex_to_set(&self, colex: usize) -> ColorSet<'_> {
         self.set_id_to_set(self.colex_to_set_id(colex))
+    }
+
+    pub fn serialize(&self, out: &mut impl std::io::Write) {
+        self.sets.serialize(out);
+        self.map.serialize(out);
+    }
+
+    pub fn load(input: &mut impl std::io::Read, sbwt: Arc<SbwtIndex<SubsetMatrix>>) -> Self {
+        let sets = ColorSets::load(input);
+        let map = ColexToColorSetMap::load(input, sbwt);
+        CompactColexColoring{sets, map}
     }
 
 }
@@ -396,6 +445,26 @@ impl ColorSets {
         };
 
         (colorsets, distinct_sets)
+    }
+
+    pub fn serialize(&self, out: &mut impl std::io::Write) {
+        bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
+        self.is_dense_marks.serialize(out).unwrap();
+        self.sparse_sets.serialize(out);
+        self.dense_sets.serialize(out);
+    }
+
+    pub fn load(input: &mut impl std::io::Read) -> Self {
+        let n_colors: usize = bincode::deserialize_from(input.by_ref()).unwrap();
+        let is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
+        let sparse_sets = IntVecs::load(input);
+        let dense_sets = BitMaps::load(input);
+
+        assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
+        assert_eq!(n_colors, dense_sets.individual_length);
+        assert!(sparse_sets.intvec_data.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
+
+        ColorSets{is_dense_marks, sparse_sets, dense_sets, n_colors}
     }
 }
 
