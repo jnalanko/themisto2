@@ -1,10 +1,11 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf, sync::Arc};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 use compatibility_criteria::unique_support_combination_method;
+use sbwt::{SbwtIndex, SubsetMatrix};
 
 mod EM;
 mod colored_kmers;
@@ -290,6 +291,21 @@ pub enum Subcommands {
         validation_queries: Option<PathBuf>,
     },
 
+    #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
+    MergeCompressedIndexes {
+        #[arg(long = "index1", required = true)]
+        index1_file: PathBuf,
+
+        #[arg(long = "index2", required = true)]
+        index2_file: PathBuf,
+
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
+
 }
 
 
@@ -502,8 +518,7 @@ fn main() {
                     println!("{}", bitstring);
                 }
             }
-        }
-
+        },
         Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads, outfile} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
 
@@ -516,7 +531,8 @@ fn main() {
                 let compressed = index.clone().compress_colors(sample_distance, n_threads);
 
                 log::info!("Serializing to {}", outfile.display());
-                compressed.serialize(&mut out);
+                index.sbwt().serialize(&mut out).unwrap(); // SBWT
+                compressed.serialize(&mut out); // Colors
 
                 log::info!("Validating compressed colors for {}", validation_queries.display());
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
@@ -536,11 +552,37 @@ fn main() {
                 }
                 log::info!("All sets match");
             } else {
+                log::info!("Copying SBWT to {}", outfile.display());
+                index.sbwt().serialize(&mut out).unwrap(); // SBWT
+
                 let compressed = index.compress_colors(sample_distance, n_threads);
-                log::info!("Serializing to {}", outfile.display());
-                compressed.serialize(&mut out);
+                log::info!("Serializing colors to {}", outfile.display());
+                compressed.serialize(&mut out); // Colors
                 log::info!("Finished");
             }
+        },
+        Subcommands::MergeCompressedIndexes{ index1_file, index2_file, n_threads, outfile} => {
+            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
+
+            log::info!("Loading index 1");
+            let mut in1 = &mut BufReader::new(File::open(index1_file).unwrap());
+            let sbwt1 = Arc::new(SbwtIndex::<SubsetMatrix>::load(&mut in1).unwrap()); 
+            let colors1 = coloring::CompactColexColoring::load(&mut in1, sbwt1.clone());
+
+            log::info!("Loading index 2");
+            let mut in2 = &mut BufReader::new(File::open(index2_file).unwrap());
+            let sbwt2 = Arc::new(SbwtIndex::<SubsetMatrix>::load(&mut in2).unwrap()); 
+            let colors2 = coloring::CompactColexColoring::load(&mut in2, sbwt2.clone());
+
+            log::info!("Merging");
+            let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, true, n_threads);
+
+            log::info!("Serializing");
+            merged_sbwt.serialize(&mut out).unwrap();
+            merged_colors.serialize(&mut out);
+
+            log::info!("Finished");
+
         }
     } 
 }

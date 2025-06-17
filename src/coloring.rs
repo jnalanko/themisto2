@@ -468,7 +468,7 @@ impl ColorSets {
     }
 }
 
-fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
 
