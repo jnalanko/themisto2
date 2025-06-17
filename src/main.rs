@@ -503,12 +503,13 @@ fn main() {
 
         Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads} => {
             log::info!("Loading index");
-            let mut index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
-            index.build_sbwt_select_support();
-            let compressed = index.compress_colors(sample_distance, n_threads);
 
             if let Some(validation_queries) = validation_queries {
+                // Clone the original index before construction to be able to compare to it
+                let compressed = index.clone().compress_colors(sample_distance, n_threads);
+
                 log::info!("Validating compressed colors for {}", validation_queries.display());
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
                 while let Some(rec) = reader.read_next().unwrap() {
@@ -526,7 +527,10 @@ fn main() {
                     }
                 }
                 log::info!("All sets match");
+            } else {
+                let compressed = index.compress_colors(sample_distance, n_threads);
             }
+            // Todo: serialize
         }
     } 
 }

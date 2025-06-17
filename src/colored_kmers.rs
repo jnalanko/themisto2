@@ -6,7 +6,7 @@ use bitvec::prelude::*;
 
 use crate::{coloring::CompactColexColoring, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ColoredKmers {
     kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
     lcs: sbwt::LcsArray,
@@ -271,13 +271,10 @@ impl ColoredKmers {
         self.kmers.build_select();
     }
 
-    // Requires that build_sbwt_select_support has been called before.
-    // We can't call it here because then then we would need to take self as
-    // a mutable borrow, which makes the sbwt reference in the return value also
-    // a mutable borrow, which causes problems. I could not find a way to return an
-    // immutable borrow.
-    pub fn compress_colors(&self, sample_distance: usize, n_threads: usize) -> CompactColexColoring {
-        CompactColexColoring::new(&self.kmers, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
+    pub fn compress_colors(mut self, sample_distance: usize, n_threads: usize) -> CompactColexColoring {
+        self.build_sbwt_select_support(); // Required in the compactification
+        let sbwt = Arc::new(self.kmers); // Move to heap
+        CompactColexColoring::new(sbwt, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
     }
 }
 
