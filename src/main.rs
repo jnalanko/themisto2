@@ -566,13 +566,15 @@ fn main() {
 
             log::info!("Loading index 1");
             let mut in1 = &mut BufReader::new(File::open(index1_file).unwrap());
-            let sbwt1 = Arc::new(SbwtIndex::<SubsetMatrix>::load(&mut in1).unwrap()); 
-            let colors1 = coloring::CompactColexColoring::load(&mut in1, sbwt1.clone());
+            let mut sbwt1 = SbwtIndex::<SubsetMatrix>::load(&mut in1).unwrap(); 
+            sbwt1.build_select();
+            let colors1 = coloring::CompactColexColoring::load(&mut in1, Arc::new(sbwt1));
 
             log::info!("Loading index 2");
             let mut in2 = &mut BufReader::new(File::open(index2_file).unwrap());
-            let sbwt2 = Arc::new(SbwtIndex::<SubsetMatrix>::load(&mut in2).unwrap()); 
-            let colors2 = coloring::CompactColexColoring::load(&mut in2, sbwt2.clone());
+            let mut sbwt2 = SbwtIndex::<SubsetMatrix>::load(&mut in2).unwrap(); 
+            sbwt2.build_select();
+            let colors2 = coloring::CompactColexColoring::load(&mut in2, Arc::new(sbwt2));
 
             log::info!("Merging");
             let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, true, n_threads);
