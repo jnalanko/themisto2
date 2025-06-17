@@ -1,19 +1,19 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use rand::seq::index::sample;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
 use std::cmp::max;
+use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
-pub struct CompactColexColoring<'a> {
+pub struct CompactColexColoring {
     sets: ColorSets, // Distinct color sets
-    map: ColexToColorSetMap<'a>, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
+    map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
 }
 
 /// A data structure for storing arbitary set of sets of integers, such that dense
@@ -28,8 +28,12 @@ pub struct ColorSets {
 /// A data structure that stores the color set ids for a subset of sampled k-mers in the SBWT such that
 /// the color sets of the rest can be obtained by walking forward in the de Bruijn graph to the
 /// closest sampled node.
-pub struct ColexToColorSetMap<'a> {
-    sbwt: &'a SbwtIndex<SubsetMatrix>,
+pub struct ColexToColorSetMap {
+
+    // This is reference-counted so that the merge function can return a new SBWT and a new mapping referring to it.
+    // It's atomic in because we want to support sharing between threads for parallel queries.
+    sbwt: Arc<SbwtIndex<SubsetMatrix>>,
+
     sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
     color_set_ids: IntVector, // One color set id for every 1-bit in the sampling
 }
@@ -173,13 +177,13 @@ impl BitMaps {
     }
 }
 
-impl<'a> ColexToColorSetMap<'a> {
+impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
-    fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
+    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
         log::info!("Building mapping from colex to color set id");
 
-        let mut sampling_marks = Self::pick_sampled_kmers(n_colors, sample_distance, sbwt, color_bitmap, n_threads);
+        let mut sampling_marks = Self::pick_sampled_kmers(n_colors, sample_distance, &(*sbwt), color_bitmap, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -273,12 +277,12 @@ impl<'a> ColexToColorSetMap<'a> {
 
 }
 
-impl<'a> CompactColexColoring<'a> {
+impl CompactColexColoring {
 
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
         let (sets, hashmap) = ColorSets::hash_and_encode_distinct_sets(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt, sample_distance, bm, &hashmap, n_colors, n_threads);
 
@@ -295,10 +299,6 @@ impl<'a> CompactColexColoring<'a> {
 
     pub fn colex_to_set(&self, colex: usize) -> ColorSet<'_> {
         self.set_id_to_set(self.colex_to_set_id(colex))
-    }
-
-    pub fn merge<'b>(left: CompactColexColoring<'a>, right: CompactColexColoring<'a>) -> (CompactColexColoring<'b>, SbwtIndex<SubsetMatrix>) {
-        todo!();
     }
 
 }
@@ -399,9 +399,9 @@ impl ColorSets {
     }
 }
 
-fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring {
+fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
     log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::merge::MergeInterleaving::new(coloring1.map.sbwt, coloring2.map.sbwt, optimize_peak_ram, n_threads);
+    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
 
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();    
@@ -417,8 +417,8 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
     let mut colex2 = 0_usize;
 
     let mut color_set_sample_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(merged_len, false);
-    let dbg1 = sbwt::dbg::Dbg::new(coloring1.map.sbwt, None, n_threads);
-    let dbg2 = sbwt::dbg::Dbg::new(coloring2.map.sbwt, None, n_threads);
+    let dbg1 = sbwt::dbg::Dbg::new(&(*coloring1.map.sbwt), None, n_threads);
+    let dbg2 = sbwt::dbg::Dbg::new(&(*coloring2.map.sbwt), None, n_threads);
     let mut outlabel_buf_1 = Vec::<u8>::new();
     let mut outlabel_buf_2 = Vec::<u8>::new();
 
@@ -595,15 +595,24 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
     log::info!("Interleaving SBWTs");
     let precalc_len = max(coloring1.map.sbwt.get_lookup_table().prefix_length, coloring2.map.sbwt.get_lookup_table().prefix_length);
-    let sbwt1 = coloring1.map.sbwt.clone(); // Todo: avoid clone. Currently unavoidable because we have just a reference to the SBWT. 
+
+    let sbwt1 = (*coloring1.map.sbwt).clone(); // Todo: avoid clone. Currently unavoidable because we have just a reference to the SBWT, but the merge needs an owned value.
     drop(coloring1);
 
-    let sbwt2 = coloring2.map.sbwt.clone(); // Todo: avoid clone
+    let sbwt2 = (*coloring2.map.sbwt).clone(); // Todo: avoid clone
     drop(coloring2);
 
-    let merged_sbwt = SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
-    let new_color_set_ids = IntVector::new(64).unwrap(); // TODO
+    let merged_sbwt = Arc::new(SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads));
 
-    CompactColexColoring { sets: colorsets, map: ColexToColorSetMap{sbwt: &merged_sbwt, sampling: color_set_sample_marks, color_set_ids: sampled_ids} }
+    let new_coloring = CompactColexColoring { 
+        sets: colorsets, 
+        map: ColexToColorSetMap {
+            sbwt: merged_sbwt.clone(), 
+            sampling: color_set_sample_marks, 
+            color_set_ids: sampled_ids 
+        }
+    };
+
+    (new_coloring, merged_sbwt)
 
 }
