@@ -97,13 +97,13 @@ impl ColorSet<'_> {
         }
     }
 
-    pub fn as_bitvec(&self) -> bitvec::vec::BitVec {
+    pub fn as_bitvec(&self, n_colors: usize) -> bitvec::vec::BitVec {
         match self {
             ColorSet::Dense(bv) => {
                 (*bv).into()
             },
             ColorSet::Sparse(iv) => {
-                let mut bv = bitvec![0; self.len()];
+                let mut bv = bitvec![0; n_colors];
                 for i in iv.start..iv.end {
                     bv.set(iv.vec.get(i) as usize, true);
                 }
@@ -563,8 +563,8 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 if n_elements * bits_per_color > n_colors {
                     // Dense set -> encode as bitmap
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
-                    concat.extend_from_bitslice(&set1.as_bitvec());
-                    concat.extend_from_bitslice(&set2.as_bitvec());
+                    concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
+                    concat.extend_from_bitslice(&set2.as_bitvec(n_colors_2));
                     dense_sets.push(&concat);
                     is_dense_marks.push_bit(true);
                 } else {
@@ -585,7 +585,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 if n_elements * bits_per_color > n_colors {
                     // Dense
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
-                    concat.extend_from_bitslice(&set1.as_bitvec());
+                    concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
                     concat.extend_from_bitslice(&bitvec![0; n_colors_2]);
 
                     dense_sets.push(&concat);
@@ -604,7 +604,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                     // Dense
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
                     concat.extend_from_bitslice(&bitvec![0; n_colors_1]);
-                    concat.extend_from_bitslice(&set2.as_bitvec());
+                    concat.extend_from_bitslice(&set2.as_bitvec(n_colors_2));
 
                     dense_sets.push(&concat);
                     is_dense_marks.push_bit(true);
