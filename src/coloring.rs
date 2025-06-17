@@ -1,5 +1,6 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+use rand::seq::index::sample;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
@@ -405,6 +406,11 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();    
 
+    let n_colors_1 = coloring1.sets.n_colors;
+    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors = n_colors_1 + n_colors_2;
+    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+
     log::info!("Hashing distinct color set id pairs");
     let mut distinct_ids = std::collections::HashSet::<(Option<usize>, Option<usize>)>::new();
     let mut colex1 = 0_usize;
@@ -468,19 +474,16 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Constructing distinct merged color sets");
-    let mut id_pairs: Vec<_> = distinct_ids.into_iter().collect();
+    let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
     id_pairs.sort_unstable();
-
-    let n_colors_1 = coloring1.sets.n_colors;
-    let n_colors_2 = coloring2.sets.n_colors;
-    let n_colors = n_colors_1 + n_colors_2;
-    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+    let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
 
     let mut sparse_sets = IntVecs::new(bits_per_color);
     let mut dense_sets = BitMaps::new(n_colors);
     let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-    for (left, right) in id_pairs.into_iter() {
+    for (new_id, (left, right)) in id_pairs.into_iter().enumerate() {
+        pair_to_new_id.insert((left,right), new_id);
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
@@ -550,6 +553,34 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
+    log::info!("Storing new sampled color set ids");
+    let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color).unwrap();
+    colex1 = 0_usize;
+    colex2 = 0_usize;
+    for merged_colex in 0..merged_len {
+        if color_set_sample_marks.get(merged_colex) {
+            let color_set_id_1 = if merge_plan.s1[merged_colex] {
+                Some(coloring1.colex_to_set_id(colex1))
+            } else {
+                None
+            };
+
+            let color_set_id_2 = if merge_plan.s2[merged_colex] {
+                Some(coloring2.colex_to_set_id(colex2))
+            } else {
+                None
+            };
+
+            // The merge plan should not have a zero-bit at the same position in s1 and s2
+            assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
+            let id = pair_to_new_id[&(color_set_id_1, color_set_id_2)];
+            sampled_ids.push(id as u64);
+        }
+
+        colex1 += merge_plan.s1[merged_colex] as usize;
+        colex2 += merge_plan.s1[merged_colex] as usize;
+    }
+
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
     let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
@@ -572,8 +603,7 @@ fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColor
 
     let merged_sbwt = SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
     let new_color_set_ids = IntVector::new(64).unwrap(); // TODO
-    todo!(); // See line above
 
-    CompactColexColoring { sets: colorsets, map: ColexToColorSetMap{sbwt: &merged_sbwt, sampling: color_set_sample_marks, color_set_ids: new_color_set_ids} }
+    CompactColexColoring { sets: colorsets, map: ColexToColorSetMap{sbwt: &merged_sbwt, sampling: color_set_sample_marks, color_set_ids: sampled_ids} }
 
 }
