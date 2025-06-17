@@ -1,5 +1,6 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+use sbwt::merge;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
@@ -507,7 +508,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         if color_set_id_1.is_some() || color_set_id_2.is_some() {
             distinct_ids.insert((color_set_id_1, color_set_id_2));
             color_set_sample_marks.set_bit(merged_colex, true);
-        } else if merge_plan.s1[merged_colex] && merge_plan.s2[merged_colex] {
+        } else if merge_plan.s1[merged_colex] && merge_plan.s2[merged_colex] && !merge_plan.is_dummy[merged_colex] {
             // K-mer is in both SBWTs but its not sampled in either one.
             // Since it is not sampled in either SBWT, the outdegree of this k-mer
             // is 1 in both. But we might still need to sample it in the merged graph.
