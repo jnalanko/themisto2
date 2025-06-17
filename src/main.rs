@@ -277,6 +277,9 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
         #[arg(long = "sample-distance", short = 'd', default_value = "1")]
         sample_distance: usize,
 
@@ -501,7 +504,9 @@ fn main() {
             }
         }
 
-        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads} => {
+        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads, outfile} => {
+            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
+
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
             log::info!("Compressing colors");
@@ -509,6 +514,9 @@ fn main() {
             if let Some(validation_queries) = validation_queries {
                 // Clone the original index before construction to be able to compare to it
                 let compressed = index.clone().compress_colors(sample_distance, n_threads);
+
+                log::info!("Serializing to {}", outfile.display());
+                compressed.serialize(&mut out);
 
                 log::info!("Validating compressed colors for {}", validation_queries.display());
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
@@ -529,8 +537,10 @@ fn main() {
                 log::info!("All sets match");
             } else {
                 let compressed = index.compress_colors(sample_distance, n_threads);
+                log::info!("Serializing to {}", outfile.display());
+                compressed.serialize(&mut out);
+                log::info!("Finished");
             }
-            // Todo: serialize
         }
     } 
 }
