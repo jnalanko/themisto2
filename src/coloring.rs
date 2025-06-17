@@ -536,7 +536,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
-        colex2 += merge_plan.s1[merged_colex] as usize;
+        colex2 += merge_plan.s2[merged_colex] as usize;
     }
 
     let color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
@@ -648,7 +648,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
-        colex2 += merge_plan.s1[merged_colex] as usize;
+        colex2 += merge_plan.s2[merged_colex] as usize;
     }
 
     // Add rank support to dense marks
