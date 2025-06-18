@@ -529,13 +529,13 @@ fn insert_pair(x: (Option<usize>, Option<usize>), hashmaps: &mut [HashMap::<(Opt
 }
 
 
-pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (std::collections::HashSet::<(Option<usize>, Option<usize>)>, simple_sds_sbwt::raw_vector::RawVector){
+pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (Vec<HashMap<(Option<usize>, Option<usize>), usize>>, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
     // Distinct color id pairs, inserted into key-disjoint hash maps. The values are
     // color set ids within the hash map.
-    let mut hash_sets = vec![HashMap::<(Option::<usize>, Option::<usize>), usize>::new(); n_threads];
+    let mut hashmaps = vec![HashMap::<(Option::<usize>, Option::<usize>), usize>::new(); n_threads];
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
 
@@ -575,24 +575,22 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
             // but it's so few lines of code anyway so let's just go with this.
             match (c1, c2) {
                 (Case::Sampled(id1), Case::Sampled(id2)) => {
-                    //eprintln!("Case 1");
-                    distinct_ids.insert((Some(id1), Some(id2)));
+                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Sampled(id1), Case::NotSampled) => {
-                    //eprintln!("Case 2");
                     let id2 = coloring2.colex_to_set_id(colex2);
-                    distinct_ids.insert((Some(id1), Some(id2)));
+                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Sampled(id1), Case::Absent) => {
-                    distinct_ids.insert((Some(id1), None));
+                    insert_pair((Some(id1), None), &mut hashmaps);
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::NotSampled, Case::Sampled(id2)) => {
                     //eprintln!("Case 3");
                     let id1 = coloring1.colex_to_set_id(colex1);
-                    distinct_ids.insert((Some(id1), Some(id2)));
+                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::NotSampled, Case::NotSampled) => {
@@ -619,7 +617,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                                 color_set_sample_marks.set_bit(merged_colex, true);
                                 let id1 = coloring1.colex_to_set_id(colex1);
                                 let id2 = coloring2.colex_to_set_id(colex2);
-                                distinct_ids.insert((Some(id1), Some(id2)));
+                                insert_pair((Some(id1), Some(id2)), &mut hashmaps);
                             } else { // The else-branch would be case 1 but then there is nothing to do
 
                             }
@@ -629,18 +627,18 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 },
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
-                    distinct_ids.insert((Some(id1), None));
+                    insert_pair((Some(id1), None), &mut hashmaps);
                     if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
                 (Case::Absent, Case::Sampled(id2)) => {
-                    distinct_ids.insert((None, Some(id2)));
+                    insert_pair((None, Some(id2)), &mut hashmaps);
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
-                    distinct_ids.insert((None, Some(id2)));
+                    insert_pair((None, Some(id2)), &mut hashmaps);
                     if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
@@ -653,15 +651,11 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
 
-    (distinct_ids, color_set_sample_marks)
+    (hashmaps, color_set_sample_marks)
 
 }
 
-fn encode_merged_color_sets(distinct_ids: HashSet::<(Option<usize>, Option<usize>)>, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector, HashMap::<(Option<usize>, Option<usize>), usize>){
-    let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
-    id_pairs.sort_unstable();
-    id_pairs.dedup();
-    let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
+fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Option::<usize>), usize>, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
 
     let n_colors_1 = coloring1.sets.n_colors;
     let n_colors_2 = coloring2.sets.n_colors;
@@ -672,8 +666,7 @@ fn encode_merged_color_sets(distinct_ids: HashSet::<(Option<usize>, Option<usize
     let mut dense_sets = BitMaps::new(n_colors);
     let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-    for (new_id, (left, right)) in id_pairs.into_iter().enumerate() {
-        pair_to_new_id.insert((left,right), new_id);
+    for (&(left, right), new_id) in id_pair_to_new_id.iter() {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
@@ -743,7 +736,7 @@ fn encode_merged_color_sets(distinct_ids: HashSet::<(Option<usize>, Option<usize
     sparse_sets.shrink_to_fit();
     dense_sets.shrink_to_fit();
 
-    (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id)
+    (sparse_sets, dense_sets, is_dense_marks)
 
 }
 
@@ -795,8 +788,20 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let n_colors = n_colors_1 + n_colors_2;
 
     log::info!("Computing color id pairs and merged sampling");
-    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
-    let n_distinct_color_sets = distinct_ids.len();
+    let (distinct_id_pairs_maps, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
+
+    // Combine maps
+    let distinct_pairs_map = distinct_id_pairs_maps.into_iter().fold(
+        HashMap::<(Option::<usize>, Option::<usize>), usize>::new(),
+        |mut acc, H| {
+            let old_len = acc.len();
+            for (key, val) in H.iter() {
+                acc.insert(*key, val + old_len);
+            }
+            acc}
+        );
+
+    let n_distinct_color_sets = distinct_pairs_map.len();
 
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
@@ -804,12 +809,12 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Encoding distinct merged color sets");
-    let (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id) = encode_merged_color_sets(distinct_ids, &coloring1, &coloring2);
+    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&distinct_pairs_map, &coloring1, &coloring2);
 
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
     log::info!("Storing new sampled color set ids");
-    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &pair_to_new_id);
+    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &distinct_pairs_map);
 
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
