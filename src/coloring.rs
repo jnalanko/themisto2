@@ -479,9 +479,7 @@ impl ColorSets {
 fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     absent_sbwt: &'a SbwtIndex<SubsetMatrix>, 
     present_dbg: &Dbg<'_, SubsetMatrix>,
-    present_colex: usize,
-    outlabel_buf_1: &mut Vec<u8>,
-    outlabel_buf_2: &mut Vec<u8>) -> bool {
+    present_colex: usize) -> bool {
 
     // This node may become the end of a colored unitig in the merged graph. So we may need
     // to sample it. 
@@ -499,11 +497,6 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     // to check only for case (iii). If our assumption that all color sets are nonempty
     // does not hold, it only means that we may sample a node unnecessarily, but the
     // color set structure is still correct. 
-
-    outlabel_buf_1.clear();
-    outlabel_buf_2.clear();
-    present_dbg.push_outlabels(Node{id: present_colex}, outlabel_buf_1);
-    assert_eq!(outlabel_buf_1.len(), 1);
 
     let mut x = present_dbg.get_kmer(Node{id: present_colex});
     for c in [b'A', b'C', b'G', b'T'] {
@@ -630,7 +623,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
                     distinct_ids.insert((Some(id1), None));
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
@@ -641,7 +634,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
                     distinct_ids.insert((None, Some(id2)));
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
