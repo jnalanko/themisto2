@@ -506,6 +506,7 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
     // does not hold, it only means that we may sample a node unnecessarily, but the
     // color set structure is still correct. 
 
+    assert!(!absent_merge_marks[merged_colex]); // Should be absent
     let mut s = merged_colex;
     while !merged_leader_marks[s] {
         // merged_leader_marks[0] is always set so s > 0 if we are here
@@ -514,7 +515,7 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
             absent_colex -= 1;
         }
     }
-    let mut e = merged_colex;
+    let mut e = merged_colex+1;
     while e < merged_leader_marks.len() && !merged_leader_marks[e] {
         e += 1;
     }
