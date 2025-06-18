@@ -699,7 +699,6 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
             // The merge plan should not have a zero-bit at the same position in s1 and s2
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
-            dbg!(&color_set_id_1, &color_set_id_2);
             let id = pair_to_new_id[&(color_set_id_1, color_set_id_2)];
             sampled_ids.push(id as u64);
         }
