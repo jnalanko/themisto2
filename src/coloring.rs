@@ -7,6 +7,7 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
 use std::cmp::max;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
@@ -635,33 +636,16 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
 
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
-
-    log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
-
-    assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
-    let merged_len = merge_plan.s1.len();    
+fn encode_merged_color_sets(distinct_ids: HashSet::<(Option<usize>, Option<usize>)>, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector, HashMap::<(Option<usize>, Option<usize>), usize>){
+    let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
+    id_pairs.sort_unstable();
+    id_pairs.dedup();
+    let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
 
     let n_colors_1 = coloring1.sets.n_colors;
     let n_colors_2 = coloring2.sets.n_colors;
     let n_colors = n_colors_1 + n_colors_2;
     let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-    log::info!("Computing color id pairs and merged sampling");
-    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
-
-    let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
-    color_set_sample_marks.enable_rank();
-    let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
-    log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
-
-    log::info!("Constructing distinct merged color sets");
-    let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
-    id_pairs.sort_unstable();
-    id_pairs.dedup();
-    let n_distinct_color_sets = id_pairs.len();
-    let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
 
     let mut sparse_sets = IntVecs::new(bits_per_color);
     let mut dense_sets = BitMaps::new(n_colors);
@@ -737,6 +721,35 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
     sparse_sets.shrink_to_fit();
     dense_sets.shrink_to_fit();
+
+    (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id)
+
+}
+
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+
+    log::info!("Computing the sbwt merge plan");
+    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
+
+    assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
+    let merged_len = merge_plan.s1.len();    
+
+    let n_colors_1 = coloring1.sets.n_colors;
+    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors = n_colors_1 + n_colors_2;
+    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+
+    log::info!("Computing color id pairs and merged sampling");
+    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
+    let n_distinct_color_sets = distinct_ids.len();
+
+    let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
+    color_set_sample_marks.enable_rank();
+    let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
+    log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
+
+    log::info!("Encoding distinct merged color sets");
+    let (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id) = encode_merged_color_sets(distinct_ids, &coloring1, &coloring2);
 
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
