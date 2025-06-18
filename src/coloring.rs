@@ -482,8 +482,6 @@ impl ColorSets {
 
 fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
     absent_sbwt: &SbwtIndex<SubsetMatrix>, 
-    present_dbg: &Dbg<'_, SubsetMatrix>,
-    present_colex: usize, // Position of the k-mer in the present sbwt
     mut absent_colex: usize, // Position in the absent sbwt where k-mer would be inserted
     merged_colex: usize,
     merged_leader_marks: &bitvec::vec::BitVec<u64, Lsb0>,
@@ -650,7 +648,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
                     insert_pair((Some(id1), None), &mut hashmaps);
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1, colex2, merged_colex, &merge_plan.is_leader, &merge_plan.s2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, colex2, merged_colex, &merge_plan.is_leader, &merge_plan.s2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
@@ -661,7 +659,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
                     insert_pair((None, Some(id2)), &mut hashmaps);
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2, colex1, merged_colex, &merge_plan.is_leader, &merge_plan.s1) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, colex1, merged_colex, &merge_plan.is_leader, &merge_plan.s1) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
