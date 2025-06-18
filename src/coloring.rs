@@ -865,7 +865,12 @@ mod tests {
 
         let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
         let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
-        let cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
+        let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
+
+        cc_both.build_sbwt_select_support();
+        for colex in 0..cc_both.sbwt().n_sets() {
+            eprintln!("{}", String::from_utf8_lossy(&cc_both.sbwt().access_kmer(colex)));
+        }
 
         //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
 
