@@ -666,7 +666,12 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
     let mut dense_sets = BitMaps::new(n_colors);
     let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-    for (&(left, right), new_id) in id_pair_to_new_id.iter() {
+    let mut id_pairs_in_new_id_order = id_pair_to_new_id.iter()
+        .map(|(pair, new_id)| (new_id, pair))
+        .collect::<Vec::<_>>();
+    id_pairs_in_new_id_order.sort();
+
+    for (_, &(left, right)) in id_pairs_in_new_id_order {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
