@@ -10,6 +10,7 @@ use rustc_hash::FxHasher;
 use std::cmp::max;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::u64;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
@@ -512,10 +513,29 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     false
 }
 
+fn hash_pair(x: (Option<usize>, Option<usize>)) -> u64 {
+    let mut hasher = FxHasher::default();
+    x.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn insert_pair(x: (Option<usize>, Option<usize>), hashmaps: &mut [HashMap::<(Option::<usize>, Option::<usize>), usize>]) {
+    let r = hash_pair(x);
+    let hash_map_idx = (r / (u64::MAX / hashmaps.len() as u64)) as usize;
+    let H = &mut hashmaps[hash_map_idx];
+    if !H.contains_key(&x) {
+        H.insert(x, H.len());
+    }
+}
+
+
 pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (std::collections::HashSet::<(Option<usize>, Option<usize>)>, simple_sds_sbwt::raw_vector::RawVector){
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
-    let mut distinct_ids = std::collections::HashSet::<(Option<usize>, Option<usize>)>::new();
+
+    // Distinct color id pairs, inserted into key-disjoint hash maps. The values are
+    // color set ids within the hash map.
+    let mut hash_sets = vec![HashMap::<(Option::<usize>, Option::<usize>), usize>::new(); n_threads];
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
 
