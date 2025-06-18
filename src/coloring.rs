@@ -869,7 +869,9 @@ mod tests {
 
         cc_both.build_sbwt_select_support();
         for colex in 0..cc_both.sbwt().n_sets() {
-            eprintln!("{}", String::from_utf8_lossy(&cc_both.sbwt().access_kmer(colex)));
+            let kmer = cc_both.sbwt().access_kmer(colex);
+            let colors = cc_both.get_color_set(&kmer);
+            eprintln!("{} {}", String::from_utf8_lossy(&kmer), colors);
         }
 
         //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
