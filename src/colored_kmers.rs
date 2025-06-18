@@ -396,11 +396,6 @@ impl ColoredKmers {
         let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
         // Stream the output again to mark colors
-        let input_stream = InputStream {
-            dbs: dbs.clone(),
-            cur_db_idx: 0,
-            seq_idx_in_cur_db: 0,
-        };
         let color_sets = std::thread::scope(|scope| {
 
             log::info!("Building colors");

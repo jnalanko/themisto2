@@ -814,7 +814,7 @@ mod tests {
     pub(crate) fn gen_random_dna_string(len: usize, seed: u64) -> Vec<u8> {
         use rand_chacha::rand_core::{RngCore, SeedableRng};
 
-        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(1234);
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(seed);
         (0..len).map(|_| { 
             match rng.next_u64() % 4 {
                 0 => b'A',
@@ -838,8 +838,6 @@ mod tests {
         all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
         all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
 
-        let (sbwt1, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[..input_seqs_1.len()]);
-        let (sbwt2, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[input_seqs_1.len()..]);
 
         let mut dbs1 = Vec::<SeqDB>::new();
         let mut dbs2 = Vec::<SeqDB>::new();
