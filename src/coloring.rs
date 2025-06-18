@@ -879,7 +879,7 @@ mod tests {
 
         cc_both.build_sbwt_select_support();
 
-        let sample_distance = 0;
+        let sample_distance = 3;
         let ccc1 = cc1.compress_colors(sample_distance, 3);
         let ccc2 = cc2.compress_colors(sample_distance, 3);
 
