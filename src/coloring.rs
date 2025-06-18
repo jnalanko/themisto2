@@ -836,7 +836,7 @@ mod tests {
         if std::env::var("RUST_LOG").is_err() {
             std::env::set_var("RUST_LOG", "info")
         }
-        env_logger::init();
+        //env_logger::init();
 
         for k in 3_usize..10_usize { // k < 3 does not work because construction uses 3-mer binning.
 
