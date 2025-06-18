@@ -1,3 +1,4 @@
+use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 use sbwt::dbg::Dbg;
@@ -479,10 +480,14 @@ impl ColorSets {
     }
 }
 
-fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
-    absent_sbwt: &'a SbwtIndex<SubsetMatrix>, 
+fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
+    absent_sbwt: &SbwtIndex<SubsetMatrix>, 
     present_dbg: &Dbg<'_, SubsetMatrix>,
-    present_colex: usize) -> bool {
+    present_colex: usize, // Position of the k-mer in the present sbwt
+    mut absent_colex: usize, // Position in the absent sbwt where k-mer would be inserted
+    merged_colex: usize,
+    merged_leader_marks: &bitvec::vec::BitVec<u64, Lsb0>,
+    absent_merge_marks: &bitvec::vec::BitVec<u64, Lsb0>) -> bool {
 
     // This node may become the end of a colored unitig in the merged graph. So we may need
     // to sample it. 
@@ -501,16 +506,30 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     // does not hold, it only means that we may sample a node unnecessarily, but the
     // color set structure is still correct. 
 
-    let x = present_dbg.get_kmer(Node{id: present_colex}); // This is a slow operation
-    let absent_suf_range = absent_sbwt.search(&x[1..]); // This is also quite slow
-    if let Some(absent_suf_range) = absent_suf_range {
-        let suf_group_leader = absent_suf_range.start;
-        for c_idx in 0..absent_sbwt.alphabet().len() {
-            if absent_sbwt.sbwt().set_contains(suf_group_leader, c_idx as u8) {
-                return true; // Sample x
-            }
+    let mut s = merged_colex;
+    while !merged_leader_marks[s] {
+        // merged_leader_marks[0] is always set so s > 0 if we are here
+        s -= 1;
+        if absent_merge_marks[s] {
+            absent_colex -= 1;
         }
+    }
+    let mut e = merged_colex;
+    while e < merged_leader_marks.len() && !merged_leader_marks[e] {
+        e += 1;
+    }
 
+    // [s..e) is the suffix group of the present k-mer in the merged sbwt.
+    for i in s..e {
+        if absent_merge_marks[i] {
+            // Suffix group leader in the absent sbwt
+            for c_idx in 0..absent_sbwt.alphabet().len() {
+                if absent_sbwt.sbwt().set_contains(absent_colex, c_idx as u8) {
+                    return true; // Sample x
+                }
+            }
+            return false; // Suffix group leader did not have any edge
+        }
     }
     false
 }
@@ -630,7 +649,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
                     insert_pair((Some(id1), None), &mut hashmaps);
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1, colex2, merged_colex, &merge_plan.is_leader, &merge_plan.s2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
@@ -641,7 +660,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
                     insert_pair((None, Some(id2)), &mut hashmaps);
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2, colex1, merged_colex, &merge_plan.is_leader, &merge_plan.s1) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
