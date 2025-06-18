@@ -1,7 +1,7 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 use sbwt::dbg::Dbg;
-use sbwt::merge;
+use sbwt::merge::{self, MergeInterleaving};
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
@@ -510,20 +510,9 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     false
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
-
-    log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
-
+pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (std::collections::HashSet::<(Option<usize>, Option<usize>)>, simple_sds_sbwt::raw_vector::RawVector){
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
-    let merged_len = merge_plan.s1.len();    
-
-    let n_colors_1 = coloring1.sets.n_colors;
-    let n_colors_2 = coloring2.sets.n_colors;
-    let n_colors = n_colors_1 + n_colors_2;
-    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-    log::info!("Hashing distinct color set id pairs");
+    let merged_len = merge_plan.s1.len();
     let mut distinct_ids = std::collections::HashSet::<(Option<usize>, Option<usize>)>::new();
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
@@ -557,10 +546,6 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
             } else {
                 Case::NotSampled
             };
-
-            if merged_colex == 246 {
-                dbg!(&c1, &c2, coloring2.colex_to_set_id(colex2), coloring2.colex_to_set(colex2).as_intvec());
-            }
 
             // Ok, this is going to get a bit verbose but bear with me. We have
             // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
@@ -645,6 +630,26 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         colex1 += merge_plan.s1[merged_colex] as usize;
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
+
+    (distinct_ids, color_set_sample_marks)
+
+}
+
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+
+    log::info!("Computing the sbwt merge plan");
+    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
+
+    assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
+    let merged_len = merge_plan.s1.len();    
+
+    let n_colors_1 = coloring1.sets.n_colors;
+    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors = n_colors_1 + n_colors_2;
+    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+
+    log::info!("Computing color id pairs and merged sampling");
+    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
 
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
@@ -738,8 +743,8 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("Storing new sampled color set ids");
     let bits_per_color_set_id = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
     let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color_set_id).unwrap();
-    colex1 = 0_usize;
-    colex2 = 0_usize;
+    let mut colex1 = 0_usize;
+    let mut colex2 = 0_usize;
     for merged_colex in 0..merged_len {
         if color_set_sample_marks.get(merged_colex) {
             let color_set_id_1 = if merge_plan.s1[merged_colex] {
@@ -836,7 +841,7 @@ mod tests {
         if std::env::var("RUST_LOG").is_err() {
             std::env::set_var("RUST_LOG", "info")
         }
-        //env_logger::init();
+        env_logger::init();
 
         for k in 3_usize..10_usize { // k < 3 does not work because construction uses 3-mer binning.
 
