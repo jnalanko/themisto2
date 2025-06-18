@@ -544,6 +544,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let mut outlabel_buf_1 = Vec::<u8>::new();
     let mut outlabel_buf_2 = Vec::<u8>::new();
 
+    #[derive(Debug)]
     enum Case { // Three cases in a loop below
         Sampled(usize),
         NotSampled,
@@ -566,6 +567,12 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
             } else {
                 Case::NotSampled
             };
+
+            if merged_colex == 17 {
+                dbg!(merge_plan.s1[merged_colex], merge_plan.s2[merged_colex], &c1, &c2);
+                eprintln!("{}", String::from_utf8_lossy(&coloring1.map.sbwt.access_kmer(colex1)));
+                dbg!(coloring1.colex_to_set(colex1).as_intvec());
+            }
 
             // Ok, this is going to get a bit verbose but bear with me. We have
             // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
@@ -659,6 +666,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("Constructing distinct merged color sets");
     let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
     id_pairs.sort_unstable();
+    id_pairs.dedup();
     let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
 
     let mut sparse_sets = IntVecs::new(bits_per_color);
@@ -832,6 +840,11 @@ mod tests {
     #[test]
     fn test_merge() {
 
+        if std::env::var("RUST_LOG").is_err() {
+            std::env::set_var("RUST_LOG", "info")
+        }
+        env_logger::init();
+
         let k = 5;
 
         let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, i as u64)).collect();
@@ -870,7 +883,7 @@ mod tests {
 
         cc_both.build_sbwt_select_support();
 
-        let sample_distance = 3;
+        let sample_distance = 0;
         let ccc1 = cc1.compress_colors(sample_distance, 3);
         let ccc2 = cc2.compress_colors(sample_distance, 3);
 
@@ -879,12 +892,13 @@ mod tests {
         for colex in 0..cc_both.sbwt().n_sets() {
             let kmer = cc_both.sbwt().access_kmer(colex);
             let true_colors = cc_both.get_color_set(&kmer);
-            eprintln!("{} {}", String::from_utf8_lossy(&kmer), true_colors);
+            eprintln!("{} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors);
 
             if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
                 let range = sbwt_merged.search(&kmer).unwrap();
                 assert_eq!(range.len(), 1);
                 let colex_merged = range.start;
+                dbg!(ccc_merged.colex_to_set_id(colex_merged), ccc_merged.colex_to_set(colex_merged).as_intvec());
                 let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
                 assert_eq!(true_colors, merged_colors);
             }
