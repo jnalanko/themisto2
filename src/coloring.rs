@@ -831,8 +831,8 @@ mod tests {
 
         let k = 5;
 
-        let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(100, i as u64)).collect();
-        let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(100, 123456 + i as u64)).collect();
+        let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, i as u64)).collect();
+        let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, 123456 + i as u64)).collect();
 
         let mut all_input_seq_slices = Vec::<&[u8]>::new();
         all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
