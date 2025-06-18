@@ -3,6 +3,7 @@ use bitvec::bitvec;
 use sbwt::dbg::Dbg;
 use sbwt::merge::{self, MergeInterleaving};
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
+use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
@@ -726,34 +727,10 @@ fn encode_merged_color_sets(distinct_ids: HashSet::<(Option<usize>, Option<usize
 
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
-
-    log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
-
+fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id: &HashMap::<(Option<usize>, Option<usize>), usize>) -> simple_sds_sbwt::int_vector::IntVector {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
-    let merged_len = merge_plan.s1.len();    
+    let merged_len = merge_plan.s1.len();
 
-    let n_colors_1 = coloring1.sets.n_colors;
-    let n_colors_2 = coloring2.sets.n_colors;
-    let n_colors = n_colors_1 + n_colors_2;
-    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-    log::info!("Computing color id pairs and merged sampling");
-    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
-    let n_distinct_color_sets = distinct_ids.len();
-
-    let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
-    color_set_sample_marks.enable_rank();
-    let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
-    log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
-
-    log::info!("Encoding distinct merged color sets");
-    let (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id) = encode_merged_color_sets(distinct_ids, &coloring1, &coloring2);
-
-    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
-
-    log::info!("Storing new sampled color set ids");
     let bits_per_color_set_id = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
     let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color_set_id).unwrap();
     let mut colex1 = 0_usize;
@@ -781,6 +758,38 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         colex1 += merge_plan.s1[merged_colex] as usize;
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
+
+    sampled_ids
+}
+
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+
+    log::info!("Computing the sbwt merge plan");
+    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
+
+    assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
+    let merged_len = merge_plan.s1.len();    
+
+    let n_colors_1 = coloring1.sets.n_colors;
+    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors = n_colors_1 + n_colors_2;
+
+    log::info!("Computing color id pairs and merged sampling");
+    let (distinct_ids, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
+    let n_distinct_color_sets = distinct_ids.len();
+
+    let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
+    color_set_sample_marks.enable_rank();
+    let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
+    log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
+
+    log::info!("Encoding distinct merged color sets");
+    let (sparse_sets, dense_sets, is_dense_marks, pair_to_new_id) = encode_merged_color_sets(distinct_ids, &coloring1, &coloring2);
+
+    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
+
+    log::info!("Storing new sampled color set ids");
+    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &pair_to_new_id);
 
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
