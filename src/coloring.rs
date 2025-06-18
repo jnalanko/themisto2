@@ -501,14 +501,16 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     // does not hold, it only means that we may sample a node unnecessarily, but the
     // color set structure is still correct. 
 
-    let mut x = present_dbg.get_kmer(Node{id: present_colex});
-    for c in [b'A', b'C', b'G', b'T'] {
-        x.push(c);
-        let y = &x[1..];
-        if absent_sbwt.search(y).is_some() {
-            return true; // Sample x
+    let x = present_dbg.get_kmer(Node{id: present_colex}); // This is a slow operation
+    let absent_suf_range = absent_sbwt.search(&x[1..]); // This is also quite slow
+    if let Some(absent_suf_range) = absent_suf_range {
+        let suf_group_leader = absent_suf_range.start;
+        for c_idx in 0..absent_sbwt.alphabet().len() {
+            if absent_sbwt.sbwt().set_contains(suf_group_leader, c_idx as u8) {
+                return true; // Sample x
+            }
         }
-        x.pop();
+
     }
     false
 }
