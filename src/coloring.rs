@@ -847,7 +847,7 @@ mod tests {
         }
         env_logger::init();
 
-        let k = 5;
+        let k = 4;
 
         let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, i as u64)).collect();
         let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, 123456 + i as u64)).collect();
