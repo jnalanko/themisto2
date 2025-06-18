@@ -667,6 +667,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let mut id_pairs: Vec<(Option<usize>, Option<usize>)> = distinct_ids.into_iter().collect();
     id_pairs.sort_unstable();
     id_pairs.dedup();
+    let n_distinct_color_sets = id_pairs.len();
     let mut pair_to_new_id = HashMap::<(Option<usize>, Option<usize>), usize>::new();
 
     let mut sparse_sets = IntVecs::new(bits_per_color);
@@ -675,6 +676,9 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
     for (new_id, (left, right)) in id_pairs.into_iter().enumerate() {
         pair_to_new_id.insert((left,right), new_id);
+        if left == Some(7) && right.is_none() {
+            dbg!(new_id, left, right);
+        }
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
@@ -745,7 +749,8 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
     log::info!("Storing new sampled color set ids");
-    let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color).unwrap();
+    let bits_per_color_set_id = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
+    let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color_set_id).unwrap();
     colex1 = 0_usize;
     colex2 = 0_usize;
     for merged_colex in 0..merged_len {
@@ -766,6 +771,10 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
             let id = pair_to_new_id[&(color_set_id_1, color_set_id_2)];
             sampled_ids.push(id as u64);
+
+            if merged_colex == 17 {
+                dbg!(color_set_id_1, color_set_id_2, id);
+            }
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
