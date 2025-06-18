@@ -809,6 +809,8 @@ mod tests {
 
     use crate::colored_kmers::ColoredKmers;
 
+    use super::{merge_colorings, CompactColexColoring};
+
 
     #[cfg(test)]
     pub(crate) fn gen_random_dna_string(len: usize, seed: u64) -> Vec<u8> {
@@ -866,11 +868,28 @@ mod tests {
         let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
 
         cc_both.build_sbwt_select_support();
+
+        let sample_distance = 3;
+        let ccc1 = cc1.compress_colors(sample_distance, 3);
+        let ccc2 = cc2.compress_colors(sample_distance, 3);
+
+        let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
+
         for colex in 0..cc_both.sbwt().n_sets() {
             let kmer = cc_both.sbwt().access_kmer(colex);
-            let colors = cc_both.get_color_set(&kmer);
-            eprintln!("{} {}", String::from_utf8_lossy(&kmer), colors);
+            let true_colors = cc_both.get_color_set(&kmer);
+            eprintln!("{} {}", String::from_utf8_lossy(&kmer), true_colors);
+
+            if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
+                let range = sbwt_merged.search(&kmer).unwrap();
+                assert_eq!(range.len(), 1);
+                let colex_merged = range.start;
+                let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
+                assert_eq!(true_colors, merged_colors);
+            }
+
         }
+        
 
         //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
 
