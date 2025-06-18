@@ -319,7 +319,7 @@ fn main() {
     match args.command {
         Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let index = ColoredKmers::new(input_paths.as_slice(), k, n_threads, &temp_dir);
+            let index = ColoredKmers::new_from_files(input_paths.as_slice(), k, n_threads, &temp_dir);
             index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
         },
         Subcommands::Import { sbwt_ascii_dump, color_dump_prefix, out: out_path } => {

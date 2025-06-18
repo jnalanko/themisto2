@@ -802,6 +802,9 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use jseqio::seq_db::SeqDB;
     use sbwt::{BitPackedKmerSorting, SbwtIndexBuilder};
 
     use crate::colored_kmers::ColoredKmers;
@@ -838,7 +841,31 @@ mod tests {
         let (sbwt1, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[..input_seqs_1.len()]);
         let (sbwt2, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[input_seqs_1.len()..]);
 
-        let cc1 = ColoredKmers::new(); todo!();
+        let mut dbs1 = Vec::<SeqDB>::new();
+        let mut dbs2 = Vec::<SeqDB>::new();
+        let mut dbs_both = Vec::<SeqDB>::new();
+        for seq in input_seqs_1.iter() {
+            let mut db = SeqDB::new();
+            db.push_seq(seq);
+            dbs1.push(db);
+
+            let mut db = SeqDB::new();
+            db.push_seq(seq);
+            dbs_both.push(db);
+        }
+        for seq in input_seqs_2.iter() {
+            let mut db = SeqDB::new();
+            db.push_seq(seq);
+            dbs2.push(db);
+
+            let mut db = SeqDB::new();
+            db.push_seq(seq);
+            dbs_both.push(db);
+        }
+
+        let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
+        let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
+        let cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
 
         //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
 
