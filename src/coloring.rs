@@ -568,12 +568,6 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 Case::NotSampled
             };
 
-            if merged_colex == 17 {
-                dbg!(merge_plan.s1[merged_colex], merge_plan.s2[merged_colex], &c1, &c2);
-                eprintln!("{}", String::from_utf8_lossy(&coloring1.map.sbwt.access_kmer(colex1)));
-                dbg!(coloring1.colex_to_set(colex1).as_intvec());
-            }
-
             // Ok, this is going to get a bit verbose but bear with me. We have
             // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
             // reduce code duplication by making symmetric cases call a common function,
@@ -676,9 +670,6 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
     for (new_id, (left, right)) in id_pairs.into_iter().enumerate() {
         pair_to_new_id.insert((left,right), new_id);
-        if left == Some(7) && right.is_none() {
-            dbg!(new_id, left, right);
-        }
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
@@ -771,10 +762,6 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
             let id = pair_to_new_id[&(color_set_id_1, color_set_id_2)];
             sampled_ids.push(id as u64);
-
-            if merged_colex == 17 {
-                dbg!(color_set_id_1, color_set_id_2, id);
-            }
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
@@ -907,7 +894,6 @@ mod tests {
                 let range = sbwt_merged.search(&kmer).unwrap();
                 assert_eq!(range.len(), 1);
                 let colex_merged = range.start;
-                dbg!(ccc_merged.colex_to_set_id(colex_merged), ccc_merged.colex_to_set(colex_merged).as_intvec());
                 let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
                 assert_eq!(true_colors, merged_colors);
             }
