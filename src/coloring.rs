@@ -238,19 +238,25 @@ impl ColexToColorSetMap {
         Self{sbwt, sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
     }
 
-    fn colex_to_color_set_id(&self, colex: usize) -> usize {
+    fn colex_to_color_set_id(&self, mut colex: usize) -> usize {
         if self.sampling.get(colex) {
             // This set is stored
             self.color_set_ids.get(self.sampling.rank(colex)) as usize
         } else {
             // This set is not stored -> walk forward in the de Bruijn graph
-            for char_idx in 0..self.sbwt.alphabet().len() {
-                if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
-                    let new_colex = self.sbwt.lf_step(colex, char_idx);
-                    return self.colex_to_color_set_id(new_colex); // Todo: no recursion
+            loop {
+                for char_idx in 0..self.sbwt.alphabet().len() {
+                    if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
+                        // Found the outedge label
+                        let new_colex = self.sbwt.lf_step(colex, char_idx);
+                        return self.colex_to_color_set_id(new_colex); // Todo: no recursion
+                    }
                 }
+
+                // No outedges found -> colex is not a suffix group leader position
+                assert!(colex > 0);
+                colex -= 1;
             }
-            panic!("Bug in color set sampling: dead end in SBWT graph");
         }
     }
 
