@@ -847,67 +847,64 @@ mod tests {
         }
         env_logger::init();
 
-        let k = 4;
+        for k in 3_usize..10_usize { // k < 3 does not work because construction uses 3-mer binning.
 
-        let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, i as u64)).collect();
-        let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, 123456 + i as u64)).collect();
+            let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (i + k.pow(4)) as u64)).collect();
+            let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (123456 + i + k.pow(4)) as u64)).collect();
 
-        let mut all_input_seq_slices = Vec::<&[u8]>::new();
-        all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
-        all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
+            let mut all_input_seq_slices = Vec::<&[u8]>::new();
+            all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
+            all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
 
 
-        let mut dbs1 = Vec::<SeqDB>::new();
-        let mut dbs2 = Vec::<SeqDB>::new();
-        let mut dbs_both = Vec::<SeqDB>::new();
-        for seq in input_seqs_1.iter() {
-            let mut db = SeqDB::new();
-            db.push_seq(seq);
-            dbs1.push(db);
+            let mut dbs1 = Vec::<SeqDB>::new();
+            let mut dbs2 = Vec::<SeqDB>::new();
+            let mut dbs_both = Vec::<SeqDB>::new();
+            for seq in input_seqs_1.iter() {
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs1.push(db);
 
-            let mut db = SeqDB::new();
-            db.push_seq(seq);
-            dbs_both.push(db);
-        }
-        for seq in input_seqs_2.iter() {
-            let mut db = SeqDB::new();
-            db.push_seq(seq);
-            dbs2.push(db);
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs_both.push(db);
+            }
+            for seq in input_seqs_2.iter() {
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs2.push(db);
 
-            let mut db = SeqDB::new();
-            db.push_seq(seq);
-            dbs_both.push(db);
-        }
-
-        let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
-        let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
-        let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
-
-        cc_both.build_sbwt_select_support();
-
-        let sample_distance = 3;
-        let ccc1 = cc1.compress_colors(sample_distance, 3);
-        let ccc2 = cc2.compress_colors(sample_distance, 3);
-
-        let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
-
-        for colex in 0..cc_both.sbwt().n_sets() {
-            let kmer = cc_both.sbwt().access_kmer(colex);
-            let true_colors = cc_both.get_color_set(&kmer);
-            eprintln!("{} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors);
-
-            if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
-                let range = sbwt_merged.search(&kmer).unwrap();
-                assert_eq!(range.len(), 1);
-                let colex_merged = range.start;
-                let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
-                assert_eq!(true_colors, merged_colors);
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs_both.push(db);
             }
 
+            let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
+            let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
+            let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
+
+            cc_both.build_sbwt_select_support();
+
+            let sample_distance = 3;
+            let ccc1 = cc1.compress_colors(sample_distance, 3);
+            let ccc2 = cc2.compress_colors(sample_distance, 3);
+
+            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
+
+            for colex in 0..cc_both.sbwt().n_sets() {
+                let kmer = cc_both.sbwt().access_kmer(colex);
+                let true_colors = cc_both.get_color_set(&kmer);
+                eprintln!("{} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors);
+
+                if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
+                    let range = sbwt_merged.search(&kmer).unwrap();
+                    assert_eq!(range.len(), 1);
+                    let colex_merged = range.start;
+                    let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
+                    assert_eq!(true_colors, merged_colors);
+                }
+
+            }
         }
-        
-
-        //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
-
     }
 }
