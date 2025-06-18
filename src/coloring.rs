@@ -515,6 +515,7 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
                 return true;
             }
         }
+        x.pop();
     }
     false
 }
