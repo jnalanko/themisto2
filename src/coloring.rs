@@ -796,6 +796,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         |mut acc, H| {
             let old_len = acc.len();
             for (key, val) in H.iter() {
+                debug_assert!(!acc.contains_key(key)); // All hash maps should be disjoint
                 acc.insert(*key, val + old_len);
             }
             acc}
