@@ -1,7 +1,7 @@
-use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
+use std::{ops::DerefMut, path::{Path, PathBuf}, sync::{Arc, Mutex}};
 
 use crossbeam::channel::{Receiver, RecvError, Sender};
-use sbwt::{self, BitPackedKmerSorting, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
+use sbwt::{self, BitPackedKmerSorting, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
 use crate::{coloring::CompactColexColoring, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
@@ -279,7 +279,7 @@ impl ColoredKmers {
 }
 
 struct InputStream {
-    dbs: Vec<jseqio::seq_db::SeqDB>,
+    dbs: Arc<Vec<jseqio::seq_db::SeqDB>>, // Arc because we may want to hold onto the dbs even if the stream is consumed
     cur_db_idx: usize, // Index of the db currently being iterated over
     seq_idx_in_cur_db: usize,
 }
@@ -301,7 +301,7 @@ impl InputStream {
             }
             dbs.push(fw);
         }
-        Self {dbs, cur_db_idx: 0, seq_idx_in_cur_db: 0}
+        Self {dbs: Arc::new(dbs), cur_db_idx: 0, seq_idx_in_cur_db: 0}
     }
 }
 
@@ -357,34 +357,50 @@ fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize
 
 impl ColoredKmers {
 
-    #[allow(clippy::type_complexity)]
-    pub fn new<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+    /// Note: reverse complements are not added, so if you want them, include them in the dbs.
+    pub fn new_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db::SeqDB>, k: usize, n_threads: usize, temp_dir: Option<P>) -> Self {
+        let dbs = Arc::new(dbs);
+        let input_stream = InputStream {
+            dbs: dbs.clone(),
+            cur_db_idx: 0,
+            seq_idx_in_cur_db: 0,
+        };
 
-        log::info!("Loading {} sequence files (colors) into memory", filenames.len());
-        let input_stream = InputStream::new(filenames);
         let num_colors = input_stream.dbs.len();
         log::info!("Building SBWT");
-        let sbwt_builder = sbwt::SbwtIndexBuilder::new()
-            .add_rev_comp(false) // Already added in the input stream
-            .k(k)
-            .build_lcs(true)
-            .n_threads(n_threads)
-            .precalc_length(8)
-            .algorithm(BitPackedKmerSorting::new()
-                .dedup_batches(true)
-                .temp_dir(temp_dir)
-        );
-        let (sbwt, lcs) = sbwt_builder.run(input_stream);
+        let (sbwt, lcs) = if let Some(temp_dir) = temp_dir {
+            sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(false) // Already added in the input stream
+                .k(k)
+                .build_lcs(true)
+                .n_threads(n_threads)
+                .precalc_length(8)
+                .algorithm(BitPackedKmerSorting::new()
+                    .dedup_batches(true)
+                    .temp_dir(temp_dir.as_ref())
+            ).run(input_stream)
+        } else {
+            sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(false) // Already added in the input stream
+                .k(k)
+                .build_lcs(true)
+                .n_threads(n_threads)
+                .precalc_length(8)
+                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
+            .run(input_stream)
+        };
         let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
 
         let sbwt_len = sbwt.n_sets();
         let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
         let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
-        log::info!("Reading input sequences back into memory again");
-        let input_stream = InputStream::new(filenames); // Read the data into memory again
-        let dbs = &input_stream.dbs;
-
+        // Stream the output again to mark colors
+        let input_stream = InputStream {
+            dbs: dbs.clone(),
+            cur_db_idx: 0,
+            seq_idx_in_cur_db: 0,
+        };
         let color_sets = std::thread::scope(|scope| {
 
             log::info!("Building colors");
@@ -392,7 +408,7 @@ impl ColoredKmers {
             let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
 
             // Push work to the input queue
-            for color in 0..filenames.len() {
+            for color in 0..dbs.len() {
                 for rec in dbs[color].iter() {
                     work_input_queue.0.send((color, rec.seq)).unwrap(); 
                 }
@@ -436,7 +452,18 @@ impl ColoredKmers {
 
         let colex_to_color_set_id: Vec<usize> = (0..sbwt_len).collect(); // Identity mapping
 
-        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: filenames.len()}
+        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: dbs.len()}
+
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+
+        log::info!("Loading {} sequence files (colors) into memory", filenames.len());
+        let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs
+
+        log::info!("Indexing");
+        Self::new_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
     }
 }
 
