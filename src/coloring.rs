@@ -478,15 +478,27 @@ impl ColorSets {
 
 fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
     absent_sbwt: &'a SbwtIndex<SubsetMatrix>, 
-    absent_dbg: &Dbg<'a, SubsetMatrix>,
     present_dbg: &Dbg<'_, SubsetMatrix>,
     present_colex: usize,
     outlabel_buf_1: &mut Vec<u8>,
     outlabel_buf_2: &mut Vec<u8>) -> bool {
 
-    // This node may become the end of a unitig in the merged graph. So we may need
-    // to sample it. This happens if the merged graph has a new outneighbor for
-    // this node, or if the current outneighbor gets a new in-neighbor.
+    // This node may become the end of a colored unitig in the merged graph. So we may need
+    // to sample it. 
+    // 
+    // This happens if any of the following happen:
+    //   (i)   The merged graph has a new outneighbor for this node (unitig ends).
+    //   (ii)  The current outneighbor gets a new in-neighbor (unitig ends).
+    //   (iii) There will be an edge from the node in the present SBWT to a node
+    //         in the absent SBWT. Then the node from the absent SBWT may introduce 
+    //         a new color, in which case the colored unitig ends.
+    //
+    // We assume that all color sets are non-empty, which means that if there is an
+    // outedge into the absent sbwt, then this always introduces a new color in case (iii).
+    // Under this assumption, if case (i) or (ii) happens, case (iii) also happens, so it's enough
+    // to check only for case (iii). If our assumption that all color sets are nonempty
+    // does not hold, it only means that we may sample a node unnecessarily, but the
+    // color set structure is still correct. 
 
     outlabel_buf_1.clear();
     outlabel_buf_2.clear();
@@ -498,28 +510,7 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
         x.push(c);
         let y = &x[1..];
         if absent_sbwt.search(y).is_some() {
-            // This outneighbor will exist in the merged graph
-            outlabel_buf_2.push(c); 
-        }
-        x.pop();
-    }
-    if outlabel_buf_2.len() >= 2 || outlabel_buf_2.first().is_some_and(|c| c != outlabel_buf_1.first().unwrap()) {
-        // This node will have outdegree >= 2 in the merged graph -> sample this node
-        return true;
-    } else {
-        let c = *outlabel_buf_1.first().unwrap();
-        x.push(c);
-        let y = &x[1..];
-        if let Some(colex_range) = absent_sbwt.search(y) {
-            assert!(colex_range.len() == 1); // It's a k-mer so the range should be singleton
-            let v = Node{id: colex_range.start}; 
-            if absent_dbg.indegree(v) >= 1 {
-                // The indegree of v will be > 1 in the merged graph iff v has at least
-                // one inedge in sbwt2. Why? Because the merged node will get the single
-                // inedge it has in sbwt1, and any inedge that exists in sbwt2 is
-                // different from that inedge because the k-mer we came from is absent in sbwt2.
-                return true;
-            }
+            return true; // Sample x
         }
         x.pop();
     }
@@ -573,6 +564,10 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
             } else {
                 Case::NotSampled
             };
+
+            if merged_colex == 246 {
+                dbg!(&c1, &c2, coloring2.colex_to_set_id(colex2), coloring2.colex_to_set(colex2).as_intvec());
+            }
 
             // Ok, this is going to get a bit verbose but bear with me. We have
             // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
@@ -635,7 +630,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
                     distinct_ids.insert((Some(id1), None));
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg2, &dbg1, colex1, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg1, colex1, &mut outlabel_buf_1, &mut outlabel_buf_2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
@@ -646,7 +641,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
                     distinct_ids.insert((None, Some(id2)));
-                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg1, &dbg2, colex2, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg2, colex2, &mut outlabel_buf_1, &mut outlabel_buf_2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
@@ -720,8 +715,10 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
 
             },
             (None, Some(y)) => {
+
                 let set2 = coloring2.set_id_to_set(y);
                 let n_elements = set2.len();
+
                 if n_elements * bits_per_color > n_colors {
                     // Dense
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
@@ -817,6 +814,7 @@ mod tests {
 
     use jseqio::seq_db::SeqDB;
     use sbwt::{BitPackedKmerSorting, SbwtIndexBuilder};
+    use simple_sds_sbwt::ops::BitVec;
 
     use crate::colored_kmers::ColoredKmers;
 
@@ -894,13 +892,14 @@ mod tests {
             for colex in 0..cc_both.sbwt().n_sets() {
                 let kmer = cc_both.sbwt().access_kmer(colex);
                 let true_colors = cc_both.get_color_set(&kmer);
-                eprintln!("{} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors);
 
                 if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
                     let range = sbwt_merged.search(&kmer).unwrap();
                     assert_eq!(range.len(), 1);
                     let colex_merged = range.start;
                     let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(cc_both.n_colors());
+
+                    eprintln!("{} {} {} {:?} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors, sbwt_merged.search(&kmer), ccc_merged.map.sampling.get(colex_merged), ccc_merged.colex_to_set_id(colex_merged));
                     assert_eq!(true_colors, merged_colors);
                 }
 
