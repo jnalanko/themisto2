@@ -1,5 +1,6 @@
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+use sbwt::dbg::Dbg;
 use sbwt::merge;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
@@ -469,6 +470,55 @@ impl ColorSets {
     }
 }
 
+fn figure_out_if_we_need_to_sample_nonsampled_vs_absent<'a>(
+    absent_sbwt: &'a SbwtIndex<SubsetMatrix>, 
+    absent_dbg: &Dbg<'a, SubsetMatrix>,
+    present_dbg: &Dbg<'_, SubsetMatrix>,
+    present_colex: usize,
+    outlabel_buf_1: &mut Vec<u8>,
+    outlabel_buf_2: &mut Vec<u8>) -> bool {
+
+    // This node may become the end of a unitig in the merged graph. So we may need
+    // to sample it. This happens if the merged graph has a new outneighbor for
+    // this node, or if the current outneighbor gets a new in-neighbor.
+
+    outlabel_buf_1.clear();
+    outlabel_buf_2.clear();
+    present_dbg.push_outlabels(Node{id: present_colex}, outlabel_buf_1);
+    assert_eq!(outlabel_buf_1.len(), 1);
+
+    let mut x = present_dbg.get_kmer(Node{id: present_colex});
+    for c in [b'A', b'C', b'G', b'T'] {
+        x.push(c);
+        let y = &x[1..];
+        if absent_sbwt.search(y).is_some() {
+            // This outneighbor will exist in the merged graph
+            outlabel_buf_2.push(c); 
+        }
+        x.pop();
+    }
+    if outlabel_buf_2.len() >= 2 || outlabel_buf_2.first().is_some_and(|c| c != outlabel_buf_1.first().unwrap()) {
+        // This node will have outdegree >= 2 in the merged graph -> sample this node
+        return true;
+    } else {
+        let c = *outlabel_buf_1.first().unwrap();
+        x.push(c);
+        let y = &x[1..];
+        if let Some(colex_range) = absent_sbwt.search(y) {
+            assert!(colex_range.len() == 1); // It's a k-mer so the range should be singleton
+            let v = Node{id: colex_range.start}; 
+            if absent_dbg.indegree(v) >= 1 {
+                // The indegree of v will be > 1 in the merged graph iff v has at least
+                // one inedge in sbwt2. Why? Because the merged node will get the single
+                // inedge it has in sbwt1, and any inedge that exists in sbwt2 is
+                // different from that inedge because the k-mer we came from is absent in sbwt2.
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
 
     log::info!("Computing the sbwt merge plan");
@@ -493,73 +543,73 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let mut outlabel_buf_1 = Vec::<u8>::new();
     let mut outlabel_buf_2 = Vec::<u8>::new();
 
-
     enum Case { // Three cases in a loop below
         Sampled(usize),
         NotSampled,
         Absent,
     }
     for merged_colex in 0..merged_len {
-        let c1 = if !merge_plan.s1[merged_colex] {
-            Case::Absent
-        } else if coloring1.map.sampling.get(colex1) {
-            Case::Sampled(coloring1.colex_to_set_id(colex1))
-        } else {
-            Case::NotSampled
-        };
+        if !merge_plan.is_dummy[merged_colex] {
+            let c1 = if !merge_plan.s1[merged_colex] {
+                Case::Absent
+            } else if coloring1.map.sampling.get(colex1) {
+                Case::Sampled(coloring1.colex_to_set_id(colex1))
+            } else {
+                Case::NotSampled
+            };
 
-        let c2 = if !merge_plan.s2[merged_colex] {
-            Case::Absent
-        } else if coloring2.map.sampling.get(colex2) {
-            Case::Sampled(coloring2.colex_to_set_id(colex2))
-        } else {
-            Case::NotSampled
-        };
+            let c2 = if !merge_plan.s2[merged_colex] {
+                Case::Absent
+            } else if coloring2.map.sampling.get(colex2) {
+                Case::Sampled(coloring2.colex_to_set_id(colex2))
+            } else {
+                Case::NotSampled
+            };
 
-        // Ok, this is going to get a bit verbose but bear with me. We have
-        // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
-        // reduce code duplication by making symmetric cases call a common function,
-        // but it's so few lines of code anyway so let's just go with this.
-        match (c1, c2) {
-            (Case::Sampled(id1), Case::Sampled(id2)) => {
-                //eprintln!("Case 1");
-                distinct_ids.insert((Some(id1), Some(id2)));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::Sampled(id1), Case::NotSampled) => {
-                //eprintln!("Case 2");
-                let id2 = coloring2.colex_to_set_id(colex2);
-                distinct_ids.insert((Some(id1), Some(id2)));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::Sampled(id1), Case::Absent) => {
-                distinct_ids.insert((Some(id1), None));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::NotSampled, Case::Sampled(id2)) => {
-                //eprintln!("Case 3");
-                let id1 = coloring1.colex_to_set_id(colex1);
-                distinct_ids.insert((Some(id1), Some(id2)));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::NotSampled, Case::NotSampled) => {
-                // K-mer is in both SBWTs but its not sampled in either one.
-                // Since it is not sampled in either SBWT, the outdegree of this k-mer
-                // is 1 in both. But we might still need to sample it in the merged graph.
-                // There are two cases:
-                // 1) The outneighbor k-mers are the same k-mer. Then the outdegree in the merged graph 
-                //    will be 1, and that outneighbor will have the same color set id pair as this
-                //    one -> this node does not need to be sampled
-                // 2) The outneighbor k-mers are different. Now we have a new outgoing branch at this 
-                //    node. Which means this node needs to be sampled.
+            // Ok, this is going to get a bit verbose but bear with me. We have
+            // 3 * 3 = 9 cases. There are two symmetric pairs of cases and three unique cases. We could
+            // reduce code duplication by making symmetric cases call a common function,
+            // but it's so few lines of code anyway so let's just go with this.
+            match (c1, c2) {
+                (Case::Sampled(id1), Case::Sampled(id2)) => {
+                    //eprintln!("Case 1");
+                    distinct_ids.insert((Some(id1), Some(id2)));
+                    color_set_sample_marks.set_bit(merged_colex, true);
+                },
+                (Case::Sampled(id1), Case::NotSampled) => {
+                    //eprintln!("Case 2");
+                    let id2 = coloring2.colex_to_set_id(colex2);
+                    distinct_ids.insert((Some(id1), Some(id2)));
+                    color_set_sample_marks.set_bit(merged_colex, true);
+                },
+                (Case::Sampled(id1), Case::Absent) => {
+                    distinct_ids.insert((Some(id1), None));
+                    color_set_sample_marks.set_bit(merged_colex, true);
+                },
+                (Case::NotSampled, Case::Sampled(id2)) => {
+                    //eprintln!("Case 3");
+                    let id1 = coloring1.colex_to_set_id(colex1);
+                    distinct_ids.insert((Some(id1), Some(id2)));
+                    color_set_sample_marks.set_bit(merged_colex, true);
+                },
+                (Case::NotSampled, Case::NotSampled) => {
+                    // K-mer is in both SBWTs but its not sampled in either one.
+                    // Since it is not sampled in either SBWT, the outdegree of this k-mer
+                    // is 1 in both. But we might still need to sample it in the merged graph.
+                    // There are two cases:
+                    // 1) The outneighbor k-mers are the same k-mer. Then the outdegree in the merged graph 
+                    //    will be 1, and that outneighbor will have the same color set id pair as this
+                    //    one -> this node does not need to be sampled
+                    // 2) The outneighbor k-mers are different. Now we have a new outgoing branch at this 
+                    //    node. Which means this node needs to be sampled.
 
-                if !merge_plan.is_dummy[merged_colex] {
                     outlabel_buf_1.clear();
                     outlabel_buf_2.clear();
                     dbg1.push_outlabels(Node{id: colex1}, &mut outlabel_buf_1);
                     dbg2.push_outlabels(Node{id: colex2}, &mut outlabel_buf_2);
                     assert_eq!(outlabel_buf_1.len(), 1);
                     assert_eq!(outlabel_buf_2.len(), 1);
+                    //eprintln!("{} {}", *outlabel_buf_1.first().unwrap() as char, *outlabel_buf_2.first().unwrap() as char);
                     match (outlabel_buf_1.first(), outlabel_buf_2.first()) {
                         (Some(a), Some(b)) => {
                             if a != b { // Case 2 in the comment above
@@ -567,28 +617,33 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
                                 let id1 = coloring1.colex_to_set_id(colex1);
                                 let id2 = coloring2.colex_to_set_id(colex2);
                                 distinct_ids.insert((Some(id1), Some(id2)));
-                            } // The else-branch would be case 1 but then there is nothing to do
+                            } else { // The else-branch would be case 1 but then there is nothing to do
+
+                            }
                         }
                         _ => panic!("Bug at computing color set samples bit vector in merge") // Both should have outdegree > 0
                     }
-                }
-            },
-            (Case::NotSampled, Case::Absent) => {
-                let id1 = coloring1.colex_to_set_id(colex1);
-                distinct_ids.insert((Some(id1), None));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::Absent, Case::Sampled(id2)) => {
-                distinct_ids.insert((None, Some(id2)));
-                color_set_sample_marks.set_bit(merged_colex, true);
-            },
-            (Case::Absent, Case::NotSampled) => {
-                let id2 = coloring2.colex_to_set_id(colex2);
-                distinct_ids.insert((None, Some(id2)));
-                color_set_sample_marks.set_bit(merged_colex, true);
-
-            },
-            (Case::Absent, Case::Absent) => panic!("Nonexisting merged kmer") // Impossible
+                },
+                (Case::NotSampled, Case::Absent) => {
+                    let id1 = coloring1.colex_to_set_id(colex1);
+                    distinct_ids.insert((Some(id1), None));
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, &dbg2, &dbg1, colex1, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                        color_set_sample_marks.set_bit(merged_colex, true);
+                    }
+                },
+                (Case::Absent, Case::Sampled(id2)) => {
+                    distinct_ids.insert((None, Some(id2)));
+                    color_set_sample_marks.set_bit(merged_colex, true);
+                },
+                (Case::Absent, Case::NotSampled) => {
+                    let id2 = coloring2.colex_to_set_id(colex2);
+                    distinct_ids.insert((None, Some(id2)));
+                    if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, &dbg1, &dbg2, colex2, &mut outlabel_buf_1, &mut outlabel_buf_2) {
+                        color_set_sample_marks.set_bit(merged_colex, true);
+                    }
+                },
+                (Case::Absent, Case::Absent) => panic!("Nonexisting merged kmer") // Impossible
+            }
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;
