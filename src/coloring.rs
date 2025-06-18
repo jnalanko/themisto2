@@ -651,8 +651,9 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
 
-    let color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
-    let n_sampled = color_set_sample_marks.count_ones();
+    let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
+    color_set_sample_marks.enable_rank();
+    let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Constructing distinct merged color sets");
