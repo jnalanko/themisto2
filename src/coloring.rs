@@ -798,3 +798,49 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     (new_coloring, merged_sbwt)
 
 }
+
+
+#[cfg(test)]
+mod tests {
+    use sbwt::{BitPackedKmerSorting, SbwtIndexBuilder};
+
+    use crate::colored_kmers::ColoredKmers;
+
+
+    #[cfg(test)]
+    pub(crate) fn gen_random_dna_string(len: usize, seed: u64) -> Vec<u8> {
+        use rand_chacha::rand_core::{RngCore, SeedableRng};
+
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(1234);
+        (0..len).map(|_| { 
+            match rng.next_u64() % 4 {
+                0 => b'A',
+                1 => b'C',
+                2 => b'G',
+                3 => b'T',
+                _ => panic!("Impossible")
+            }
+        }).collect()
+    }
+
+    #[test]
+    fn test_merge() {
+
+        let k = 5;
+
+        let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(100, i as u64)).collect();
+        let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(100, 123456 + i as u64)).collect();
+
+        let mut all_input_seq_slices = Vec::<&[u8]>::new();
+        all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
+        all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
+
+        let (sbwt1, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[..input_seqs_1.len()]);
+        let (sbwt2, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices[input_seqs_1.len()..]);
+
+        let cc1 = ColoredKmers::new(); todo!();
+
+        //let (sbwt_both, _) = SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).run_from_slices(&all_input_seq_slices);
+
+    }
+}
