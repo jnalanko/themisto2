@@ -11,7 +11,7 @@ mod EM;
 mod colored_kmers;
 mod themisto1_compatibility;
 mod compatibility_criteria;
-mod coloring;
+mod compact_colored_kmers;
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 
@@ -564,14 +564,14 @@ fn main() {
 
             log::info!("Loading index 1");
             let mut in1 = &mut BufReader::new(File::open(index1_file).unwrap());
-            let colors1 = coloring::CompactColexColoring::load(&mut in1, true); // Select support is required for merge
+            let colors1 = compact_colored_kmers::CompactColexColoring::load(&mut in1, true); // Select support is required for merge
 
             log::info!("Loading index 2");
             let mut in2 = &mut BufReader::new(File::open(index2_file).unwrap());
-            let colors2 = coloring::CompactColexColoring::load(&mut in2, true); // Select support is required for merge
+            let colors2 = compact_colored_kmers::CompactColexColoring::load(&mut in2, true); // Select support is required for merge
 
             log::info!("Merging");
-            let merged_colored_kmers = coloring::merge_compact_colorings(colors1, colors2, true, n_threads);
+            let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, true, n_threads);
 
             log::info!("Serializing");
             merged_colored_kmers.serialize(&mut out);
