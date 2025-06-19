@@ -5,7 +5,7 @@ use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 use compatibility_criteria::unique_support_combination_method;
-use sbwt::{SbwtIndex, SubsetMatrix};
+use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
 
 mod EM;
 mod colored_kmers;
@@ -532,6 +532,7 @@ fn main() {
 
                 log::info!("Serializing to {}", outfile.display());
                 index.sbwt().serialize(&mut out).unwrap(); // SBWT
+                index.lcs_array().serialize(&mut out).unwrap(); // LCS
                 compressed.serialize(&mut out); // Colors
 
                 log::info!("Validating compressed colors for {}", validation_queries.display());
@@ -554,6 +555,7 @@ fn main() {
             } else {
                 log::info!("Copying SBWT to {}", outfile.display());
                 index.sbwt().serialize(&mut out).unwrap(); // SBWT
+                index.lcs_array().serialize(&mut out).unwrap(); // LCS
 
                 let compressed = index.compress_colors(sample_distance, n_threads);
                 log::info!("Serializing colors to {}", outfile.display());
@@ -567,17 +569,19 @@ fn main() {
             log::info!("Loading index 1");
             let mut in1 = &mut BufReader::new(File::open(index1_file).unwrap());
             let mut sbwt1 = SbwtIndex::<SubsetMatrix>::load(&mut in1).unwrap(); 
+            let lcs1 = LcsArray::load(&mut in1).unwrap(); 
             sbwt1.build_select();
             let colors1 = coloring::CompactColexColoring::load(&mut in1, Arc::new(sbwt1));
 
             log::info!("Loading index 2");
             let mut in2 = &mut BufReader::new(File::open(index2_file).unwrap());
             let mut sbwt2 = SbwtIndex::<SubsetMatrix>::load(&mut in2).unwrap(); 
+            let lcs2 = LcsArray::load(&mut in2).unwrap();
             sbwt2.build_select();
             let colors2 = coloring::CompactColexColoring::load(&mut in2, Arc::new(sbwt2));
 
             log::info!("Merging");
-            let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, true, n_threads);
+            let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, &lcs1, &lcs2, true, n_threads);
 
             log::info!("Serializing");
             merged_sbwt.serialize(&mut out).unwrap();

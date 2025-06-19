@@ -267,6 +267,10 @@ impl ColoredKmers {
         &self.kmers
     }
 
+    pub fn lcs_array(&self) -> &LcsArray {
+        &self.lcs
+    }
+
     pub fn build_sbwt_select_support(&mut self) {
         self.kmers.build_select();
     }

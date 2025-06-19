@@ -3,6 +3,7 @@ use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 use sbwt::dbg::Dbg;
 use sbwt::merge::{self, MergeInterleaving};
+use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
@@ -605,7 +606,7 @@ impl PartitionedReadOnlyIdMap {
 }
 
 
-fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
+fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, lcs1: &LcsArray, lcs2: &LcsArray, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
@@ -618,8 +619,8 @@ fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexCol
     let mut colex2 = 0_usize;
 
     let mut color_set_sample_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(merged_len, false);
-    let dbg1 = sbwt::dbg::Dbg::new(&(*coloring1.map.sbwt), None, n_threads);
-    let dbg2 = sbwt::dbg::Dbg::new(&(*coloring2.map.sbwt), None, n_threads);
+    let dbg1 = sbwt::dbg::Dbg::new(&(*coloring1.map.sbwt), Some(lcs1), n_threads);
+    let dbg2 = sbwt::dbg::Dbg::new(&(*coloring2.map.sbwt), Some(lcs2), n_threads);
     let mut outlabel_buf_1 = Vec::<u8>::new();
     let mut outlabel_buf_2 = Vec::<u8>::new();
 
@@ -863,7 +864,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
     sampled_ids
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, lcs1: &LcsArray, lcs2: &LcsArray, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
@@ -876,7 +877,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let n_colors = n_colors_1 + n_colors_2;
 
     log::info!("Computing color id pairs and merged sampling");
-    let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
+    let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, lcs1, lcs2, &merge_plan, n_threads);
 
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
@@ -1001,6 +1002,8 @@ mod tests {
             let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
             let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
             let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
+            let lcs1 = cc1.lcs_array().clone();
+            let lcs2 = cc2.lcs_array().clone();
 
             cc_both.build_sbwt_select_support();
 
@@ -1008,7 +1011,7 @@ mod tests {
             let ccc1 = cc1.compress_colors(sample_distance, 3);
             let ccc2 = cc2.compress_colors(sample_distance, 3);
 
-            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
+            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, &lcs1, &lcs2, true, 3);
 
             for colex in 0..cc_both.sbwt().n_sets() {
                 let kmer = cc_both.sbwt().access_kmer(colex);
