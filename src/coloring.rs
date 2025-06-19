@@ -10,7 +10,7 @@ use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, R
 use rustc_hash::FxHasher;
 use core::hash;
 use std::cmp::max;
-use std::collections::HashSet;
+use std::collections::{hash_map, HashSet};
 use std::sync::Arc;
 use std::u64;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
@@ -552,7 +552,8 @@ fn insert_pair(x: (Option<usize>, Option<usize>), hashmaps: &mut [HashMap::<(Opt
 fn get_new_id_of_pair(x: (Option<usize>, Option<usize>), hashmaps: &[HashMap::<(Option::<usize>, Option::<usize>), usize>]) -> usize {
     let r = hash_pair(x);
     let hash_map_idx = (r / (u64::MAX / hashmaps.len() as u64)) as usize;
-    hashmaps[hash_map_idx][&x]
+    let sum_before = hashmaps[0..hash_map_idx].iter().fold(0_usize, |acc, H| acc + H.len()); // TODO: precompute
+    sum_before + hashmaps[hash_map_idx][&x]
 }
 
 
@@ -704,8 +705,9 @@ fn encode_merged_color_sets(id_pair_maps: &[HashMap::<(Option::<usize>, Option::
     let mut id_pairs_in_new_id_order = id_pair_maps.iter().fold(
         Vec::<(usize, (Option::<usize>, Option::<usize>))>::with_capacity(n_pairs_total),
         |mut acc, H| {
+            let len_before = acc.len();
             acc.extend(
-                H.iter().map(|(pair, new_id)| (*new_id, *pair))
+                H.iter().map(|(pair, new_id)| (*new_id + len_before, *pair))
             );
             acc
         }
