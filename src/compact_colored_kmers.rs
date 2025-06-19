@@ -5,6 +5,7 @@ use sbwt::dbg::Dbg;
 use sbwt::merge::{self, MergeInterleaving};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
+use simple_sds_sbwt::bit_vector::BitVector;
 use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
@@ -360,16 +361,24 @@ impl CompactColexColoring {
 
         // Let's make the singleton set dense because a bitvector access is
         // probably a bit cheaper than an intvector access.
-        dense_sets.push(&bitvec![1]); // Singleton set
+        let singleton = bitvec![1];
+        dense_sets.push(&singleton); // Singleton set
 
-        let is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(len, value); // TODO
-
-        let unitig_samples = ColexToColorSetMap::pick_sampled_kmers(n_colors, sample_distance, &(*sbwt), &dense_sets.bitmap_data, n_threads);
+        let is_dense_marks = BitVector::from(RawVector::with_len(1, true));
 
         let sets = ColorSets {
-            dense_sets, sparse_sets, is_dense_marks
+            dense_sets, sparse_sets, is_dense_marks, n_colors
         };
-        //let colex_map = ColexToColorSetMap::new(sbwt.clone(), sample_distance, bm, &hashmap, n_colors, n_threads);
+
+        log::info!("Sampling nodes");
+        let unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, |_colex| &singleton, n_threads);
+        let mut color_set_ids = IntVector::with_capacity(1, int_bitwidth).unwrap();
+        color_set_ids.push(0);
+        let colex_map = ColexToColorSetMap{
+            sbwt: sbwt.clone(),
+            sampling: unitig_samples,
+            color_set_ids,
+        };
         Self {sbwt, lcs, sets, map: colex_map}
     }
 
