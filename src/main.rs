@@ -574,7 +574,7 @@ fn main() {
                 let SbwtIndexVariant::SubsetMatrix(mut sbwt1) = sbwt::load_sbwt_index_variant(&mut in1).unwrap();
                 sbwt1.build_select(); // Required for merge
                 let lcs1 = LcsArray::from_sbwt(&sbwt1, n_threads);
-                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt1), lcs1, 4, n_threads) // Todo: 4 to CLI
+                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt1), lcs1, 1, n_threads) // Todo: 1 to CLI
             } else {
                 compact_colored_kmers::CompactColexColoring::load(&mut in1, true) // Select support is required for merge
             };
@@ -585,7 +585,7 @@ fn main() {
                 let SbwtIndexVariant::SubsetMatrix(mut sbwt2) = sbwt::load_sbwt_index_variant(&mut in2).unwrap();
                 sbwt2.build_select(); // Required for merge
                 let lcs2 = LcsArray::from_sbwt(&sbwt2, n_threads);
-                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt2), lcs2, 4, n_threads) // Todo: 4 to CLI
+                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt2), lcs2, 1, n_threads) // Todo: 1 to CLI
             } else {
                 compact_colored_kmers::CompactColexColoring::load(&mut in1, true) // Select support is required for merge
             };

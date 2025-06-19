@@ -6,6 +6,7 @@ use sbwt::merge::{self, MergeInterleaving};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::bit_vector::BitVector;
+use simple_sds_sbwt::ops::Select;
 use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
@@ -374,8 +375,8 @@ impl CompactColexColoring {
         log::info!("Sampling nodes");
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
         unitig_samples.enable_rank();
-        let mut color_set_ids = IntVector::with_capacity(1, int_bitwidth).unwrap();
-        color_set_ids.push(0);
+        log::info!("Storing color set ids for sampled nodes");
+        let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
         let colex_map = ColexToColorSetMap{
             sbwt: sbwt.clone(),
             sampling: unitig_samples,
