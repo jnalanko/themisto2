@@ -8,6 +8,7 @@ use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
+use core::hash;
 use std::cmp::max;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -548,6 +549,12 @@ fn insert_pair(x: (Option<usize>, Option<usize>), hashmaps: &mut [HashMap::<(Opt
     }
 }
 
+fn get_new_id_of_pair(x: (Option<usize>, Option<usize>), hashmaps: &[HashMap::<(Option::<usize>, Option::<usize>), usize>]) -> usize {
+    let r = hash_pair(x);
+    let hash_map_idx = (r / (u64::MAX / hashmaps.len() as u64)) as usize;
+    hashmaps[hash_map_idx][&x]
+}
+
 
 pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (Vec<HashMap<(Option<usize>, Option<usize>), usize>>, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
@@ -681,7 +688,7 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     bitmap_size <= intvec_size
 }
 
-fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Option::<usize>), usize>, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
+fn encode_merged_color_sets(id_pair_maps: &[HashMap::<(Option::<usize>, Option::<usize>), usize>], coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
 
     let n_colors_1 = coloring1.sets.n_colors;
     let n_colors_2 = coloring2.sets.n_colors;
@@ -692,14 +699,22 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
     let mut dense_sets = BitMaps::new(n_colors);
     let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-    let mut id_pairs_in_new_id_order = id_pair_to_new_id.iter()
-        .map(|(pair, new_id)| (new_id, pair))
-        .collect::<Vec::<_>>();
+    // Collect all elements (new id, old id pair) from the hash maps
+    let n_pairs_total = id_pair_maps.iter().fold(0_usize, |acc, H| acc + H.len());
+    let mut id_pairs_in_new_id_order = id_pair_maps.iter().fold(
+        Vec::<(usize, (Option::<usize>, Option::<usize>))>::with_capacity(n_pairs_total),
+        |mut acc, H| {
+            acc.extend(
+                H.iter().map(|(pair, new_id)| (*new_id, *pair))
+            );
+            acc
+        }
+    );
     id_pairs_in_new_id_order.sort();
 
     // Encode sparse and dense sets
     // TODO: avoid small heap allocations here and instead write directly to the final data structure
-    for (_, &(left, right)) in id_pairs_in_new_id_order {
+    for (_, (left, right)) in id_pairs_in_new_id_order.into_iter() {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
@@ -773,7 +788,7 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
 
 }
 
-fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id: &HashMap::<(Option<usize>, Option<usize>), usize>) -> simple_sds_sbwt::int_vector::IntVector {
+fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id_maps: &[HashMap::<(Option<usize>, Option<usize>), usize>]) -> simple_sds_sbwt::int_vector::IntVector {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
@@ -797,7 +812,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
 
             // The merge plan should not have a zero-bit at the same position in s1 and s2
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
-            let id = pair_to_new_id[&(color_set_id_1, color_set_id_2)];
+            let id = get_new_id_of_pair((color_set_id_1, color_set_id_2), pair_to_new_id_maps);
             sampled_ids.push(id as u64);
         }
 
@@ -823,32 +838,19 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("Computing color id pairs and merged sampling");
     let (distinct_id_pairs_maps, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
 
-    // Combine maps
-    let distinct_pairs_map = distinct_id_pairs_maps.into_iter().fold(
-        HashMap::<(Option::<usize>, Option::<usize>), usize>::new(),
-        |mut acc, H| {
-            let old_len = acc.len();
-            for (key, val) in H.iter() {
-                debug_assert!(!acc.contains_key(key)); // All hash maps should be disjoint
-                acc.insert(*key, val + old_len);
-            }
-            acc}
-        );
-
-    let n_distinct_color_sets = distinct_pairs_map.len();
-
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
     let n_sampled = color_set_sample_marks.rank(color_set_sample_marks.len());
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Encoding distinct merged color sets");
-    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&distinct_pairs_map, &coloring1, &coloring2);
+    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&distinct_id_pairs_maps, &coloring1, &coloring2);
 
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
     log::info!("Storing new sampled color set ids");
-    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &distinct_pairs_map);
+    let n_distinct_color_sets = distinct_id_pairs_maps.iter().fold(0_usize, |acc, H| acc + H.len());
+    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &distinct_id_pairs_maps);
 
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
