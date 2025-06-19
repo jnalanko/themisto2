@@ -1029,8 +1029,6 @@ mod tests {
             let cc1 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs1, k, 3, None);
             let cc2 = ColoredKmers::new_from_seq_dbs::<&Path>(dbs2, k, 3, None);
             let mut cc_both = ColoredKmers::new_from_seq_dbs::<&Path>(dbs_both, k, 3, None);
-            let lcs1 = cc1.lcs_array().clone();
-            let lcs2 = cc2.lcs_array().clone();
 
             cc_both.build_sbwt_select_support();
 
