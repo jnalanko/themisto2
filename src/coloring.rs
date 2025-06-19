@@ -368,8 +368,18 @@ impl CompactColexColoring {
         self.map.serialize(out);
     }
 
-    pub fn load(input: &mut impl std::io::Read) -> Self {
-        let sbwt = Arc::new(SbwtIndex::<SubsetMatrix>::load(input).unwrap());
+    /// If this struct is going to be merged with [crate::coloring::merge_colorings], it will
+    /// need select support on the sbwt. We need to build it already during loading because
+    /// once the sbwt is put on to the heap into an Arc, it cannot be modified anymore.
+    /// Unless we make it an Arc<Refcell<...>>, but that might have overhead because then
+    /// it will do run-time borrow checking on every access if I understand correctly.
+    pub fn load(input: &mut impl std::io::Read, enable_select: bool) -> Self {
+        let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
+        if enable_select {
+            log::info!("Building select support");
+            sbwt.build_select();
+        }
+        let sbwt = Arc::new(sbwt);
         let lcs = LcsArray::load(input).unwrap();
         let sets = ColorSets::load(input);
         let map = ColexToColorSetMap::load(input, sbwt.clone());
@@ -994,7 +1004,6 @@ mod tests {
             all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
             all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
 
-
             let mut dbs1 = Vec::<SeqDB>::new();
             let mut dbs2 = Vec::<SeqDB>::new();
             let mut dbs_both = Vec::<SeqDB>::new();
@@ -1029,7 +1038,7 @@ mod tests {
             let ccc1 = cc1.compress_colors(sample_distance, 3);
             let ccc2 = cc2.compress_colors(sample_distance, 3);
 
-            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, &lcs1, &lcs2, true, 3);
+            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
 
             for colex in 0..cc_both.sbwt().n_sets() {
                 let kmer = cc_both.sbwt().access_kmer(colex);

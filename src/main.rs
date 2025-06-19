@@ -564,13 +564,11 @@ fn main() {
 
             log::info!("Loading index 1");
             let mut in1 = &mut BufReader::new(File::open(index1_file).unwrap());
-            sbwt1.build_select(); // TODO
-            let colors1 = coloring::CompactColexColoring::load(&mut in1);
+            let colors1 = coloring::CompactColexColoring::load(&mut in1, true); // Select support is required for merge
 
             log::info!("Loading index 2");
             let mut in2 = &mut BufReader::new(File::open(index2_file).unwrap());
-            sbwt2.build_select(); // TODO
-            let colors2 = coloring::CompactColexColoring::load(&mut in2);
+            let colors2 = coloring::CompactColexColoring::load(&mut in2, true); // Select support is required for merge
 
             log::info!("Merging");
             let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, true, n_threads);

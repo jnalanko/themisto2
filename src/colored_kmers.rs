@@ -278,7 +278,7 @@ impl ColoredKmers {
     pub fn compress_colors(mut self, sample_distance: usize, n_threads: usize) -> CompactColexColoring {
         self.build_sbwt_select_support(); // Required in the compactification
         let sbwt = Arc::new(self.kmers); // Move to heap
-        CompactColexColoring::new(sbwt, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
+        CompactColexColoring::new(sbwt, self.lcs, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
     }
 }
 
