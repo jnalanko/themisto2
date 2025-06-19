@@ -364,7 +364,8 @@ impl CompactColexColoring {
         let singleton = bitvec![1];
         dense_sets.push(&singleton); // Singleton set
 
-        let is_dense_marks = BitVector::from(RawVector::with_len(1, true));
+        let mut is_dense_marks = BitVector::from(RawVector::with_len(1, true));
+        is_dense_marks.enable_rank();
 
         let sets = ColorSets {
             dense_sets, sparse_sets, is_dense_marks, n_colors
