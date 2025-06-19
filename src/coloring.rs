@@ -12,6 +12,7 @@ use rustc_hash::FxHasher;
 use core::hash;
 use std::cmp::max;
 use std::collections::{hash_map, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::u64;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
@@ -21,6 +22,15 @@ use std::hash::{Hash, Hasher};
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
 pub struct CompactColexColoring {
+    // This is on the heap to allow map to refer to it (otherwise assuring lifetime 
+    // guarantees becomes problematic). It's reference counted because this struct
+    // will have two references to it, the one in self.sbwt, and one in self.map.sbwt.
+    // Note that this means that if we replace sbwt here with a new Rc pointing to a new
+    // sbwt, then, the map will continue to point to the old sbwt. So don't do that!
+    // It's atomic (Arc) because we want to pass this struct to multiple threads.
+    sbwt: Arc<SbwtIndex<SubsetMatrix>>, 
+
+    lcs: LcsArray,
     sets: ColorSets, // Distinct color sets
     map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
 }
@@ -39,8 +49,7 @@ pub struct ColorSets {
 /// closest sampled node.
 pub struct ColexToColorSetMap {
 
-    // This is reference-counted so that the merge function can return a new SBWT and a new mapping referring to it.
-    // It's atomic in because we want to support sharing between threads for parallel queries.
+    // See the comments inside CompactcolexColoring
     sbwt: Arc<SbwtIndex<SubsetMatrix>>,
 
     sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
@@ -334,11 +343,10 @@ impl CompactColexColoring {
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
         let (sets, hashmap) = ColorSets::hash_and_encode_distinct_sets(bm, n_colors);
-        let colex_map = ColexToColorSetMap::new(sbwt, sample_distance, bm, &hashmap, n_colors, n_threads);
-
-        Self {sets, map: colex_map}
+        let colex_map = ColexToColorSetMap::new(sbwt.clone(), sample_distance, bm, &hashmap, n_colors, n_threads);
+        Self {sbwt, lcs, sets, map: colex_map}
     }
 
     pub fn colex_to_set_id(&self, colex: usize) -> usize {
@@ -354,16 +362,19 @@ impl CompactColexColoring {
     }
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
+        self.sbwt.serialize(out).unwrap();
+        self.lcs.serialize(out).unwrap();
         self.sets.serialize(out);
         self.map.serialize(out);
     }
 
-    pub fn load(input: &mut impl std::io::Read, sbwt: Arc<SbwtIndex<SubsetMatrix>>) -> Self {
+    pub fn load(input: &mut impl std::io::Read) -> Self {
+        let sbwt = Arc::new(SbwtIndex::<SubsetMatrix>::load(input).unwrap());
+        let lcs = LcsArray::load(input).unwrap();
         let sets = ColorSets::load(input);
-        let map = ColexToColorSetMap::load(input, sbwt);
-        CompactColexColoring{sets, map}
+        let map = ColexToColorSetMap::load(input, sbwt.clone());
+        CompactColexColoring{sbwt, lcs, sets, map}
     }
-
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -864,7 +875,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
     sampled_ids
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, lcs1: &LcsArray, lcs2: &LcsArray, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
@@ -877,7 +888,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let n_colors = n_colors_1 + n_colors_2;
 
     log::info!("Computing color id pairs and merged sampling");
-    let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, lcs1, lcs2, &merge_plan, n_threads);
+    let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &coloring1.lcs, &coloring2.lcs, &merge_plan, n_threads);
 
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
@@ -914,9 +925,15 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let sbwt2 = (*coloring2.map.sbwt).clone(); // Todo: avoid clone
     drop(coloring2);
 
+    log::info!("Interleaving SBWTs");
     let merged_sbwt = Arc::new(SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads));
 
+    log::info!("Computing the merged LCS array"); // Todo: could we do this during the interleave?
+    let merged_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
+
     let new_coloring = CompactColexColoring { 
+        sbwt: merged_sbwt.clone(),
+        lcs: merged_lcs,
         sets: colorsets, 
         map: ColexToColorSetMap {
             sbwt: merged_sbwt.clone(), 
@@ -925,6 +942,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
         }
     };
 
+    log::info!("Color merge finished");
     (new_coloring, merged_sbwt)
 
 }
