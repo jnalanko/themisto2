@@ -675,6 +675,12 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
 
 }
 
+fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bool {
+    let intvec_size = n_elements * bits_per_color;
+    let bitmap_size = n_colors;
+    bitmap_size <= intvec_size
+}
+
 fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Option::<usize>), usize>, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
 
     let n_colors_1 = coloring1.sets.n_colors;
@@ -691,14 +697,51 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
         .collect::<Vec::<_>>();
     id_pairs_in_new_id_order.sort();
 
-    for (_, &(left, right)) in id_pairs_in_new_id_order {
+    // Count sparse and dense sets
+    let mut sparse_set_sizes = Vec::<(usize, usize)>::new(); // n_elements, id
+    let mut n_dense = 0_usize;
+    for (&(left, right), new_id) in id_pair_to_new_id.iter() {
+        let n_elements = match (left,right) {
+            (Some(x), Some(y)) => {
+                let set1 = coloring1.set_id_to_set(x);
+                let set2 = coloring2.set_id_to_set(y);
+                set1.len() + set2.len()
+            },
+            (Some(x), None) => {
+                let set1 = coloring1.set_id_to_set(x);
+                set1.len()
+            },
+            (None, Some(y)) => {
+                let set2 = coloring2.set_id_to_set(y);
+                set2.len()
+            }
+            (None, None) => panic!("Nonexisting color set id pair")
+        };
+        if is_dense_set(n_elements, bits_per_color, n_colors) {
+            n_dense += 1;
+        } else {
+            sparse_set_sizes.push((n_elements, *new_id));
+        }
+    }
+
+    // Figure out starting points in sparse set concatenation
+    sparse_set_sizes.sort();
+    let mut sparse_set_concat_starts = Vec::<usize>::with_capacity(sparse_set_sizes.len() + 1);
+    sparse_set_concat_starts.push(0);
+    for (len, _) in sparse_set_sizes.into_iter() {
+        sparse_set_concat_starts.push(sparse_set_concat_starts.last().unwrap() + len);
+    }
+
+    // Encode sparse and dense sets
+    // for (&(left, right), _) in id_pair_to_new_id.iter() {
+    for (new_id, &(left, right)) in id_pairs_in_new_id_order {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
                 let set2 = coloring2.set_id_to_set(y);
                 let n_elements = set1.len() + set2.len();
 
-                if n_elements * bits_per_color > n_colors {
+                if is_dense_set(n_elements, bits_per_color, n_colors) {
                     // Dense set -> encode as bitmap
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
                     concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
@@ -720,7 +763,7 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
             (Some(x), None) => {
                 let set1 = coloring1.set_id_to_set(x);
                 let n_elements = set1.len();
-                if n_elements * bits_per_color > n_colors {
+                if is_dense_set(n_elements, bits_per_color, n_colors) {
                     // Dense
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
                     concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
@@ -740,7 +783,7 @@ fn encode_merged_color_sets(id_pair_to_new_id: &HashMap::<(Option::<usize>, Opti
                 let set2 = coloring2.set_id_to_set(y);
                 let n_elements = set2.len();
 
-                if n_elements * bits_per_color > n_colors {
+                if is_dense_set(n_elements, bits_per_color, n_colors) {
                     // Dense
                     let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
                     concat.extend_from_bitslice(&bitvec![0; n_colors_1]);
