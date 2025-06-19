@@ -372,7 +372,8 @@ impl CompactColexColoring {
         };
 
         log::info!("Sampling nodes");
-        let unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
+        let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
+        unitig_samples.enable_rank();
         let mut color_set_ids = IntVector::with_capacity(1, int_bitwidth).unwrap();
         color_set_ids.push(0);
         let colex_map = ColexToColorSetMap{
