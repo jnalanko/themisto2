@@ -234,7 +234,7 @@ impl ColexToColorSetMap {
 
 
         let get_colorset_fn = |colex| &color_bitmap[colex*n_colors..(colex+1)*n_colors];
-        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &(*sbwt), get_colorset_fn, n_threads);
+        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &(*sbwt), None, get_colorset_fn, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -294,7 +294,7 @@ impl ColexToColorSetMap {
     }
 
     /// Utility function used in construction
-    fn pick_sampled_kmers<'a, F: Fn(usize) -> &'a BitSlice + Sync + Send>(sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, get_colorset_fn: F, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
+    fn pick_sampled_kmers<'a, F: Fn(usize) -> &'a BitSlice + Sync + Send>(sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, lcs: Option<&LcsArray>, get_colorset_fn: F, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
         // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
         
         let marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
@@ -323,7 +323,7 @@ impl ColexToColorSetMap {
         };
 
         log::info!("Initializing the de Bruijn graph");
-        let dbg = sbwt::dbg::Dbg::new(sbwt, None, n_threads);
+        let dbg = sbwt::dbg::Dbg::new(sbwt, lcs, n_threads);
 
         log::info!("Iterating unitigs");
         dbg.iter_unitigs_with_callback(callback, n_threads);
@@ -372,7 +372,7 @@ impl CompactColexColoring {
         };
 
         log::info!("Sampling nodes");
-        let unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, |_colex| &singleton, n_threads);
+        let unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
         let mut color_set_ids = IntVector::with_capacity(1, int_bitwidth).unwrap();
         color_set_ids.push(0);
         let colex_map = ColexToColorSetMap{
