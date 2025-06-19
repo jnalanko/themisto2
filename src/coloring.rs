@@ -534,36 +534,86 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
     false
 }
 
-fn hash_pair(x: (Option<usize>, Option<usize>)) -> u64 {
-    let mut hasher = FxHasher::default();
-    x.hash(&mut hasher);
-    hasher.finish()
+struct PartitionedIdMap {
+    hashmaps: Vec<HashMap::<(Option::<usize>, Option::<usize>), usize>>,
 }
 
-fn insert_pair(x: (Option<usize>, Option<usize>), hashmaps: &mut [HashMap::<(Option::<usize>, Option::<usize>), usize>]) {
-    let r = hash_pair(x);
-    let hash_map_idx = (r / (u64::MAX / hashmaps.len() as u64)) as usize;
-    let H = &mut hashmaps[hash_map_idx];
-    if !H.contains_key(&x) {
-        H.insert(x, H.len());
+struct PartitionedReadOnlyIdMap {
+    hashmaps: Vec<HashMap::<(Option::<usize>, Option::<usize>), usize>>,
+    cumul_sizes: Vec<usize> // index i contains total length of hash maps [0..i)
+}
+
+impl PartitionedIdMap {
+    fn hash_pair(x: (Option<usize>, Option<usize>)) -> u64 {
+        let mut hasher = FxHasher::default();
+        x.hash(&mut hasher);
+        hasher.finish()
     }
+
+    fn insert_pair(&mut self, x: (Option<usize>, Option<usize>)) {
+        let r = Self::hash_pair(x);
+        let hash_map_idx = (r / (u64::MAX / self.hashmaps.len() as u64)) as usize;
+        let H = &mut self.hashmaps[hash_map_idx];
+        if !H.contains_key(&x) {
+            H.insert(x, H.len());
+        }
+    }
+
+    // There is not method to get a pair. For that, first convert the struct
+    // into PartitionedReadOnlyIdMap, which does some precalc to make the
+    // lookup faster.
 }
 
-fn get_new_id_of_pair(x: (Option<usize>, Option<usize>), hashmaps: &[HashMap::<(Option::<usize>, Option::<usize>), usize>]) -> usize {
-    let r = hash_pair(x);
-    let hash_map_idx = (r / (u64::MAX / hashmaps.len() as u64)) as usize;
-    let sum_before = hashmaps[0..hash_map_idx].iter().fold(0_usize, |acc, H| acc + H.len()); // TODO: precompute
-    sum_before + hashmaps[hash_map_idx][&x]
+impl PartitionedReadOnlyIdMap {
+    fn new(old: PartitionedIdMap) -> Self {
+        let mut cumul_sizes = Vec::<usize>::with_capacity(old.hashmaps.len() + 1); 
+        cumul_sizes.push(0);
+        old.hashmaps.iter().for_each(|H| {
+            cumul_sizes.push(cumul_sizes.last().unwrap() + H.len());
+        });
+
+        PartitionedReadOnlyIdMap{hashmaps: old.hashmaps, cumul_sizes}
+    }
+
+    fn total_len(&self) -> usize {
+        self.cumul_sizes[self.hashmaps.len()]
+    }
+
+    fn get_new_id_of_pair(&self, x: (Option<usize>, Option<usize>)) -> usize {
+        let r = PartitionedIdMap::hash_pair(x);
+        let hash_map_idx = (r / (u64::MAX / self.hashmaps.len() as u64)) as usize;
+        self.cumul_sizes[hash_map_idx] + self.hashmaps[hash_map_idx][&x]
+    }
+
+    fn get_old_ids_sorted_by_new_id(&self) -> Vec<(usize, (Option::<usize>, Option::<usize>))> {
+        // Collect all elements (new id, old id pair) from the hash maps
+        let n_pairs_total = self.total_len();
+        let mut id_pairs_in_new_id_order = self.hashmaps.iter().fold(
+            Vec::<(usize, (Option::<usize>, Option::<usize>))>::with_capacity(n_pairs_total),
+            |mut acc, H| {
+                let len_before = acc.len();
+                acc.extend(
+                    H.iter().map(|(pair, new_id)| (*new_id + len_before, *pair))
+                );
+                acc
+            }
+        );
+        id_pairs_in_new_id_order.sort();
+        id_pairs_in_new_id_order
+    }
+
 }
 
 
-pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (Vec<HashMap<(Option<usize>, Option<usize>), usize>>, simple_sds_sbwt::raw_vector::RawVector) {
+fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
     // Distinct color id pairs, inserted into key-disjoint hash maps. The values are
     // color set ids within the hash map.
-    let mut hashmaps = vec![HashMap::<(Option::<usize>, Option::<usize>), usize>::new(); n_threads];
+    let hashmaps = vec![HashMap::<(Option::<usize>, Option::<usize>), usize>::new(); n_threads];
+    let mut new_id_map = PartitionedIdMap{hashmaps};
+
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
 
@@ -603,22 +653,22 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
             // but it's so few lines of code anyway so let's just go with this.
             match (c1, c2) {
                 (Case::Sampled(id1), Case::Sampled(id2)) => {
-                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
+                    new_id_map.insert_pair((Some(id1), Some(id2)));
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Sampled(id1), Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
-                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
+                    new_id_map.insert_pair((Some(id1), Some(id2)));
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Sampled(id1), Case::Absent) => {
-                    insert_pair((Some(id1), None), &mut hashmaps);
+                    new_id_map.insert_pair((Some(id1), None));
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::NotSampled, Case::Sampled(id2)) => {
                     //eprintln!("Case 3");
                     let id1 = coloring1.colex_to_set_id(colex1);
-                    insert_pair((Some(id1), Some(id2)), &mut hashmaps);
+                    new_id_map.insert_pair((Some(id1), Some(id2)));
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::NotSampled, Case::NotSampled) => {
@@ -645,7 +695,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                                 color_set_sample_marks.set_bit(merged_colex, true);
                                 let id1 = coloring1.colex_to_set_id(colex1);
                                 let id2 = coloring2.colex_to_set_id(colex2);
-                                insert_pair((Some(id1), Some(id2)), &mut hashmaps);
+                                new_id_map.insert_pair((Some(id1), Some(id2)));
                             } else { // The else-branch would be case 1 but then there is nothing to do
 
                             }
@@ -655,18 +705,18 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
                 },
                 (Case::NotSampled, Case::Absent) => {
                     let id1 = coloring1.colex_to_set_id(colex1);
-                    insert_pair((Some(id1), None), &mut hashmaps);
+                    new_id_map.insert_pair((Some(id1), None));
                     if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring2.map.sbwt, colex2, merged_colex, &merge_plan.is_leader, &merge_plan.s2) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
                 },
                 (Case::Absent, Case::Sampled(id2)) => {
-                    insert_pair((None, Some(id2)), &mut hashmaps);
+                    new_id_map.insert_pair((None, Some(id2)));
                     color_set_sample_marks.set_bit(merged_colex, true);
                 },
                 (Case::Absent, Case::NotSampled) => {
                     let id2 = coloring2.colex_to_set_id(colex2);
-                    insert_pair((None, Some(id2)), &mut hashmaps);
+                    new_id_map.insert_pair((None, Some(id2)));
                     if figure_out_if_we_need_to_sample_nonsampled_vs_absent(&coloring1.map.sbwt, colex1, merged_colex, &merge_plan.is_leader, &merge_plan.s1) {
                         color_set_sample_marks.set_bit(merged_colex, true);
                     }
@@ -679,7 +729,7 @@ pub fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactCole
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
 
-    (hashmaps, color_set_sample_marks)
+    (PartitionedReadOnlyIdMap::new(new_id_map), color_set_sample_marks)
 
 }
 
@@ -689,7 +739,7 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     bitmap_size <= intvec_size
 }
 
-fn encode_merged_color_sets(id_pair_maps: &[HashMap::<(Option::<usize>, Option::<usize>), usize>], coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
+fn encode_merged_color_sets(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
 
     let n_colors_1 = coloring1.sets.n_colors;
     let n_colors_2 = coloring2.sets.n_colors;
@@ -700,19 +750,7 @@ fn encode_merged_color_sets(id_pair_maps: &[HashMap::<(Option::<usize>, Option::
     let mut dense_sets = BitMaps::new(n_colors);
     let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-    // Collect all elements (new id, old id pair) from the hash maps
-    let n_pairs_total = id_pair_maps.iter().fold(0_usize, |acc, H| acc + H.len());
-    let mut id_pairs_in_new_id_order = id_pair_maps.iter().fold(
-        Vec::<(usize, (Option::<usize>, Option::<usize>))>::with_capacity(n_pairs_total),
-        |mut acc, H| {
-            let len_before = acc.len();
-            acc.extend(
-                H.iter().map(|(pair, new_id)| (*new_id + len_before, *pair))
-            );
-            acc
-        }
-    );
-    id_pairs_in_new_id_order.sort();
+    let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
     // Encode sparse and dense sets
     // TODO: avoid small heap allocations here and instead write directly to the final data structure
@@ -790,7 +828,7 @@ fn encode_merged_color_sets(id_pair_maps: &[HashMap::<(Option::<usize>, Option::
 
 }
 
-fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id_maps: &[HashMap::<(Option<usize>, Option<usize>), usize>]) -> simple_sds_sbwt::int_vector::IntVector {
+fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
@@ -814,7 +852,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
 
             // The merge plan should not have a zero-bit at the same position in s1 and s2
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
-            let id = get_new_id_of_pair((color_set_id_1, color_set_id_2), pair_to_new_id_maps);
+            let id = pair_to_new_id_maps.get_new_id_of_pair((color_set_id_1, color_set_id_2));
             sampled_ids.push(id as u64);
         }
 
@@ -838,7 +876,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     let n_colors = n_colors_1 + n_colors_2;
 
     log::info!("Computing color id pairs and merged sampling");
-    let (distinct_id_pairs_maps, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
+    let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &merge_plan, n_threads);
 
     let mut color_set_sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(color_set_sample_marks);
     color_set_sample_marks.enable_rank();
@@ -846,13 +884,13 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Encoding distinct merged color sets");
-    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&distinct_id_pairs_maps, &coloring1, &coloring2);
+    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&new_id_map, &coloring1, &coloring2);
 
     log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
 
     log::info!("Storing new sampled color set ids");
-    let n_distinct_color_sets = distinct_id_pairs_maps.iter().fold(0_usize, |acc, H| acc + H.len());
-    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &distinct_id_pairs_maps);
+    let n_distinct_color_sets = new_id_map.total_len(); 
+    let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &new_id_map);
 
     // Add rank support to dense marks
     log::info!("Building rank support for dense marks");
