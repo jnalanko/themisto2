@@ -25,7 +25,7 @@ pub struct CompactColexColoring {
     // This is on the heap to allow map to refer to it (otherwise assuring lifetime 
     // guarantees becomes problematic). It's reference counted because this struct
     // will have two references to it, the one in self.sbwt, and one in self.map.sbwt.
-    // Note that this means that if we replace sbwt here with a new Rc pointing to a new
+    // Note that this means that if we replace sbwt here with a new ARc pointing to a new
     // sbwt, then, the map will continue to point to the old sbwt. So don't do that!
     // It's atomic (Arc) because we want to pass this struct to multiple threads.
     sbwt: Arc<SbwtIndex<SubsetMatrix>>, 
