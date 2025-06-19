@@ -571,11 +571,10 @@ fn main() {
             let colors2 = coloring::CompactColexColoring::load(&mut in2, true); // Select support is required for merge
 
             log::info!("Merging");
-            let (merged_colors, merged_sbwt) = coloring::merge_colorings(colors1, colors2, true, n_threads);
+            let merged_colored_kmers = coloring::merge_compact_colorings(colors1, colors2, true, n_threads);
 
             log::info!("Serializing");
-            merged_sbwt.serialize(&mut out).unwrap();
-            merged_colors.serialize(&mut out);
+            merged_colored_kmers.serialize(&mut out);
 
             log::info!("Finished");
 

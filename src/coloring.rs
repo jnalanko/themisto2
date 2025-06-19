@@ -885,7 +885,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
     sampled_ids
 }
 
-pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> (CompactColexColoring, Arc<SbwtIndex<SubsetMatrix>>) {
+pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
@@ -953,7 +953,7 @@ pub fn merge_colorings(coloring1: CompactColexColoring, coloring2: CompactColexC
     };
 
     log::info!("Color merge finished");
-    (new_coloring, merged_sbwt)
+    new_coloring
 
 }
 
@@ -968,7 +968,7 @@ mod tests {
 
     use crate::colored_kmers::ColoredKmers;
 
-    use super::{merge_colorings, CompactColexColoring};
+    use super::{merge_compact_colorings, CompactColexColoring};
 
 
     #[cfg(test)]
@@ -1038,7 +1038,8 @@ mod tests {
             let ccc1 = cc1.compress_colors(sample_distance, 3);
             let ccc2 = cc2.compress_colors(sample_distance, 3);
 
-            let (ccc_merged, sbwt_merged) = merge_colorings(ccc1, ccc2, true, 3);
+            let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, 3);
+            let sbwt_merged = &ccc_merged.sbwt;
 
             for colex in 0..cc_both.sbwt().n_sets() {
                 let kmer = cc_both.sbwt().access_kmer(colex);
