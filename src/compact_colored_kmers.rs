@@ -1,22 +1,16 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use sbwt::dbg::Dbg;
-use sbwt::merge::{self, MergeInterleaving};
+use sbwt::merge::MergeInterleaving;
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::bit_vector::BitVector;
-use simple_sds_sbwt::ops::Select;
 use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use rustc_hash::FxHasher;
-use core::hash;
 use std::cmp::max;
-use std::collections::{hash_map, HashSet};
-use std::rc::Rc;
 use std::sync::Arc;
-use std::u64;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
@@ -235,7 +229,7 @@ impl ColexToColorSetMap {
 
 
         let get_colorset_fn = |colex| &color_bitmap[colex*n_colors..(colex+1)*n_colors];
-        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &(*sbwt), None, get_colorset_fn, n_threads);
+        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, None, get_colorset_fn, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -593,10 +587,12 @@ fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
 }
 
 struct PartitionedIdMap {
+    #[allow(clippy::type_complexity)]
     hashmaps: Vec<HashMap::<(Option::<usize>, Option::<usize>), usize>>,
 }
 
 struct PartitionedReadOnlyIdMap {
+    #[allow(clippy::type_complexity)]
     hashmaps: Vec<HashMap::<(Option::<usize>, Option::<usize>), usize>>,
     cumul_sizes: Vec<usize> // index i contains total length of hash maps [0..i)
 }
@@ -643,6 +639,7 @@ impl PartitionedReadOnlyIdMap {
         self.cumul_sizes[hash_map_idx] + self.hashmaps[hash_map_idx][&x]
     }
 
+    #[allow(clippy::type_complexity)]
     fn get_old_ids_sorted_by_new_id(&self) -> Vec<(usize, (Option::<usize>, Option::<usize>))> {
         // Collect all elements (new id, old id pair) from the hash maps
         let n_pairs_total = self.total_len();
@@ -999,12 +996,11 @@ mod tests {
     use std::path::Path;
 
     use jseqio::seq_db::SeqDB;
-    use sbwt::{BitPackedKmerSorting, SbwtIndexBuilder};
     use simple_sds_sbwt::ops::BitVec;
 
     use crate::colored_kmers::ColoredKmers;
 
-    use super::{merge_compact_colorings, CompactColexColoring};
+    use super::merge_compact_colorings;
 
 
     #[cfg(test)]
