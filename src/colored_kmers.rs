@@ -1,4 +1,4 @@
-use std::{ops::DerefMut, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
 
 use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSorting, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};

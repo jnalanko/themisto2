@@ -274,7 +274,7 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::ThreadRng, Rng};
+    use rand::Rng;
     use rand_distr::{Dirichlet, Distribution};
 
     struct MyLikelihood {}

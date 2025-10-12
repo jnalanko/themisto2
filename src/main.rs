@@ -5,7 +5,7 @@ use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
 use compatibility_criteria::unique_support_combination_method;
-use sbwt::{LcsArray, SbwtIndex, SbwtIndexVariant, SubsetMatrix};
+use sbwt::{LcsArray, SbwtIndexVariant};
 
 mod EM;
 mod colored_kmers;
