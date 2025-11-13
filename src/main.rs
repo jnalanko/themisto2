@@ -296,13 +296,13 @@ pub enum Subcommands {
         #[arg(long = "index1", required = true)]
         index1_file: PathBuf,
 
-        #[arg(long = "index1-from-sbwt", required = true, help = "Load index 1 from format written by sbwt-rs-cli, and color with a single color")]
+        #[arg(long = "index1-from-sbwt", help = "Load index 1 from format written by sbwt-rs-cli, and color with a single color")]
         index1_from_sbwt: bool,
 
         #[arg(long = "index2", required = true)]
         index2_file: PathBuf,
 
-        #[arg(long = "index2-from-sbwt", required = true, help = "Load index 2 from format written by sbwt-rs-cli, and color with a single color")]
+        #[arg(long = "index2-from-sbwt", help = "Load index 2 from format written by sbwt-rs-cli, and color with a single color")]
         index2_from_sbwt: bool,
 
         #[arg(long = "output", short = 'o', required = true)]
