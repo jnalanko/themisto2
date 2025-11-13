@@ -5,6 +5,8 @@ use bitvec::vec::BitVec;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
+// THIS FILE IS OUT OF DATE SINCE UPDATING TO sbwt-rs 0.4.1. Does not compile anymore.
+
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
     .expect("Unitig id is not valid utf-8").parse()

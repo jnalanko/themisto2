@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSorting, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{compact_colored_kmers::CompactColexColoring, themisto1_compatibility::{build_colex_to_color_set_mapping, read_color_sets, read_themisto_dump_metadata, sbwt_ascii_dump_to_sbwt_index}};
+use crate::{compact_colored_kmers::CompactColexColoring};
 
 #[derive(Debug, Clone)]
 pub struct ColoredKmers {
@@ -53,6 +53,8 @@ impl ColoredKmers {
         self.kmers.k()
     }
 
+
+/* Out of date: does not compile since updating to sbwt_rs 0.4.1
     pub fn new_from_new_themisto_index_dump(sbwt_ascii_dump: impl std::io::BufRead, themisto_metadata_dump: impl std::io::BufRead, themisto_unitig_dump: impl std::io::BufRead + Send + 'static, themisto_color_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> Self {
         log::info!("Reading metadata");
         let metadata = read_themisto_dump_metadata(themisto_metadata_dump);
@@ -66,6 +68,7 @@ impl ColoredKmers {
         let colex_to_color_set_id = build_colex_to_color_set_mapping(themisto_unitig_dump, &sbwt_index, &lcs);
         Self { kmers: sbwt_index, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0; metadata.num_colors], n_colors: metadata.num_colors}
     }
+*/
 
 
     pub fn get_color_set(&self, kmer: &[u8]) -> &BitSlice {

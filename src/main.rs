@@ -9,7 +9,7 @@ use sbwt::{LcsArray, SbwtIndexVariant};
 
 mod EM;
 mod colored_kmers;
-mod themisto1_compatibility;
+//mod themisto1_compatibility; // Out of date after updating sbwt-rs
 mod compatibility_criteria;
 mod compact_colored_kmers;
 
@@ -125,6 +125,7 @@ pub enum Subcommands {
         n_threads: usize
     },
 
+/*
     #[command(arg_required_else_help = true)]
     Import {
         #[arg(long = "sbwt-ascii-dump", short = 's', required = true)]
@@ -136,6 +137,7 @@ pub enum Subcommands {
         #[arg(long = "out", short = 'o', required = true)]
         out: PathBuf,
     },
+*/
 
     #[command(arg_required_else_help = true, name = "intersection-pseudoalign")]
     IntersectionPseudoalign {
@@ -328,6 +330,7 @@ fn main() {
             let index = ColoredKmers::new_from_files(input_paths.as_slice(), k, n_threads, &temp_dir);
             index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
         },
+/*
         Subcommands::Import { sbwt_ascii_dump, color_dump_prefix, out: out_path } => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
             let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
@@ -343,6 +346,7 @@ fn main() {
             let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
             index.serialize(&mut out);
         },
+*/
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits} => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));

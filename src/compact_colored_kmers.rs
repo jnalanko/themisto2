@@ -1,7 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use sbwt::merge::MergeInterleaving;
+use sbwt::MergeInterleaving;
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::bit_vector::BitVector;
@@ -921,7 +921,7 @@ fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeI
 pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring {
 
     log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::merge::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
+    let merge_plan = sbwt::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
 
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();    
@@ -969,7 +969,7 @@ pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: Compa
     drop(coloring2);
 
     log::info!("Interleaving SBWTs");
-    let merged_sbwt = Arc::new(SbwtIndex::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads));
+    let merged_sbwt = Arc::new(sbwt::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads));
 
     log::info!("Computing the merged LCS array"); // Todo: could we do this during the interleave?
     let merged_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
