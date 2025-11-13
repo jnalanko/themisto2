@@ -587,7 +587,7 @@ fn main() {
                 let lcs2 = LcsArray::from_sbwt(&sbwt2, n_threads);
                 compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt2), lcs2, 10, n_threads) // Todo: 10 to CLI
             } else {
-                compact_colored_kmers::CompactColexColoring::load(&mut in1, true) // Select support is required for merge
+                compact_colored_kmers::CompactColexColoring::load(&mut in2, true) // Select support is required for merge
             };
 
 
