@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSorting, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{compact_colored_kmers::CompactColexColoring};
+use crate::{coloring_interface::ColorSetStorage, compact_colored_kmers::CompactColexColoring};
 
 #[derive(Debug, Clone)]
 pub struct ColoredKmers {
@@ -278,7 +278,7 @@ impl ColoredKmers {
         self.kmers.build_select();
     }
 
-    pub fn compress_colors(mut self, sample_distance: usize, n_threads: usize) -> CompactColexColoring {
+    pub fn compress_colors<CSS: ColorSetStorage>(mut self, sample_distance: usize, n_threads: usize) -> CompactColexColoring<CSS> {
         self.build_sbwt_select_support(); // Required in the compactification
         let sbwt = Arc::new(self.kmers); // Move to heap
         CompactColexColoring::new(sbwt, self.lcs, &self.distinct_color_sets, self.n_colors, sample_distance, n_threads)
