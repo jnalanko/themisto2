@@ -25,7 +25,7 @@ pub trait ColorSetStorage {
 
     // Takes an iterator of iterators: Each inner iterator iterates the elements of one color set.
     // The color ids are in the range 0..n_colors.
-    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Box<Self>;
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self;
 
     fn get_empty_set(&self) -> Self::OwnedSet;
     fn get_full_set(&self) -> Self::OwnedSet;
@@ -83,7 +83,7 @@ impl ColorSetStorage for ColorSetStorageVec {
         todo!()
     }
     
-    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Box<Self> {
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
         for set in sets {
             for elem in set {
                 println!("{}", elem);
@@ -91,10 +91,6 @@ impl ColorSetStorage for ColorSetStorageVec {
         }
         todo!();
     }
-
-    
-
-    
 }
 
 
