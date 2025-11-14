@@ -1120,34 +1120,42 @@ impl coloring_interface::ColorSetStorage for ColorSets {
         let mut sparse_sets = IntVecs::new(color_id_bit_width);
         let mut dense_sets = BitMaps::new(n_colors);
 
-            /* if is_dense(set) {
-                dense_sets.push(set);
+        let mut buf = Vec::<usize>::new();
+        let mut n_sets_total = 0_usize;
+        for set in sets {
+            buf.clear();
+            buf.extend(set);
+            if is_dense_set(buf.len(), color_id_bit_width, n_colors) {
+                let mut bm = bitvec![0; n_colors];
+                for color in buf.iter() {
+                    bm.set(*color, true);
+                }
+                dense_sets.push(&bm);
                 is_dense_marks.push_bit(true);
             } else {
-                sparse_sets.push(set.iter_ones());
+                sparse_sets.push(buf.iter().copied());
                 is_dense_marks.push_bit(false);
-            } */
+            }
 
-        log::info!("{} distinct color sets found", distinct_sets.len());
+            n_sets_total += 1;
+        }
 
         sparse_sets.shrink_to_fit();
         dense_sets.shrink_to_fit();
 
-        log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64 * 100.0);
+        log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / n_sets_total as f64 * 100.0);
 
         // Add rank support to dense marks
         log::info!("Building rank support for dense marks");
         let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
         is_dense_marks.enable_rank();
 
-        let colorsets = ColorSets {
+        ColorSets {
             is_dense_marks, 
             sparse_sets,
             dense_sets,
             n_colors
         };
-
-        todo!()
     }
 
 }
@@ -1180,6 +1188,8 @@ fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec,
         }
     }
     bar.finish();
+
+    log::info!("{} distinct color sets found", distinct_sets.len());
 
     // Create and iterator of iterators, each inner iterator iterating over one color set
     let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
