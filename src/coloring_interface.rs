@@ -58,28 +58,51 @@ pub trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
 }
 
-pub trait ColorSetOwned {
+// Again we provide a lifetime 'a for implementors to work with to provide
+// a borrowing iterator.
+pub trait ColorSetOwned<'a> {
     type Iter: Iterator<Item = usize>;
 
-    fn intersect(&mut self, other: &impl ColorSetOwned);
-    fn union(&mut self, other: &impl ColorSetOwned);
-    fn iter(&self) -> Self::Iter;
+    fn intersect<'b>(&mut self, other: &impl ColorSetOwned<'b>);
+    fn union<'b>(&mut self, other: &impl ColorSetOwned<'b>);
+
+    // This signature is different than in ColorSetView to allow
+    // borrowing from the set itself.
+    fn iter(&'a self) -> Self::Iter; 
 }
 
-impl ColorSetOwned for Vec<usize> {
+struct MyVecIterator<'a> {
+    slice: &'a [usize],
+    pos: usize,
+}
 
-    type Iter = std::vec::IntoIter<usize>;
+impl<'a> Iterator for MyVecIterator<'a> {
+    type Item = usize;
 
-    fn intersect(&mut self, other: &impl ColorSetOwned) {
+    fn next(&mut self) -> Option<Self::Item> {
+        // Copy a value from self.slice and increment pos
+        todo!()
+    }
+}
+
+impl<'a> ColorSetOwned<'a> for Vec<usize> {
+
+    //type Iter = std::vec::IntoIter<usize>;
+    type Iter = MyVecIterator<'a>;
+
+    fn intersect<'b>(&mut self, other: &impl ColorSetOwned<'b>) {
         todo!()
     }
 
-    fn union(&mut self, other: &impl ColorSetOwned) {
+    fn union<'b>(&mut self, other: &impl ColorSetOwned<'b>) {
         todo!()
     }
 
-    fn iter(&self) -> Self::Iter {
-        let x = Vec::<usize>::into_iter(self.clone());
+    fn iter(&'a self) -> Self::Iter {
+        let x = MyVecIterator{
+            slice: self.as_slice(),
+            pos: 0,
+        };
         x
     }
 }
