@@ -745,7 +745,8 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
     // TODO: do this without dynamic Boxes of iterators
     // by making an iterator struct that has 1 or 2 sets.
     let mut pair_id = 0_usize;
-    let mut n_pairs = id_pairs_in_new_id_order.len();
+    let n_pairs = id_pairs_in_new_id_order.len();
+    let n_colors_1_ref = &n_colors_1; // Reference to move by reference into the closure 
     let iter_of_iters = std::iter::from_fn(move || {
         if pair_id == n_pairs {
             None
@@ -757,7 +758,7 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
                 (Some(x), Some(y)) => {
                     let set1 = coloring1.set_id_to_set(x);
                     let set2 = coloring2.set_id_to_set(y);
-                    let both = set1.iter().chain(set2.iter().map(|x| x + n_colors_1));
+                    let both = set1.iter().chain(set2.iter().map(|x| x + *n_colors_1_ref));
                     let b: Box<dyn Iterator<Item = usize>> = Box::new(both);
                     Some(b)
                 },
