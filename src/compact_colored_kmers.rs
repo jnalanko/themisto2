@@ -1074,12 +1074,12 @@ impl coloring_interface::ColorSetStorage for ColorSets {
             if is_dense_set(buf.len(), color_id_bit_width, n_colors) {
                 let mut bm = bitvec![0; n_colors];
                 for color in buf.iter() {
-                    bm.set(*color, true);
+                    bm.set(color, true);
                 }
                 dense_sets.push(&bm);
                 is_dense_marks.push_bit(true);
             } else {
-                sparse_sets.push(buf.iter().copied());
+                sparse_sets.push(buf.iter());
                 is_dense_marks.push_bit(false);
             }
 
