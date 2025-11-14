@@ -16,8 +16,14 @@ trait ColorSetStorage {
     // ColorSetStorage<BitMapColorSet<'a>> and ColorSetStorage<VecColorSet<'a>>.
     type SetView<'a>: ColorSetView<'a> where Self: 'a;
 
+    type OwnedSet;
+
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
-    fn get_set_view<'borrow>(&'borrow self, index: usize) -> Self::SetView<'borrow>;
+    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
+
+    fn get_owned_set(&self, id: usize) -> Self::OwnedSet;
+    fn get_empty_set(&self) -> Self::OwnedSet;
+    fn get_full_set(&self) -> Self::OwnedSet;
 }
 
 // A color set view that does not own the data, but can return an
@@ -46,12 +52,27 @@ trait ColorSetView<'a> {
 
 impl ColorSetStorage for ColorSetStorageVec {
     type SetView<'a> = SliceColorSet<'a> where Self: 'a;
+    type OwnedSet = Vec<usize>;
 
     fn get_set_view<'borrow>(&'borrow self, index: usize) -> Self::SetView<'borrow> {
         SliceColorSet { // Dummy implementation
             slice: &self.v[index..index + 5],
         }
     }
+    
+    fn get_owned_set(&self, id: usize) -> Self::OwnedSet {
+        todo!()
+    }
+    
+    fn get_empty_set(&self) -> Self::OwnedSet {
+        vec![]
+    }
+    
+    fn get_full_set(&self) -> Self::OwnedSet {
+        todo!()
+    }
+
+    
 }
 
 
