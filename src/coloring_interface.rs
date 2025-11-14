@@ -56,6 +56,8 @@ pub trait ColorSetView<'a> {
     // * The iterator may outlive the set because it does not borrow from the
     //   set itself but rather from some external structure with lifetime 'a.
     fn iter<'me>(&'me self) -> Self::Iter;
+    
+    fn len(&self) -> usize;
 }
 
 pub trait ColorSetOwned {
@@ -150,6 +152,12 @@ impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
             pos: 0,
         }
     }
+    
+    fn len(&self) -> usize {
+        todo!()
+    }
+
+    
 }
 
 #[derive(Debug)]

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::coloring_interface::{self, ColorSetStorage, ColorSetView};
+use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
@@ -728,10 +728,10 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     bitmap_size <= intvec_size
 }
 
-fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
+fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>) -> CSS {
 
-    let n_colors_1 = coloring1.sets.get_full_set().iter().len();
-    let n_colors_2 = coloring2.sets.get_full_set().iter().len();
+    let n_colors_1 = coloring1.sets.get_full_set().iter().count();
+    let n_colors_2 = coloring2.sets.get_full_set().iter().count();
     let n_colors = n_colors_1 + n_colors_2;
     let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
 
@@ -741,79 +741,29 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
 
     let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
-    // Encode sparse and dense sets
-    // TODO: avoid small heap allocations here and instead write directly to the final data structure
-    for (_, (left, right)) in id_pairs_in_new_id_order.into_iter() {
+    // Create an iterator of combined sets
+    let iter_of_iters = id_pairs_in_new_id_order.into_iter().map(|(_, (left, right))| {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
                 let set2 = coloring2.set_id_to_set(y);
-                let n_elements = set1.len() + set2.len();
-
-                if is_dense_set(n_elements, bits_per_color, n_colors) {
-                    // Dense set -> encode as bitmap
-                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
-                    concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
-                    concat.extend_from_bitslice(&set2.as_bitvec(n_colors_2));
-                    dense_sets.push(&concat);
-                    is_dense_marks.push_bit(true);
-                } else {
-                    // Sparse set -> encode as integers
-                    let mut concat = Vec::<usize>::with_capacity(set1.len() + set2.len());
-                    concat.extend(set1.as_intvec());
-
-                    // Offset the colors of the second set by the number of colors in the first
-                    concat.extend(set2.as_intvec().iter().map(|x| x + n_colors_1));
-
-                    sparse_sets.push(concat);
-                    is_dense_marks.push_bit(false);
-                }
+                let both = set1.iter().chain(set2.iter().map(|x| x + n_colors_1));
+                both
             },
             (Some(x), None) => {
                 let set1 = coloring1.set_id_to_set(x);
-                let n_elements = set1.len();
-                if is_dense_set(n_elements, bits_per_color, n_colors) {
-                    // Dense
-                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
-                    concat.extend_from_bitslice(&set1.as_bitvec(n_colors_1));
-                    concat.extend_from_bitslice(&bitvec![0; n_colors_2]);
-
-                    dense_sets.push(&concat);
-                    is_dense_marks.push_bit(true);
-                } else {
-                    // Sparse
-                    sparse_sets.push(set1.as_intvec());
-                    is_dense_marks.push_bit(false);
-                }
-
+                set1.iter()
             },
             (None, Some(y)) => {
-
                 let set2 = coloring2.set_id_to_set(y);
-                let n_elements = set2.len();
-
-                if is_dense_set(n_elements, bits_per_color, n_colors) {
-                    // Dense
-                    let mut concat = bitvec::vec::BitVec::with_capacity(n_colors);
-                    concat.extend_from_bitslice(&bitvec![0; n_colors_1]);
-                    concat.extend_from_bitslice(&set2.as_bitvec(n_colors_2));
-
-                    dense_sets.push(&concat);
-                    is_dense_marks.push_bit(true);
-                } else {
-                    // Sparse
-                    sparse_sets.push(set2.as_intvec().iter().map(|x| x + n_colors_1));
-                    is_dense_marks.push_bit(false);
-                }
+                set2.iter()
             }
             (None, None) => panic!("Nonexisting color set id pair")
         }
-    }
 
-    sparse_sets.shrink_to_fit();
-    dense_sets.shrink_to_fit();
+    });
 
-    (sparse_sets, dense_sets, is_dense_marks)
+    CSS::new(iter_of_iters, n_colors_1 + n_colors_2)
 
 }
 
@@ -1081,6 +1031,12 @@ impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
             pos: 0,
         }
     }
+    
+    fn len(&self) -> usize {
+        ColorSet::len(&self) // Fully qualified syntax to avoid recursion
+    }
+
+    
 }
 
 impl coloring_interface::ColorSetStorage for ColorSets {
@@ -1147,6 +1103,16 @@ impl coloring_interface::ColorSetStorage for ColorSets {
             n_colors
         }
     }
+    
+    fn serialize<W: std::io::Write>(&self, out: &mut W) {
+        todo!()
+    }
+    
+    fn load<R: std::io::Read>(input: &mut R) -> Self {
+        todo!()
+    }
+
+    
 
 }
 
