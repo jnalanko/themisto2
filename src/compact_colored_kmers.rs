@@ -407,7 +407,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         }
         let sbwt = Arc::new(sbwt);
         let lcs = LcsArray::load(input).unwrap();
-        let sets = ColorSets::load(input);
+        let sets = CSS::load(input);
         let map = ColexToColorSetMap::load(input, sbwt.clone());
         CompactColexColoring{sbwt, lcs, sets, map}
     }
