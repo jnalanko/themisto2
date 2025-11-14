@@ -16,6 +16,7 @@ trait ColorSetStorage {
     // ColorSetStorage<BitMapColorSet<'a>> and ColorSetStorage<VecColorSet<'a>>.
     type SetView<'a>: ColorSetView<'a> where Self: 'a;
 
+    // An owned version of SetView
     type OwnedSet;
 
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
@@ -166,8 +167,6 @@ fn generic<CSS: ColorSetStorage>(storage: CSS) {
     iter1.for_each(|x| println!("{}", x));
 
 }
-//`set0` dropped here while still borrowed
-//borrow might be used here, when `set0` is dropped and runs the destructor for type `<CSS as ColorSetStorage>::Set<'_>`
 
 fn main() {
     let storage = ColorSetStorageVec { v: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]};

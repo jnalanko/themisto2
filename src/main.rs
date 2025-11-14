@@ -12,8 +12,7 @@ mod colored_kmers;
 //mod themisto1_compatibility; // Out of date after updating sbwt-rs
 mod compatibility_criteria;
 mod compact_colored_kmers;
-mod new_color_set_storage;
-
+mod coloring_interface;
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 
