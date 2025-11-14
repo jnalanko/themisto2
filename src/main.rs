@@ -1,6 +1,6 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::PathBuf, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
@@ -298,11 +298,17 @@ pub enum Subcommands {
         #[arg(long = "index_file_list", required = true)]
         index_file_list: PathBuf,
 
+        #[arg(long = "temp_dir", required = true)]
+        temp_dir: PathBuf,
+
         #[arg(long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
+
+        #[arg(long = "low-ram-mode", help = "Use more slower but more compact algorithm invert and merge SBWTs")]
+        low_ram_mode: bool,
     },
 
     #[command(arg_required_else_help = true, name = "build-from-sbwt")]
@@ -575,19 +581,9 @@ fn main() {
                 log::info!("Finished");
             }
         },
-        Subcommands::MergeCompressedIndexes{ index_file_list, n_threads, outfile} => {
-            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
-
-            log::info!("Loading index 1");
-            let mut in1 = BufReader::new(File::open(index1_file).unwrap());
-
-            log::info!("Merging");
-            let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, true, n_threads);
-
-            log::info!("Serializing");
-            merged_colored_kmers.serialize(&mut out);
-
-            log::info!("Finished");
+        Subcommands::MergeCompressedIndexes{ index_file_list, n_threads, outfile, temp_dir, low_ram_mode} => {
+            let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
         }
         Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
@@ -600,6 +596,41 @@ fn main() {
             index.serialize(&mut out);
         }
     } 
+}
+
+fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
+    let n_rounds = infiles.len().div_ceil(2);
+    let mut current_files: Vec<PathBuf> = infiles.to_vec();
+    for round in 0..n_rounds {
+        log::info!("Merge round {}", round+1);
+        let mut next_files: Vec<PathBuf> = Vec::new();
+        for pair in current_files.chunks(2) {
+            if pair.len() == 2 {
+                let outpath = if round == n_rounds - 1 {
+                    outfile.to_path_buf() // Final output file
+                } else {
+                    temp_dir.join(format!("merge_round{}_{}.thm2c", round, next_files.len()))
+                };
+                log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
+                let mut out = BufWriter::new(File::create(&outpath).unwrap());
+                let mut in1 = BufReader::new(File::open(&pair[0]).unwrap());
+                let mut in2 = BufReader::new(File::open(&pair[1]).unwrap());
+
+                let colors1 = compact_colored_kmers::CompactColexColoring::load(&mut in1, true); // Select support is required
+                let colors2 = compact_colored_kmers::CompactColexColoring::load(&mut in2, true); // Select support is required
+
+                let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, low_ram_mode, n_threads);
+
+                log::info!("Serializing merged index to {}", outpath.display());
+                merged_colored_kmers.serialize(&mut out);
+
+                next_files.push(outpath);
+            } else {
+                next_files.push(pair[0].clone());
+            }
+        }
+        current_files = next_files;
+    }
 }
 
 #[cfg(test)]
