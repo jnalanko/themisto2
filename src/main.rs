@@ -13,6 +13,7 @@ mod colored_kmers;
 mod compatibility_criteria;
 mod compact_colored_kmers;
 mod coloring_interface;
+mod queries;
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 

@@ -15,12 +15,12 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::coloring_interface::{self, ColorSetView};
+use crate::coloring_interface::{self, ColorSetStorage, ColorSetView};
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
-pub struct CompactColexColoring {
+pub struct CompactColexColoring<CSS: coloring_interface::ColorSetStorage> {
     // This is on the heap to allow map to refer to it (otherwise assuring lifetime 
     // guarantees becomes problematic). It's reference counted because this struct
     // will have two references to it, the one in self.sbwt, and one in self.map.sbwt.
@@ -30,7 +30,7 @@ pub struct CompactColexColoring {
     sbwt: Arc<SbwtIndex<SubsetMatrix>>, 
 
     lcs: LcsArray,
-    sets: ColorSets, // Distinct color sets
+    sets: CSS, // Distinct color sets
     map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
 }
 
@@ -341,12 +341,13 @@ impl ColexToColorSetMap {
 
 }
 
-impl CompactColexColoring {
+impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
 
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize) -> Self {
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize)
+    -> CompactColexColoring<CSS> {
         let (sets, hashmap) = ColorSets::hash_and_encode_distinct_sets(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), sample_distance, bm, &hashmap, n_colors, n_threads);
         Self {sbwt, lcs, sets, map: colex_map}
@@ -454,68 +455,6 @@ impl ColorSets {
         }
     }
 
-
-    /// Input: 
-    /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
-    ///   color j is present in set i.
-    /// 
-    /// Output:
-    /// - Distinct color sets encoded as ColorSets
-    /// - HashMap from color set to its index in ColorSets
-    pub fn hash_and_encode_distinct_sets(bm: &bitvec::vec::BitVec, n_colors: usize) -> (ColorSets, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
-        assert_eq!(bm.len() % n_colors, 0);
-        let n_sets = bm.len() / n_colors;
-
-        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-        let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
-
-        log::info!("Hashing distinct color sets");
-
-        let mut sparse_sets = IntVecs::new(color_id_bit_width);
-        let mut dense_sets = BitMaps::new(n_colors);
-        let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
-        let bar = indicatif::ProgressBar::new(n_sets as u64);
-        for colex in 0..n_sets {
-            let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-            let key = BitKey{bits: set};
-            if !distinct_sets.contains_key(&key) {
-                distinct_sets.insert(key, distinct_sets.len());
-                if is_dense(set) {
-                    dense_sets.push(set);
-                    is_dense_marks.push_bit(true);
-                } else {
-                    sparse_sets.push(set.iter_ones());
-                    is_dense_marks.push_bit(false);
-                }
-            }
-            if colex % 100 == 0 {
-                bar.inc(100);
-            }
-        }
-        bar.finish();
-
-        log::info!("{} distinct color sets found", distinct_sets.len());
-
-        sparse_sets.shrink_to_fit();
-        dense_sets.shrink_to_fit();
-
-        log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64 * 100.0);
-
-        // Add rank support to dense marks
-        log::info!("Building rank support for dense marks");
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-        is_dense_marks.enable_rank();
-
-        let colorsets = ColorSets {
-            is_dense_marks, 
-            sparse_sets,
-            dense_sets,
-            n_colors
-        };
-
-        (colorsets, distinct_sets)
-    }
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
         bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
@@ -1173,4 +1112,83 @@ impl coloring_interface::ColorSetStorage for ColorSets {
     fn get_full_set(&self) -> Self::OwnedSet {
         todo!()
     }
+    
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Box<Self> {
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
+
+        let mut sparse_sets = IntVecs::new(color_id_bit_width);
+        let mut dense_sets = BitMaps::new(n_colors);
+
+            /* if is_dense(set) {
+                dense_sets.push(set);
+                is_dense_marks.push_bit(true);
+            } else {
+                sparse_sets.push(set.iter_ones());
+                is_dense_marks.push_bit(false);
+            } */
+
+        log::info!("{} distinct color sets found", distinct_sets.len());
+
+        sparse_sets.shrink_to_fit();
+        dense_sets.shrink_to_fit();
+
+        log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / distinct_sets.len() as f64 * 100.0);
+
+        // Add rank support to dense marks
+        log::info!("Building rank support for dense marks");
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
+
+        let colorsets = ColorSets {
+            is_dense_marks, 
+            sparse_sets,
+            dense_sets,
+            n_colors
+        };
+
+        todo!()
+    }
+
+}
+
+/// Input: 
+/// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
+///   color j is present in set i.
+/// 
+/// Output:
+/// - Distinct color sets encoded as something implementing ColorSetStorage
+/// - HashMap from color set to its index in ColorSets
+fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (Box<CSS>, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
+    assert_eq!(bm.len() % n_colors, 0);
+    let n_sets = bm.len() / n_colors;
+
+    log::info!("Hashing distinct color sets");
+
+    let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+    let mut distinct_set_colex_ranks = Vec::<usize>::new();
+    let bar = indicatif::ProgressBar::new(n_sets as u64);
+    for colex in 0..n_sets {
+        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+        let key = BitKey{bits: set};
+        if !distinct_sets.contains_key(&key) {
+            distinct_sets.insert(key, distinct_sets.len());
+            distinct_set_colex_ranks.push(colex);
+        }
+        if colex % 100 == 0 {
+            bar.inc(100);
+        }
+    }
+    bar.finish();
+
+    // Create and iterator of iterators, each inner iterator iterating over one color set
+    let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
+        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+        set.iter_ones()
+    });
+
+    let colorsets = CSS::new(color_sets_iterator);
+
+    (colorsets, distinct_sets)
+
 }

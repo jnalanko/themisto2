@@ -21,8 +21,12 @@ pub trait ColorSetStorage {
 
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
-
     fn get_owned_set(&self, id: usize) -> Self::OwnedSet;
+
+    // Takes an iterator of iterators: Each inner iterator iterates the elements of one color set.
+    // The color ids are in the range 0..n_colors.
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Box<Self>;
+
     fn get_empty_set(&self) -> Self::OwnedSet;
     fn get_full_set(&self) -> Self::OwnedSet;
 }
@@ -78,6 +82,17 @@ impl ColorSetStorage for ColorSetStorageVec {
     fn get_full_set(&self) -> Self::OwnedSet {
         todo!()
     }
+    
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Box<Self> {
+        for set in sets {
+            for elem in set {
+                println!("{}", elem);
+            }
+        }
+        todo!();
+    }
+
+    
 
     
 }
