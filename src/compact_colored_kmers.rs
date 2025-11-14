@@ -1037,7 +1037,7 @@ impl coloring_interface::ColorSetStorage for ColorSets {
     }
 
     fn get_full_set(&self) -> Self::OwnedSet {
-        todo!()
+        (0..self.n_colors).collect()
     }
     
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> ColorSets {
