@@ -1,6 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+use clap::builder::styling::Color;
 use sbwt::MergeInterleaving;
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
@@ -63,6 +64,7 @@ struct IntVecs {
     ends: Vec<usize>, 
 }
 
+#[derive(Copy, Clone)]
 pub struct IntVecSlice<'a> {
     vec: &'a IntVector,
     start: usize,
@@ -77,6 +79,7 @@ struct BitMaps {
 
 // This enum is only for passing references to individual sets around. The actual
 // sets are stored in concatenated form somewhere else in memory. 
+#[derive(Copy, Clone)]
 pub enum ColorSet<'a> {
     Dense(&'a BitSlice),
     Sparse(IntVecSlice<'a>),
@@ -1104,23 +1107,50 @@ mod tests {
 //
 //
 
-pub struct ColorSetViewIterator {
-    // Todo
+pub struct ColorSetViewIterator<'a> {
+    set: ColorSet<'a>,
+    pos: usize, // Interpreted differently depending of whether this is Sparse or Dense
 }
 
-impl Iterator for ColorSetViewIterator {
+impl<'a> Iterator for ColorSetViewIterator<'a> {
     type Item = usize;
 
+    #[allow(clippy::bool_comparison)]
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        match &self.set {
+            ColorSet::Dense(bit_slice) => {
+                // Rewind to the next 1-bit (todo: word parallelism)
+                while self.pos < bit_slice.len() && bit_slice[self.pos] == false {
+                    self.pos += 1;
+                }
+
+                if self.pos < bit_slice.len() {
+                    Some(self.pos)
+                } else {
+                    None
+                }
+            },
+            ColorSet::Sparse(int_vec_slice) => {
+                if self.pos == int_vec_slice.end - int_vec_slice.start {
+                    None
+                } else {
+                    let x = int_vec_slice.vec.get(int_vec_slice.start + self.pos);
+                    self.pos += 1;
+                    Some(x as usize)
+                }
+            },
+        }
     }
 }
 
 impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
-    type Iter = ColorSetViewIterator;
+    type Iter = ColorSetViewIterator<'a>;
 
     fn iter(&self) -> Self::Iter {
-        todo!()
+        ColorSetViewIterator{
+            set: *self,
+            pos: 0,
+        }
     }
 }
 
