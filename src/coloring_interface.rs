@@ -58,20 +58,18 @@ pub trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
 }
 
-// Again we provide a lifetime 'a for implementors to work with to provide
-// a borrowing iterator.
-pub trait ColorSetOwned<'a> {
-    type Iter: Iterator<Item = usize>;
+pub trait ColorSetOwned {
+    type Iter<'a>: Iterator<Item = &'a usize> where Self: 'a;
 
-    fn intersect<'b>(&mut self, other: &impl ColorSetOwned<'b>);
-    fn union<'b>(&mut self, other: &impl ColorSetOwned<'b>);
+    fn intersect(&mut self, other: &impl ColorSetOwned);
+    fn union(&mut self, other: &impl ColorSetOwned);
 
-    // This signature is different than in ColorSetView to allow
-    // borrowing from the set itself. The 'a on &self can be tied to the
-    // lifetime of the reference to the internal data that is iterated over.
-    fn iter(&'a self) -> Self::Iter; 
+    // This is different from ColorSetView in that it returns references
+    // to usize that have lifetime tied to &self.
+    fn iter(&self) -> Self::Iter<'_>; 
 }
 
+/*
 struct MyVecIterator<'a> {
     slice: &'a [usize],
     pos: usize,
@@ -85,26 +83,23 @@ impl<'a> Iterator for MyVecIterator<'a> {
         todo!()
     }
 }
+*/
 
-impl<'a> ColorSetOwned<'a> for Vec<usize> {
+impl ColorSetOwned for Vec<usize> {
 
     //type Iter = std::vec::IntoIter<usize>;
-    type Iter = MyVecIterator<'a>;
+    type Iter<'a> = std::slice::Iter<'a, usize>;
 
-    fn intersect<'b>(&mut self, other: &impl ColorSetOwned<'b>) {
+    fn intersect(&mut self, other: &impl ColorSetOwned) {
         todo!()
     }
 
-    fn union<'b>(&mut self, other: &impl ColorSetOwned<'b>) {
+    fn union(&mut self, other: &impl ColorSetOwned) {
         todo!()
     }
 
-    fn iter(&'a self) -> Self::Iter {
-        let x = MyVecIterator{
-            slice: self.as_slice(),
-            pos: 0,
-        };
-        x
+    fn iter(&self) -> Self::Iter<'_> {
+        self.as_slice().iter()
     }
 }
 
