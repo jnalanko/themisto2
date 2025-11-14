@@ -10,7 +10,7 @@ struct ColorSetStorageVec {
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
 // view class. 
-trait ColorSetStorage {
+pub trait ColorSetStorage {
 
     // A generic associated color set view type. We could have e.g.
     // ColorSetStorage<BitMapColorSet<'a>> and ColorSetStorage<VecColorSet<'a>>.
@@ -31,7 +31,7 @@ trait ColorSetStorage {
 // iterator into it. The lifetime 'a is not referred to in the methods here,
 // but we need it so that implementors have a lifetime parameter to work with. 
 // ColorSetStorage uses this 'a to link it to the lifetime of the storage.
-trait ColorSetView<'a> {
+pub trait ColorSetView<'a> {
 
     // This associated iterator type may have lifetime parameters even though they
     // are not listed here.
@@ -51,7 +51,7 @@ trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
 }
 
-trait OwnedSet {
+pub trait OwnedSet {
     fn intersect(&mut self, other: &impl OwnedSet);
     fn union(&mut self, other: &impl OwnedSet);
     fn iter(&self) -> impl Iterator<Item = usize>;

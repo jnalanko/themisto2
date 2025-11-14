@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
+use crate::coloring_interface::{self, ColorSetView};
+
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
@@ -1087,5 +1089,58 @@ mod tests {
 
             }
         }
+    }
+}
+
+//
+//
+//
+//
+//
+// NEW CODE HERE BELOW
+//
+//
+//
+//
+//
+
+pub struct ColorSetViewIterator {
+    // Todo
+}
+
+impl Iterator for ColorSetViewIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
+
+impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
+    type Iter = ColorSetViewIterator;
+
+    fn iter(&self) -> Self::Iter {
+        todo!()
+    }
+}
+
+impl coloring_interface::ColorSetStorage for CompactColexColoring {
+    type SetView<'a> = ColorSet<'a>; 
+    type OwnedSet = Vec<usize>; // TODO
+
+    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
+        self.set_id_to_set(id)
+    }
+
+    fn get_owned_set(&self, id: usize) -> Self::OwnedSet {
+        self.set_id_to_set(id).iter().collect()
+    }
+
+    fn get_empty_set(&self) -> Self::OwnedSet {
+        vec![]
+    }
+
+    fn get_full_set(&self) -> Self::OwnedSet {
+        todo!()
     }
 }
