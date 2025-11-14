@@ -64,8 +64,9 @@ pub trait ColorSetOwned {
     fn intersect(&mut self, other: &impl ColorSetOwned);
     fn union(&mut self, other: &impl ColorSetOwned);
 
-    // This is different from ColorSetView in that this returns references
-    // to usize that have lifetime tied to &self.
+    // This is different from ColorSetView because here the borrow in the
+    // iterator is tied to the &self borrow, allowing us to return values
+    // that borrow from &self.
     fn iter(&self) -> Self::Iter<'_>; 
 }
 
@@ -196,30 +197,37 @@ impl<'a> Iterator for OwnedColorSetIter<'a> {
     }
 }
 
-fn generic<CSS: ColorSetStorage>(storage: CSS) {
-    // 'a is is the generic lifetime associated with color set objects from CSS 
+mod tests {
 
-    // Calling get_set returns a color set with the same lifetime as the borrow
-    let set0 = storage.get_set_view(0);
-    let iter0 = set0.iter();
-    let set1 = storage.get_set_view(1);
-    let iter1 = set1.iter();
+    use super::*;
 
-    // Can drop a set but still keep and use the iterator since
-    // the iterator does not borrow from the set, but depends on the
-    // lifetime of the storage instead
-    drop(set0);
-    iter0.for_each(|x| println!("{}", x));
+    fn generic<CSS: ColorSetStorage>(storage: CSS) {
+        // 'a is is the generic lifetime associated with color set objects from CSS 
 
-    iter1.for_each(|x| println!("{}", x));
+        // Calling get_set returns a color set with the same lifetime as the borrow
+        let set0 = storage.get_set_view(0);
+        let iter0 = set0.iter();
+        let set1 = storage.get_set_view(1);
+        let iter1 = set1.iter();
 
-    let owned = storage.get_empty_set();
-    owned.iter().for_each(|x| println!("{}", x));
-    owned.iter().for_each(|x| println!("{}", x));
+        // Can drop a set but still keep and use the iterator since
+        // the iterator does not borrow from the set, but depends on the
+        // lifetime of the storage instead
+        drop(set0);
+        iter0.for_each(|x| println!("{}", x));
 
-}
+        iter1.for_each(|x| println!("{}", x));
 
-fn main() {
-    let storage = ColorSetStorageVec { v: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]};
-    generic(storage);
+        let owned = storage.get_empty_set();
+        owned.iter().for_each(|x| println!("{}", x));
+        owned.iter().for_each(|x| println!("{}", x));
+
+    }
+
+    #[test]
+    fn color_set_traits() {
+        let storage = ColorSetStorageVec { v: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]};
+        generic(storage);
+    }
+
 }
