@@ -348,7 +348,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
     ///   color j is present in set i.
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexColoring<CSS> {
-        let (sets, hashmap) = ColorSets::hash_and_encode_distinct_sets(bm, n_colors);
+        let (sets, hashmap) = hash_and_encode_distinct_sets::<CSS>(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), sample_distance, bm, &hashmap, n_colors, n_threads);
         Self {sbwt, lcs, sets, map: colex_map}
     }
@@ -357,20 +357,9 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         let n_colors = 1;
         let int_bitwidth = 1;
 
-        let mut dense_sets = BitMaps::new(n_colors);
-        let sparse_sets = IntVecs::new(int_bitwidth);
-
-        // Let's make the singleton set dense because a bitvector access is
-        // probably a bit cheaper than an intvector access.
-        let singleton = bitvec![1];
-        dense_sets.push(&singleton); // Singleton set
-
-        let mut is_dense_marks = BitVector::from(RawVector::with_len(1, true));
-        is_dense_marks.enable_rank();
-
-        let sets = ColorSets {
-            dense_sets, sparse_sets, is_dense_marks, n_colors
-        };
+        // Iterator of iterators giving a single singleton set
+        let iter_of_iters = (0..1).into_iter().map(|_| vec![0_usize].into_iter());
+        let sets = CSS::new(iter_of_iters, n_colors);
 
         log::info!("Sampling nodes");
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
