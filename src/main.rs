@@ -4,6 +4,7 @@ use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, 
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colored_kmers::ColoredKmers;
+use compact_colored_kmers::ColorSets;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{LcsArray, SbwtIndexVariant};
 
@@ -552,7 +553,7 @@ fn main() {
 
             if let Some(validation_queries) = validation_queries {
                 // Clone the original index before construction to be able to compare to it
-                let compressed = index.clone().compress_colors(sample_distance, n_threads);
+                let compressed = index.clone().compress_colors::<ColorSets>(sample_distance, n_threads);
 
                 log::info!("Serializing to {}", outfile.display());
                 compressed.serialize(&mut out); // Colors
@@ -577,7 +578,7 @@ fn main() {
             } else {
                 log::info!("Copying SBWT to {}", outfile.display());
 
-                let compressed = index.compress_colors(sample_distance, n_threads);
+                let compressed = index.compress_colors::<ColorSets>(sample_distance, n_threads);
                 log::info!("Serializing colors to {}", outfile.display());
                 compressed.serialize(&mut out); // Colors
                 log::info!("Finished");
@@ -594,7 +595,7 @@ fn main() {
             let SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut input).unwrap();
             log::info!("Building LCS array");
             let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
-            let index = compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt), lcs, sample_distance, n_threads);
+            let index = compact_colored_kmers::CompactColexColoring::<ColorSets>::new_single_colored(Arc::new(sbwt), lcs, sample_distance, n_threads);
             index.serialize(&mut out);
         }
     } 
@@ -618,8 +619,8 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 let mut in1 = BufReader::new(File::open(&pair[0]).unwrap());
                 let mut in2 = BufReader::new(File::open(&pair[1]).unwrap());
 
-                let colors1 = compact_colored_kmers::CompactColexColoring::load(&mut in1, true); // Select support is required
-                let colors2 = compact_colored_kmers::CompactColexColoring::load(&mut in2, true); // Select support is required
+                let colors1 = compact_colored_kmers::CompactColexColoring::<ColorSets>::load(&mut in1, true); // Select support is required
+                let colors2 = compact_colored_kmers::CompactColexColoring::<ColorSets>::load(&mut in2, true); // Select support is required
 
                 let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, low_ram_mode, n_threads);
 
