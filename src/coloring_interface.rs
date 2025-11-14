@@ -67,7 +67,8 @@ pub trait ColorSetOwned<'a> {
     fn union<'b>(&mut self, other: &impl ColorSetOwned<'b>);
 
     // This signature is different than in ColorSetView to allow
-    // borrowing from the set itself.
+    // borrowing from the set itself. The 'a on &self can be tied to the
+    // lifetime of the reference to the internal data that is iterated over.
     fn iter(&'a self) -> Self::Iter; 
 }
 
@@ -232,6 +233,10 @@ fn generic<CSS: ColorSetStorage>(storage: CSS) {
     iter0.for_each(|x| println!("{}", x));
 
     iter1.for_each(|x| println!("{}", x));
+
+    let owned = storage.get_empty_set();
+    owned.iter().for_each(|x| println!("{}", x));
+    owned.iter().for_each(|x| println!("{}", x));
 
 }
 
