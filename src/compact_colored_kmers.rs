@@ -594,7 +594,7 @@ impl PartitionedReadOnlyIdMap {
 }
 
 
-fn compute_color_id_pairs_and_merged_unitig_sampling(coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, lcs1: &LcsArray, lcs2: &LcsArray, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
+fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>, lcs1: &LcsArray, lcs2: &LcsArray, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
