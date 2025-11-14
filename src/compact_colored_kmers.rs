@@ -781,7 +781,7 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
 
 }
 
-fn store_new_sampled_color_ids(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
+fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
