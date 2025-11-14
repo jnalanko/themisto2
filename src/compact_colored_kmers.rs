@@ -713,13 +713,6 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
 
     let n_colors_1 = coloring1.sets.get_full_set().iter().count();
     let n_colors_2 = coloring2.sets.get_full_set().iter().count();
-    let n_colors = n_colors_1 + n_colors_2;
-    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-
-    let mut sparse_sets = IntVecs::new(bits_per_color);
-    let mut dense_sets = BitMaps::new(n_colors);
-    let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
-
     let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
     // Create an iterator of combined sets
@@ -985,7 +978,9 @@ impl<'a> Iterator for ColorSetViewIterator<'a> {
                 }
 
                 if self.pos < bit_slice.len() {
-                    Some(self.pos)
+                    let ret = self.pos;
+                    self.pos += 1; // Starting point for the next iteration
+                    Some(ret)
                 } else {
                     None
                 }
