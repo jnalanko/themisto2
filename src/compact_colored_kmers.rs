@@ -446,25 +446,6 @@ impl ColorSets {
     }
 
 
-    pub fn serialize(&self, out: &mut impl std::io::Write) {
-        bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
-        self.is_dense_marks.serialize(out).unwrap();
-        self.sparse_sets.serialize(out);
-        self.dense_sets.serialize(out);
-    }
-
-    pub fn load(input: &mut impl std::io::Read) -> Self {
-        let n_colors: usize = bincode::deserialize_from(input.by_ref()).unwrap();
-        let is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
-        let sparse_sets = IntVecs::load(input);
-        let dense_sets = BitMaps::load(input);
-
-        assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
-        assert_eq!(n_colors, dense_sets.individual_length);
-        assert!(sparse_sets.intvec_data.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
-
-        ColorSets{is_dense_marks, sparse_sets, dense_sets, n_colors}
-    }
 }
 
 fn figure_out_if_we_need_to_sample_nonsampled_vs_absent(
@@ -1103,17 +1084,26 @@ impl coloring_interface::ColorSetStorage for ColorSets {
             n_colors
         }
     }
-    
+
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
-        todo!()
+        bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
+        self.is_dense_marks.serialize(out).unwrap();
+        self.sparse_sets.serialize(out);
+        self.dense_sets.serialize(out);
     }
-    
+
     fn load<R: std::io::Read>(input: &mut R) -> Self {
-        todo!()
+        let n_colors: usize = bincode::deserialize_from(input.by_ref()).unwrap();
+        let is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
+        let sparse_sets = IntVecs::load(input);
+        let dense_sets = BitMaps::load(input);
+
+        assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
+        assert_eq!(n_colors, dense_sets.individual_length);
+        assert!(sparse_sets.intvec_data.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
+
+        ColorSets{is_dense_marks, sparse_sets, dense_sets, n_colors}
     }
-
-    
-
 }
 
 /// Input: 
