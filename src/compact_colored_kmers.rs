@@ -742,21 +742,53 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
     let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
     // Create an iterator of combined sets
+    let mut pair_id = 0_usize;
+    let mut n_pairs = id_pairs_in_new_id_order.len();
+    let iter_of_iters = std::iter::from_fn(move || {
+        if pair_id == n_pairs {
+            None
+        } else {
+            let (_, (left, right)) = id_pairs_in_new_id_order[pair_id]; 
+            pair_id += 1;
+
+            match (left,right) {
+                (Some(x), Some(y)) => {
+                    let set1 = coloring1.set_id_to_set(x);
+                    let set2 = coloring2.set_id_to_set(y);
+                    let both = set1.iter().chain(set2.iter().map(|x| x + n_colors_1));
+                    let b: Box<dyn Iterator<Item = usize>> = Box::new(both);
+                    Some(b)
+                },
+                (Some(x), None) => {
+                    let set1 = coloring1.set_id_to_set(x).iter();
+                    let b: Box<dyn Iterator<Item = usize>> = Box::new(set1);
+                    Some(b)
+                },
+                (None, Some(y)) => {
+                    let set2 = coloring2.set_id_to_set(y).iter();
+                    let b: Box<dyn Iterator<Item = usize>> = Box::new(set2);
+                    Some(b)
+                }
+                (None, None) => panic!("Nonexisting color set id pair")
+            }
+        }
+    });
     let iter_of_iters = id_pairs_in_new_id_order.into_iter().map(|(_, (left, right))| {
         match (left,right) {
             (Some(x), Some(y)) => {
                 let set1 = coloring1.set_id_to_set(x);
                 let set2 = coloring2.set_id_to_set(y);
                 let both = set1.iter().chain(set2.iter().map(|x| x + n_colors_1));
-                both
+                let b: Box<dyn CSS::SetView::Iter> = Box::new(both);
+                b
             },
             (Some(x), None) => {
-                let set1 = coloring1.set_id_to_set(x);
-                set1.iter()
+                let set1 = coloring1.set_id_to_set(x).iter();
+                Box::new(set1)
             },
             (None, Some(y)) => {
-                let set2 = coloring2.set_id_to_set(y);
-                set2.iter()
+                let set2 = coloring2.set_id_to_set(y).iter();
+                Box::new(set2)
             }
             (None, None) => panic!("Nonexisting color set id pair")
         }
