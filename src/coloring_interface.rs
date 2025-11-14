@@ -59,36 +59,20 @@ pub trait ColorSetView<'a> {
 }
 
 pub trait ColorSetOwned {
-    type Iter<'a>: Iterator<Item = &'a usize> where Self: 'a;
+    type Iter<'a>: Iterator<Item = usize> where Self: 'a;
 
     fn intersect(&mut self, other: &impl ColorSetOwned);
     fn union(&mut self, other: &impl ColorSetOwned);
 
-    // This is different from ColorSetView in that it returns references
+    // This is different from ColorSetView in that this returns references
     // to usize that have lifetime tied to &self.
     fn iter(&self) -> Self::Iter<'_>; 
 }
 
-/*
-struct MyVecIterator<'a> {
-    slice: &'a [usize],
-    pos: usize,
-}
-
-impl<'a> Iterator for MyVecIterator<'a> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // Copy a value from self.slice and increment pos
-        todo!()
-    }
-}
-*/
-
 impl ColorSetOwned for Vec<usize> {
 
     //type Iter = std::vec::IntoIter<usize>;
-    type Iter<'a> = std::slice::Iter<'a, usize>;
+    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
 
     fn intersect(&mut self, other: &impl ColorSetOwned) {
         todo!()
@@ -99,7 +83,7 @@ impl ColorSetOwned for Vec<usize> {
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        self.as_slice().iter()
+        self.as_slice().iter().copied()
     }
 }
 
