@@ -1154,16 +1154,16 @@ impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
     }
 }
 
-impl coloring_interface::ColorSetStorage for CompactColexColoring {
+impl coloring_interface::ColorSetStorage for ColorSets {
     type SetView<'a> = ColorSet<'a>; 
     type OwnedSet = Vec<usize>; // TODO
 
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
-        self.set_id_to_set(id)
+        self.get(id)
     }
 
     fn get_owned_set(&self, id: usize) -> Self::OwnedSet {
-        self.set_id_to_set(id).iter().collect()
+        self.get(id).iter().collect()
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {
