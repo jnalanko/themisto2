@@ -362,6 +362,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         let sets = CSS::new(iter_of_iters, n_colors);
 
         log::info!("Sampling nodes");
+        let singleton = bitvec![1];
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
         unitig_samples.enable_rank();
         log::info!("Storing color set ids for sampled nodes");
