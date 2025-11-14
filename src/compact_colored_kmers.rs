@@ -884,7 +884,7 @@ mod tests {
 
     use crate::colored_kmers::ColoredKmers;
 
-    use super::merge_compact_colorings;
+    use super::{ColorSets, merge_compact_colorings};
 
 
     #[cfg(test)]
@@ -949,8 +949,8 @@ mod tests {
             cc_both.build_sbwt_select_support();
 
             let sample_distance = 3;
-            let ccc1 = cc1.compress_colors(sample_distance, 3);
-            let ccc2 = cc2.compress_colors(sample_distance, 3);
+            let ccc1 = cc1.compress_colors::<ColorSets>(sample_distance, 3);
+            let ccc2 = cc2.compress_colors::<ColorSets>(sample_distance, 3);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, 3);
             let sbwt_merged = &ccc_merged.sbwt;
