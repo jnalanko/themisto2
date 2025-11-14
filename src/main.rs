@@ -584,12 +584,12 @@ fn main() {
         Subcommands::MergeCompressedIndexes{ index_file_list, n_threads, outfile, temp_dir, low_ram_mode} => {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
-        }
+        },
         Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
             log::info!("Loading SBWT");
             let mut input = BufReader::new(File::open(sbwt_file).unwrap());
-            let SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut input).unwrap();
+            let SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut input).unwrap();
             log::info!("Building LCS array");
             let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
             let index = compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt), lcs, sample_distance, n_threads);
@@ -602,7 +602,7 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
     let n_rounds = infiles.len().div_ceil(2);
     let mut current_files: Vec<PathBuf> = infiles.to_vec();
     for round in 0..n_rounds {
-        log::info!("Merge round {}", round+1);
+        log::info!("Merge round {}", round);
         let mut next_files: Vec<PathBuf> = Vec::new();
         for pair in current_files.chunks(2) {
             if pair.len() == 2 {
