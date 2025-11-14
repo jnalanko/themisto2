@@ -709,6 +709,35 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     bitmap_size <= intvec_size
 }
 
+struct TwoSetMerger<L: Iterator<Item = usize>, R: Iterator<Item = usize>> {
+    left: Option<L>,
+    right: Option<R>,
+    left_n_colors: usize, // The left set get colors 0..left_n_colors, the right set gets left_n_colors..
+}
+
+impl<L: Iterator<Item = usize>, R: Iterator<Item = usize>> Iterator for TwoSetMerger<L,R> {
+    type Item = usize;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        // Terrible branch city. TODO: do better.
+
+        // Try to take from left
+        if let Some(l) = &mut self.left {
+            if let Some(x) = l.next() {
+                return Some(x);
+            } 
+        }
+
+        // Could not take from left -> take from right
+        if let Some(r) = &mut self.right {
+            r.next().map(|x| self.left_n_colors + x)
+        } else {
+            None // Finished
+        }
+    }
+}
+
+
 fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>) -> CSS {
 
     let n_colors_1 = coloring1.sets.get_full_set().iter().count();
@@ -716,8 +745,6 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
     let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
     // Create an iterator of combined sets
-    // TODO: do this without dynamic Boxes of iterators
-    // by making an iterator struct that has 1 or 2 sets.
     let mut pair_id = 0_usize;
     let n_pairs = id_pairs_in_new_id_order.len();
     let n_colors_1_ref = &n_colors_1; // Reference to move by reference into the closure 
@@ -732,19 +759,17 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
                 (Some(x), Some(y)) => {
                     let set1 = coloring1.set_id_to_set(x);
                     let set2 = coloring2.set_id_to_set(y);
-                    let both = set1.iter().chain(set2.iter().map(|x| x + *n_colors_1_ref));
-                    let b: Box<dyn Iterator<Item = usize>> = Box::new(both);
-                    Some(b)
+                    //let both = set1.iter().chain(set2.iter().map(|x| x + *n_colors_1_ref));
+                    Some(TwoSetMerger{left: Some(set1.iter()), right: Some(set2.iter()), left_n_colors: *n_colors_1_ref})
                 },
                 (Some(x), None) => {
-                    let set1 = coloring1.set_id_to_set(x).iter();
-                    let b: Box<dyn Iterator<Item = usize>> = Box::new(set1);
-                    Some(b)
+                    let set1 = coloring1.set_id_to_set(x);
+                    Some(TwoSetMerger{left: Some(set1.iter()), right: None, left_n_colors: *n_colors_1_ref})
                 },
                 (None, Some(y)) => {
-                    let set2 = coloring2.set_id_to_set(y).iter();
-                    let b: Box<dyn Iterator<Item = usize>> = Box::new(set2);
-                    Some(b)
+                    // Chain with empty to match types in match arms
+                    let set2 = coloring2.set_id_to_set(y);
+                    Some(TwoSetMerger{left: None, right: Some(set2.iter()), left_n_colors: *n_colors_1_ref})
                 }
                 (None, None) => panic!("Nonexisting color set id pair")
             }
