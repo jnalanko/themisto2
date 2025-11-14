@@ -378,12 +378,12 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         self.map.colex_to_color_set_id(colex)
     }
 
-    pub fn set_id_to_set(&self, id: usize) -> ColorSet<'_>  {
-        self.sets.get(id)
+    pub fn set_id_to_set<'a>(&'a self, id: usize) -> CSS::SetView<'a> {
+        self.sets.get_set_view(id)
     }
 
-    pub fn colex_to_set(&self, colex: usize) -> ColorSet<'_> {
-        self.set_id_to_set(self.colex_to_set_id(colex))
+    pub fn colex_to_set<'a>(&'a self, colex: usize) -> CSS::SetView<'a> {
+        self.sets.get_set_view(self.colex_to_set_id(colex))
     }
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
