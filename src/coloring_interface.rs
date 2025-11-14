@@ -29,6 +29,9 @@ pub trait ColorSetStorage {
 
     fn get_empty_set(&self) -> Self::OwnedSet;
     fn get_full_set(&self) -> Self::OwnedSet;
+
+    fn serialize<W: std::io::Write>(out: &mut W);
+    fn load<R: std::io::Read>(input: &mut R);
 }
 
 // A color set view that does not own the data, but can return an
