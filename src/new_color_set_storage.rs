@@ -50,6 +50,12 @@ trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
 }
 
+trait OwnedSet {
+    fn intersect(&mut self, other: &impl OwnedSet);
+    fn union(&mut self, other: &impl OwnedSet);
+    fn iter(&self) -> impl Iterator<Item = usize>;
+}
+
 impl ColorSetStorage for ColorSetStorageVec {
     type SetView<'a> = SliceColorSet<'a> where Self: 'a;
     type OwnedSet = Vec<usize>;
