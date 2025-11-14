@@ -295,10 +295,10 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
     MergeCompressedIndexes {
-        #[arg(long = "index_file_list", required = true)]
+        #[arg(long = "index-file-list", required = true)]
         index_file_list: PathBuf,
 
-        #[arg(long = "temp_dir", required = true)]
+        #[arg(long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
         #[arg(long = "output", short = 'o', required = true)]
