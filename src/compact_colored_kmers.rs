@@ -742,6 +742,8 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
     let id_pairs_in_new_id_order = new_id_map.get_old_ids_sorted_by_new_id();
 
     // Create an iterator of combined sets
+    // TODO: do this without dynamic Boxes of iterators
+    // by making an iterator struct that has 1 or 2 sets.
     let mut pair_id = 0_usize;
     let mut n_pairs = id_pairs_in_new_id_order.len();
     let iter_of_iters = std::iter::from_fn(move || {
