@@ -295,23 +295,29 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
     MergeCompressedIndexes {
-        #[arg(long = "index1", required = true)]
-        index1_file: PathBuf,
-
-        #[arg(long = "index1-from-sbwt", help = "Load index 1 from format written by sbwt-rs-cli, and color with a single color")]
-        index1_from_sbwt: bool,
-
-        #[arg(long = "index2", required = true)]
-        index2_file: PathBuf,
-
-        #[arg(long = "index2-from-sbwt", help = "Load index 2 from format written by sbwt-rs-cli, and color with a single color")]
-        index2_from_sbwt: bool,
+        #[arg(long = "index_file_list", required = true)]
+        index_file_list: PathBuf,
 
         #[arg(long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
+    },
+
+    #[command(arg_required_else_help = true, name = "build-from-sbwt")]
+    BuildFromSbwt{
+        #[arg(long = "sbwt_file", short = 'i', required = true)]
+        sbwt_file: PathBuf,
+
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
+        sample_distance: usize,
     },
 
 }
@@ -569,31 +575,11 @@ fn main() {
                 log::info!("Finished");
             }
         },
-        Subcommands::MergeCompressedIndexes{ index1_file, index2_file, index1_from_sbwt, index2_from_sbwt, n_threads, outfile} => {
+        Subcommands::MergeCompressedIndexes{ index_file_list, n_threads, outfile} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
 
             log::info!("Loading index 1");
             let mut in1 = BufReader::new(File::open(index1_file).unwrap());
-            let colors1 = if index1_from_sbwt {
-                let SbwtIndexVariant::SubsetMatrix(mut sbwt1) = sbwt::load_sbwt_index_variant(&mut in1).unwrap();
-                sbwt1.build_select(); // Required for merge
-                let lcs1 = LcsArray::from_sbwt(&sbwt1, n_threads);
-                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt1), lcs1, 10, n_threads) // Todo: 10 to CLI
-            } else {
-                compact_colored_kmers::CompactColexColoring::load(&mut in1, true) // Select support is required for merge
-            };
-
-            log::info!("Loading index 2");
-            let mut in2 = BufReader::new(File::open(index2_file).unwrap());
-            let colors2 = if index2_from_sbwt {
-                let SbwtIndexVariant::SubsetMatrix(mut sbwt2) = sbwt::load_sbwt_index_variant(&mut in2).unwrap();
-                sbwt2.build_select(); // Required for merge
-                let lcs2 = LcsArray::from_sbwt(&sbwt2, n_threads);
-                compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt2), lcs2, 10, n_threads) // Todo: 10 to CLI
-            } else {
-                compact_colored_kmers::CompactColexColoring::load(&mut in2, true) // Select support is required for merge
-            };
-
 
             log::info!("Merging");
             let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, true, n_threads);
@@ -602,7 +588,16 @@ fn main() {
             merged_colored_kmers.serialize(&mut out);
 
             log::info!("Finished");
-
+        }
+        Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
+            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
+            log::info!("Loading SBWT");
+            let mut input = BufReader::new(File::open(sbwt_file).unwrap());
+            let SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut input).unwrap();
+            log::info!("Building LCS array");
+            let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
+            let index = compact_colored_kmers::CompactColexColoring::new_single_colored(Arc::new(sbwt), lcs, sample_distance, n_threads);
+            index.serialize(&mut out);
         }
     } 
 }
