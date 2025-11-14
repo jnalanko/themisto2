@@ -816,7 +816,7 @@ fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usiz
     sampled_ids
 }
 
-pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: CompactColexColoring, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring {
+pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexColoring<CSS>, coloring2: CompactColexColoring<CSS>, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring<CSS> {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
@@ -824,8 +824,8 @@ pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: Compa
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();    
 
-    let n_colors_1 = coloring1.sets.n_colors;
-    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors_1 = coloring1.sets.get_full_set().iter().count();
+    let n_colors_2 = coloring2.sets.get_full_set().iter().count();
     let n_colors = n_colors_1 + n_colors_2;
 
     log::info!("Computing color id pairs and merged sampling");
@@ -837,25 +837,11 @@ pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: Compa
     log::info!("Sampled {} out of {} SBWT nodes ({:.2}%)", n_sampled, merged_len, n_sampled as f64 / merged_len as f64 * 100.0);
 
     log::info!("Encoding distinct merged color sets");
-    let (sparse_sets, dense_sets, is_dense_marks) = encode_merged_color_sets(&new_id_map, &coloring1, &coloring2);
-
-    log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / (sparse_sets.n_sets() + dense_sets.n_sets()) as f64 * 100.0);
+    let css = encode_merged_color_sets(&new_id_map, &coloring1, &coloring2);
 
     log::info!("Storing new sampled color set ids");
     let n_distinct_color_sets = new_id_map.total_len(); 
     let sampled_ids = store_new_sampled_color_ids(n_distinct_color_sets, &merge_plan, &color_set_sample_marks, &coloring1, &coloring2, &new_id_map);
-
-    // Add rank support to dense marks
-    log::info!("Building rank support for dense marks");
-    let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-    is_dense_marks.enable_rank();
-
-    let colorsets = ColorSets {
-        is_dense_marks, 
-        sparse_sets,
-        dense_sets,
-        n_colors
-    };
 
     log::info!("Interleaving SBWTs");
     let precalc_len = max(coloring1.map.sbwt.get_lookup_table().prefix_length, coloring2.map.sbwt.get_lookup_table().prefix_length);
@@ -875,7 +861,7 @@ pub fn merge_compact_colorings(coloring1: CompactColexColoring, coloring2: Compa
     let new_coloring = CompactColexColoring { 
         sbwt: merged_sbwt.clone(),
         lcs: merged_lcs,
-        sets: colorsets, 
+        sets: css, 
         map: ColexToColorSetMap {
             sbwt: merged_sbwt.clone(), 
             sampling: color_set_sample_marks, 
