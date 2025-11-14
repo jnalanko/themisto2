@@ -1167,7 +1167,7 @@ impl coloring_interface::ColorSetStorage for ColorSets {
 /// Output:
 /// - Distinct color sets encoded as something implementing ColorSetStorage
 /// - HashMap from color set to its index in ColorSets
-fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (Box<CSS>, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
+fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (CSS, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
     assert_eq!(bm.len() % n_colors, 0);
     let n_sets = bm.len() / n_colors;
 
@@ -1197,7 +1197,7 @@ fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec,
         set.iter_ones()
     });
 
-    let colorsets = CSS::new(color_sets_iterator);
+    let colorsets = CSS::new(color_sets_iterator, n_colors);
 
     (colorsets, distinct_sets)
 
