@@ -759,7 +759,6 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
                 (Some(x), Some(y)) => {
                     let set1 = coloring1.set_id_to_set(x);
                     let set2 = coloring2.set_id_to_set(y);
-                    //let both = set1.iter().chain(set2.iter().map(|x| x + *n_colors_1_ref));
                     Some(TwoSetMerger{left: Some(set1.iter()), right: Some(set2.iter()), left_n_colors: *n_colors_1_ref})
                 },
                 (Some(x), None) => {
@@ -767,7 +766,6 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
                     Some(TwoSetMerger{left: Some(set1.iter()), right: None, left_n_colors: *n_colors_1_ref})
                 },
                 (None, Some(y)) => {
-                    // Chain with empty to match types in match arms
                     let set2 = coloring2.set_id_to_set(y);
                     Some(TwoSetMerger{left: None, right: Some(set2.iter()), left_n_colors: *n_colors_1_ref})
                 }
