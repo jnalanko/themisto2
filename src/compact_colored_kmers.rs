@@ -775,27 +775,6 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
             }
         }
     });
-    let iter_of_iters = id_pairs_in_new_id_order.into_iter().map(|(_, (left, right))| {
-        match (left,right) {
-            (Some(x), Some(y)) => {
-                let set1 = coloring1.set_id_to_set(x);
-                let set2 = coloring2.set_id_to_set(y);
-                let both = set1.iter().chain(set2.iter().map(|x| x + n_colors_1));
-                let b: Box<dyn CSS::SetView::Iter> = Box::new(both);
-                b
-            },
-            (Some(x), None) => {
-                let set1 = coloring1.set_id_to_set(x).iter();
-                Box::new(set1)
-            },
-            (None, Some(y)) => {
-                let set2 = coloring2.set_id_to_set(y).iter();
-                Box::new(set2)
-            }
-            (None, None) => panic!("Nonexisting color set id pair")
-        }
-
-    });
 
     CSS::new(iter_of_iters, n_colors_1 + n_colors_2)
 
