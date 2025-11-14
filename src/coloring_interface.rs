@@ -17,7 +17,7 @@ pub trait ColorSetStorage {
     type SetView<'a>: ColorSetView<'a> where Self: 'a;
 
     // An owned version of SetView
-    type OwnedSet;
+    type OwnedSet: ColorSetOwned;
 
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
@@ -58,10 +58,30 @@ pub trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
 }
 
-pub trait OwnedSet {
-    fn intersect(&mut self, other: &impl OwnedSet);
-    fn union(&mut self, other: &impl OwnedSet);
-    fn iter(&self) -> impl Iterator<Item = usize>;
+pub trait ColorSetOwned {
+    type Iter: Iterator<Item = usize>;
+
+    fn intersect(&mut self, other: &impl ColorSetOwned);
+    fn union(&mut self, other: &impl ColorSetOwned);
+    fn iter(&self) -> Self::Iter;
+}
+
+impl ColorSetOwned for Vec<usize> {
+
+    type Iter = std::vec::IntoIter<usize>;
+
+    fn intersect(&mut self, other: &impl ColorSetOwned) {
+        todo!()
+    }
+
+    fn union(&mut self, other: &impl ColorSetOwned) {
+        todo!()
+    }
+
+    fn iter(&self) -> Self::Iter {
+        let x = Vec::<usize>::into_iter(self.clone());
+        x
+    }
 }
 
 impl ColorSetStorage for ColorSetStorageVec {

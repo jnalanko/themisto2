@@ -728,10 +728,10 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     bitmap_size <= intvec_size
 }
 
-fn encode_merged_color_sets(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring, coloring2: &CompactColexColoring) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
+fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>) -> (IntVecs, BitMaps, simple_sds_sbwt::raw_vector::RawVector){
 
-    let n_colors_1 = coloring1.sets.n_colors;
-    let n_colors_2 = coloring2.sets.n_colors;
+    let n_colors_1 = coloring1.sets.get_full_set().iter().len();
+    let n_colors_2 = coloring2.sets.get_full_set().iter().len();
     let n_colors = n_colors_1 + n_colors_2;
     let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
 
