@@ -9,6 +9,7 @@ use coloring_interface::ColorSetStorage;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant};
 use serde_json::value::Index;
+use sparse_dense_storage::SparseDenseStorage;
 
 mod EM;
 mod bitmap_storage;
@@ -179,12 +180,19 @@ fn main() {
                 IndexType::Bitmaps => {
                     log::info!("Building uncompressed color bitmap");
                     let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
-                    log::info!("Compressing with unitig sampling");
+                    log::info!("Compressing to bitmap sets with unitig sampling distance {}", sample_distance);
                     let index = CompactColexColoring::<BitmapStorage>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads);
                     log::info!("Writing to {}", output.display());
                     index.serialize(&mut out);
                 },
-                IndexType::SparseDense => todo!(),
+                IndexType::SparseDense => {
+                    log::info!("Building uncompressed color bitmap");
+                    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
+                    log::info!("Compressing to sparse-dense sets with unitig sampling distance {}", sample_distance);
+                    let index = CompactColexColoring::<SparseDenseStorage>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads);
+                    log::info!("Writing to {}", output.display());
+                    index.serialize(&mut out);
+                },
             }
 
         },
