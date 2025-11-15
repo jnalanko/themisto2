@@ -15,7 +15,6 @@ mod compatibility_criteria;
 mod colex_colored_kmers;
 mod coloring_interface;
 mod sparse_dense_storage;
-mod queries;
 mod io;
 
 #[derive(Parser)]
