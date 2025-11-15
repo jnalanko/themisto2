@@ -1,3 +1,5 @@
+#![allow(dead_code)] // This code will be re-integrated at some point
+
 use std::cmp::max;
 
 fn indices_with_minimum_support(supports: &[usize], minimum_support: usize) -> Vec<usize> {
