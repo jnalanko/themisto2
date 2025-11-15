@@ -336,13 +336,13 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                         log::info!("Merging bitmap indexes");
                         let merged_colored_kmers = colex_colored_kmers::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
-                        merged_colored_kmers.serialize(&mut out);
+                        write_index_variant(&IndexVariant::BitmapIndex(merged_colored_kmers), &mut out);
                     },
                     (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
                         log::info!("Merging sparse-dense indexes");
                         let merged_colored_kmers = colex_colored_kmers::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
-                        merged_colored_kmers.serialize(&mut out);
+                        write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
                     },
                     (IndexVariant::SparseDenseIndex(_), IndexVariant::BitmapIndex(_)) => {
                         panic!("Mismatched index types when merging: {} and {}", pair[0].display(), pair[1].display());
