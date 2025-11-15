@@ -276,12 +276,16 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             .intersection(&b.iter().collect::<HashSet<usize>>())
             .copied()
             .collect::<Vec::<usize>>();
-        *a = SparseDenseColorSetOwned::new(elements.into_iter(), self.n_colors);
+        *a = SparseDenseColorSetOwned::new(elements.into_iter(), a.n_colors);
     }
     
     fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         // Really slow dummy implementation
-        todo!();
+        let elements = a.iter().chain(b.iter())
+            .collect::<HashSet<usize>>()
+            .into_iter()
+            .collect::<Vec::<usize>>();
+        *a = SparseDenseColorSetOwned::new(elements.into_iter(), a.n_colors);
     }
 
      
