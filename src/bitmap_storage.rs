@@ -13,8 +13,8 @@ use crate::{coloring_interface::{self, ColorSetStorage}};
  */
 
 pub struct BitmapStorage {
-    bitmap: BitVec, // Concatenation of distinct color sets
-    n_colors: usize,
+    pub bitmap: BitVec, // Concatenation of distinct color sets
+    pub n_colors: usize,
 }
 
 pub struct BitSetView<'storage> {
