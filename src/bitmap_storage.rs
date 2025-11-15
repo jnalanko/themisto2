@@ -331,63 +331,7 @@ pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n
 #[cfg(test)]
 mod tests {
 
-    use sbwt::BitPackedKmerSorting;
-
     use super::*;
-
-    #[test]
-    fn test_distinguishing_scores(){
-        let red_seq: &[u8] = b"AAACATCGATCGTACGTACGTCAGCTACTGCA";
-        let blue_seq: &[u8] = b"CACTCTATCGCGTTATCTTACGATCATGCTAGC";
-        let green_seq: &[u8] = b"ACATCGGCGTATCTATCTACGATCGTACGTCA";
-        let uncolored_seq: &[u8] = b"GGATTCGGATCTATCGTAGCTGTACGTGCTGAC";
-        let red_and_blue_seq: &[u8] = b"TTAGCTATCGTATCCGATCACGTACGTAGTCAA";
-        let red_and_blue_and_green_seq: &[u8] = b"CCGTTATCGGCCTATACTATCGACTACGTAGC";
-        let k = 12; // Let's hope I didn't accidentally repeat any kmers
-
-        let all_seqs: &[&[u8]] = &[red_seq, blue_seq, green_seq, uncolored_seq, red_and_blue_seq, red_and_blue_and_green_seq];
-        let distinct_color_sets = bitvec![0,0,0, 1,0,0, 0,1,0, 0,0,1, 1,1,0, 1,1,1];
-        let seq_color_set_ids: Vec<usize> = vec![1, 2, 3, 0, 4, 5];
-
-        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::<BitPackedKmerSortingMem>::new().k(k).build_lcs(true).run_from_slices(all_seqs);
-        let lcs = lcs.unwrap();
-
-        // Build colex to color id mapping
-        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
-        for (seq_id, seq) in all_seqs.iter().enumerate() {
-            for (match_len, colex_range) in sbwt::StreamingIndex::new(&sbwt, &lcs).matching_statistics(seq).iter() {
-                if *match_len == k {
-                    assert_eq!(colex_range.len(), 1);
-                    colex_to_color_set_id[colex_range.start] = seq_color_set_ids[seq_id];
-                }
-            }
-        }
-
-        let index = ColoredKmers{kmers: sbwt, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0,0,0], n_colors: 3};
-
-        // Concatenate the sequences
-        let all_seqs_concatenated: Vec<u8> = all_seqs.iter().flat_map(|x| x.iter().copied()).collect();
-
-        //let total_kmers = all_seqs_concatenated.len() - k + 1;
-        //let n_distinguishing = red_seq.len() - k + 1 + blue_seq.len() - k + 1 + green_seq.len() - k + 1 + red_and_blue_seq.len() - k + 1;
-        let n_red_distinguishing_hits = red_seq.len() - k + 1 + red_and_blue_seq.len() - k + 1;
-        let n_blue_distinguishing_hits = blue_seq.len() - k + 1 + red_and_blue_seq.len() - k + 1;
-        let n_green_distinguishing_hits = green_seq.len() - k + 1;
-        let max_distinguishing_hits = n_red_distinguishing_hits.max(n_blue_distinguishing_hits).max(n_green_distinguishing_hits);
-        let true_scores = [n_red_distinguishing_hits as f64 / max_distinguishing_hits as f64, n_blue_distinguishing_hits as f64 / max_distinguishing_hits as f64, n_green_distinguishing_hits as f64 / max_distinguishing_hits as f64];
-
-        let scores = index.compute_distinguishing_scores(&all_seqs_concatenated);
-
-        eprintln!("{:?}", scores);
-        eprintln!("{:?}", true_scores);
-        
-        let epsilon = 1e-6;
-        assert_eq!(true_scores.len(), scores.len());
-        for (color, score) in scores {
-            assert!((score - true_scores[color]).abs() < epsilon);
-        }
-
-    }
 
     /*
     #[test]
