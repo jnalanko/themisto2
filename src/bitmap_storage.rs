@@ -4,21 +4,21 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{coloring_interface::ColorSetStorage, compact_colored_kmers::CompactColexColoring};
+use crate::{coloring_interface::{self, ColorSetStorage}, compact_colored_kmers::CompactColexColoring};
 
 pub struct BitmapStorage {
     bitmap: BitVec, // Concatenation of distinct color sets
     n_colors: usize,
 }
 
-pub struct BitSliceSetView<'storage> {
+pub struct BitSetView<'storage> {
     bs: &'storage BitSlice<usize, Lsb0>,
 }
-pub struct BitSliceSetViewIter<'storage> {
+pub struct BitSetViewIter<'storage> {
     it: bitvec::slice::IterOnes<'storage, usize, Lsb0>,
 }
 
-impl<'a> Iterator for BitSliceSetViewIter<'a> {
+impl<'a> Iterator for BitSetViewIter<'a> {
     type Item = usize;
     
     fn next(&mut self) -> Option<Self::Item> {
@@ -27,11 +27,11 @@ impl<'a> Iterator for BitSliceSetViewIter<'a> {
 
 }
  
-impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage BitSliceSetView<'storage> {
-    type Iter = BitSliceSetViewIter<'storage>;
+impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage BitSetView<'storage> {
+    type Iter = BitSetViewIter<'storage>;
 
     fn iter(&self) -> Self::Iter {
-        BitSliceSetViewIter{it: self.bs.iter_ones()}
+        BitSliceSetIter{it: self.bs.iter_ones()}
 
     }
 
@@ -40,19 +40,34 @@ impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage B
     }
 }
 
-impl crate::coloring_interface::ColorSetOwned for BitVec {
-    type Iter<'a> where Self: 'a;
+pub struct BitSetOwned {
+    bv: BitVec<usize, Lsb0>,
+}
+pub struct BitSetOwnedIter<'a> {
+    it: bitvec::slice::IterOnes<'a, usize, Lsb0>,
+}
 
-    fn intersect(&mut self, other: &impl crate::coloring_interface::ColorSetOwned) {
+impl coloring_interface::ColorSetOwned for BitSetOwned {
+    type Iter<'a> = BitSetOwnedIter<'a> where Self: 'a;
+
+    fn intersect(&mut self, other: &impl coloring_interface::ColorSetOwned) {
         todo!()
     }
 
-    fn union(&mut self, other: &impl crate::coloring_interface::ColorSetOwned) {
+    fn union(&mut self, other: &impl coloring_interface::ColorSetOwned) {
         todo!()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        todo!()
+        BitSetOwnedIter{it: self.bv.iter_ones()}
+    }
+}
+
+impl<'a> Iterator for BitSetOwnedIter<'a> {
+    type Item = usize;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.it.next()
     }
 }
 
