@@ -324,7 +324,7 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 let outpath = if round == n_rounds - 1 {
                     outfile.to_path_buf() // Final output file
                 } else {
-                    temp_dir.join(format!("merge_round{}_{}.thm2c", round, next_files.len()))
+                    temp_dir.join(format!("merge_round{}_{}.thm2", round, next_files.len()))
                 };
                 log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
                 let mut out = BufWriter::new(File::create(&outpath).unwrap());
