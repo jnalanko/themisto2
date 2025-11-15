@@ -3,7 +3,6 @@
 use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
-use colex_colored_kmers::ColorSets;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{LcsArray, SbwtIndexVariant};
 
@@ -13,6 +12,7 @@ mod bitmap_storage;
 mod compatibility_criteria;
 mod colex_colored_kmers;
 mod coloring_interface;
+mod sparse_dense_storage;
 mod queries;
 
 struct SimpleLikelihood {} // Based on compatibility vectors
