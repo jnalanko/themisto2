@@ -751,7 +751,7 @@ fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec,
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::sync::Arc;
 
     use jseqio::seq_db::SeqDB;
     use sbwt::BitPackedKmerSortingMem;

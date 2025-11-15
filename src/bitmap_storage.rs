@@ -1,7 +1,7 @@
 use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
 
 use crossbeam::channel::{Receiver, RecvError, Sender};
-use sbwt::{self, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
+use sbwt::{self, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
 use crate::coloring_interface;
@@ -241,7 +241,7 @@ pub fn build_from_seq_dbs(dbs: Vec<jseqio::seq_db::SeqDB>, sbwt: &SbwtIndex<Subs
 
     let sbwt_len = sbwt.n_sets();
     let k = sbwt.k();
-    let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
+    let streaming_index_owned = StreamingIndex::new(sbwt, lcs);
     let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
     // Stream the output again to mark colors
