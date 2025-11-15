@@ -858,9 +858,9 @@ mod tests {
             let lcs2 = lcs2.unwrap();
             let lcs_both = lcs_both.unwrap();
 
-            let bms1 = build_from_seq_dbs::<&Path>(dbs1, k, n_threads, None);
-            let bms2 = build_from_seq_dbs::<&Path>(dbs2, k, n_threads, None);
-            let bms_both = build_from_seq_dbs::<&Path>(dbs_both, k, n_threads, None);
+            let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
+            let bms2 = build_from_seq_dbs(dbs2, &sbwt2, &lcs2, n_threads);
+            let bms_both = build_from_seq_dbs(dbs_both, &sbwt1, &lcs1, n_threads);
 
             let sample_distance = 3;
 

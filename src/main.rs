@@ -155,11 +155,10 @@ pub enum Subcommands {
 }
 
 fn build_coloring<CSS: ColorSetStorage>(
-    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], k: usize,
-    n_threads: usize, sample_distance: usize, temp_dir: &Path,
-) -> CompactColexColoring<CSS> {
+    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexColoring<CSS> {
+
     log::info!("Building uncompressed color bitmap");
-    let color_storage = bitmap_storage::build_from_files(input_paths, k, n_threads, temp_dir);
+    let color_storage = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
     CompactColexColoring::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
 }
@@ -394,12 +393,12 @@ fn main() {
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, k, n_threads, sample_distance, &temp_dir);
+                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance);
                     log::info!("Serializing bitmap index to {}", output.display());
                     write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, k, n_threads, sample_distance, &temp_dir);
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance);
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },

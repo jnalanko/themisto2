@@ -229,7 +229,7 @@ fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize
 } 
 
 /// Note: reverse complements are not added, so if you want them, include them in the dbs.
-pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db::SeqDB>, k: usize, n_threads: usize, temp_dir: Option<P>) -> BitmapStorage {
+pub fn build_from_seq_dbs(dbs: Vec<jseqio::seq_db::SeqDB>, sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, n_threads: usize) -> BitmapStorage {
     let dbs = Arc::new(dbs);
     let input_stream = InputStream {
         dbs: dbs.clone(),
@@ -238,31 +238,9 @@ pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db:
     };
 
     let num_colors = input_stream.dbs.len();
-    log::info!("Building SBWT");
-    let (sbwt, lcs) = if let Some(temp_dir) = temp_dir {
-        sbwt::SbwtIndexBuilder::new()
-            .add_rev_comp(false) // Already added in the input stream
-            .k(k)
-            .build_lcs(true)
-            .n_threads(n_threads)
-            .precalc_length(8)
-            .algorithm(sbwt::BitPackedKmerSortingDisk::new()
-                .dedup_batches(true)
-                .temp_dir(temp_dir.as_ref())
-        ).run(input_stream)
-    } else {
-        sbwt::SbwtIndexBuilder::new()
-            .add_rev_comp(false) // Already added in the input stream
-            .k(k)
-            .build_lcs(true)
-            .n_threads(n_threads)
-            .precalc_length(8)
-            .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
-        .run(input_stream)
-    };
-    let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
 
     let sbwt_len = sbwt.n_sets();
+    let k = sbwt.k();
     let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
     let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
@@ -324,13 +302,13 @@ pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db:
 }
 
 #[allow(clippy::type_complexity)]
-pub fn build_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> BitmapStorage {
+pub fn build_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, n_threads: usize) -> BitmapStorage {
 
     log::info!("Loading {} sequence files (colors) into memory", filenames.len());
     let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs
 
     log::info!("Indexing");
-    build_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
+    build_from_seq_dbs(dbs, sbwt, lcs, n_threads)
 }
 
 #[cfg(test)]
