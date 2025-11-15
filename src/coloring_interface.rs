@@ -212,30 +212,6 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
-    struct OwnedColorSet {
-        set: Vec<usize>
-    }
-
-    struct OwnedColorSetIter<'a> {
-        pos: usize,
-        set: &'a [usize],
-    }
-
-    impl<'a> Iterator for OwnedColorSetIter<'a> {
-        type Item = usize;
-        fn next(&mut self) -> Option<usize> {
-            if self.pos >= self.set.len() {
-                None
-            } else {
-                let item = self.set[self.pos];
-                self.pos += 1;
-                Some(item)
-            }
-        }
-    }
-
-
     fn generic<CSS: ColorSetStorage>(storage: CSS, true_sets: &[Vec<usize>]) {
         // 'a is is the generic lifetime associated with color set objects from CSS 
 
