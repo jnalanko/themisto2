@@ -657,10 +657,6 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexColo
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();    
 
-    let n_colors_1 = coloring1.sets.get_full_set().iter().count();
-    let n_colors_2 = coloring2.sets.get_full_set().iter().count();
-    let n_colors = n_colors_1 + n_colors_2;
-
     log::info!("Computing color id pairs and merged sampling");
     let (new_id_map, color_set_sample_marks) = compute_color_id_pairs_and_merged_unitig_sampling(&coloring1, &coloring2, &coloring1.lcs, &coloring2.lcs, &merge_plan, n_threads);
 
@@ -708,15 +704,60 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexColo
 }
 
 
+
+
+/// Input: 
+/// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
+///   color j is present in set i.
+/// 
+/// Output:
+/// - Distinct color sets encoded as something implementing ColorSetStorage
+/// - HashMap from color set to its index in ColorSets
+fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (CSS, HashMap::<BitKey<'_>, usize, BuildHasherDefault::<FxHasher>>) {
+    assert_eq!(bm.len() % n_colors, 0);
+    let n_sets = bm.len() / n_colors;
+
+    log::info!("Hashing distinct color sets");
+
+    let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+    let mut distinct_set_colex_ranks = Vec::<usize>::new();
+    let bar = indicatif::ProgressBar::new(n_sets as u64);
+    for colex in 0..n_sets {
+        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+        let key = BitKey{bits: set};
+        if !distinct_sets.contains_key(&key) {
+            distinct_sets.insert(key, distinct_sets.len());
+            distinct_set_colex_ranks.push(colex);
+        }
+        if colex % 100 == 0 {
+            bar.inc(100);
+        }
+    }
+    bar.finish();
+
+    log::info!("{} distinct color sets found", distinct_sets.len());
+
+    // Create an iterator of iterators, each inner iterator iterating over one color set
+    let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
+        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
+        set.iter_ones()
+    });
+
+    let colorsets = CSS::new(color_sets_iterator, n_colors);
+
+    (colorsets, distinct_sets)
+
+}
+
 #[cfg(test)]
 mod tests {
     use std::{path::Path, sync::Arc};
 
     use jseqio::seq_db::SeqDB;
-    use sbwt::{BitPackedKmerSortingMem, SbwtIndexBuilder};
+    use sbwt::BitPackedKmerSortingMem;
     use simple_sds_sbwt::ops::BitVec;
 
-    use crate::{bitmap_storage::build_from_seq_dbs, coloring_interface::ColorSetView, sparse_dense_storage::{self, SparseDenseStorage}};
+    use crate::{bitmap_storage::build_from_seq_dbs, coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
 
     use super::{CompactColexColoring, merge_compact_colorings};
 
@@ -848,48 +889,4 @@ mod tests {
             }
         }
     }
-}
-
-
-/// Input: 
-/// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
-///   color j is present in set i.
-/// 
-/// Output:
-/// - Distinct color sets encoded as something implementing ColorSetStorage
-/// - HashMap from color set to its index in ColorSets
-fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (CSS, HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>) {
-    assert_eq!(bm.len() % n_colors, 0);
-    let n_sets = bm.len() / n_colors;
-
-    log::info!("Hashing distinct color sets");
-
-    let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
-    let mut distinct_set_colex_ranks = Vec::<usize>::new();
-    let bar = indicatif::ProgressBar::new(n_sets as u64);
-    for colex in 0..n_sets {
-        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-        let key = BitKey{bits: set};
-        if !distinct_sets.contains_key(&key) {
-            distinct_sets.insert(key, distinct_sets.len());
-            distinct_set_colex_ranks.push(colex);
-        }
-        if colex % 100 == 0 {
-            bar.inc(100);
-        }
-    }
-    bar.finish();
-
-    log::info!("{} distinct color sets found", distinct_sets.len());
-
-    // Create an iterator of iterators, each inner iterator iterating over one color set
-    let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
-        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-        set.iter_ones()
-    });
-
-    let colorsets = CSS::new(color_sets_iterator, n_colors);
-
-    (colorsets, distinct_sets)
-
 }
