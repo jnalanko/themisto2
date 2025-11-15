@@ -141,6 +141,12 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     }
 }
 
+/*
+ *
+ * Construction algorithm
+ *
+ */
+
 struct InputStream {
     dbs: Arc<Vec<jseqio::seq_db::SeqDB>>, // Arc because we may want to hold onto the dbs even if the stream is consumed
     cur_db_idx: usize, // Index of the db currently being iterated over
@@ -218,116 +224,112 @@ fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize
     }
 } 
 
-impl ColoredKmers {
+/// Note: reverse complements are not added, so if you want them, include them in the dbs.
+pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db::SeqDB>, k: usize, n_threads: usize, temp_dir: Option<P>) -> BitmapStorage {
+    let dbs = Arc::new(dbs);
+    let input_stream = InputStream {
+        dbs: dbs.clone(),
+        cur_db_idx: 0,
+        seq_idx_in_cur_db: 0,
+    };
 
-    /// Note: reverse complements are not added, so if you want them, include them in the dbs.
-    pub fn new_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db::SeqDB>, k: usize, n_threads: usize, temp_dir: Option<P>) -> Self {
-        let dbs = Arc::new(dbs);
-        let input_stream = InputStream {
-            dbs: dbs.clone(),
-            cur_db_idx: 0,
-            seq_idx_in_cur_db: 0,
-        };
+    let num_colors = input_stream.dbs.len();
+    log::info!("Building SBWT");
+    let (sbwt, lcs) = if let Some(temp_dir) = temp_dir {
+        sbwt::SbwtIndexBuilder::new()
+            .add_rev_comp(false) // Already added in the input stream
+            .k(k)
+            .build_lcs(true)
+            .n_threads(n_threads)
+            .precalc_length(8)
+            .algorithm(sbwt::BitPackedKmerSortingDisk::new()
+                .dedup_batches(true)
+                .temp_dir(temp_dir.as_ref())
+        ).run(input_stream)
+    } else {
+        sbwt::SbwtIndexBuilder::new()
+            .add_rev_comp(false) // Already added in the input stream
+            .k(k)
+            .build_lcs(true)
+            .n_threads(n_threads)
+            .precalc_length(8)
+            .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
+        .run(input_stream)
+    };
+    let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
 
-        let num_colors = input_stream.dbs.len();
-        log::info!("Building SBWT");
-        let (sbwt, lcs) = if let Some(temp_dir) = temp_dir {
-            sbwt::SbwtIndexBuilder::new()
-                .add_rev_comp(false) // Already added in the input stream
-                .k(k)
-                .build_lcs(true)
-                .n_threads(n_threads)
-                .precalc_length(8)
-                .algorithm(BitPackedKmerSorting::new()
-                    .dedup_batches(true)
-                    .temp_dir(temp_dir.as_ref())
-            ).run(input_stream)
-        } else {
-            sbwt::SbwtIndexBuilder::new()
-                .add_rev_comp(false) // Already added in the input stream
-                .k(k)
-                .build_lcs(true)
-                .n_threads(n_threads)
-                .precalc_length(8)
-                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
-            .run(input_stream)
-        };
-        let lcs = lcs.unwrap(); // Ok since used build_lcs(true) above
+    let sbwt_len = sbwt.n_sets();
+    let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
+    let streaming_index = &streaming_index_owned; // Pass by reference into the scope
 
-        let sbwt_len = sbwt.n_sets();
-        let streaming_index_owned = StreamingIndex::new(&sbwt, &lcs);
-        let streaming_index = &streaming_index_owned; // Pass by reference into the scope
+    // Stream the output again to mark colors
+    let color_sets = std::thread::scope(|scope| {
 
-        // Stream the output again to mark colors
-        let color_sets = std::thread::scope(|scope| {
+        log::info!("Building colors");
 
-            log::info!("Building colors");
+        let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
 
-            let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
-
-            // Push work to the input queue
-            for color in 0..dbs.len() {
-                for rec in dbs[color].iter() {
-                    work_input_queue.0.send((color, rec.seq)).unwrap(); 
-                }
+        // Push work to the input queue
+        for color in 0..dbs.len() {
+            for rec in dbs[color].iter() {
+                work_input_queue.0.send((color, rec.seq)).unwrap(); 
             }
-            drop(work_input_queue.0); // Close the channel
+        }
+        drop(work_input_queue.0); // Close the channel
 
-            // Spawn worker threads
-            let mut worker_handles = Vec::new();
-            let color_sets_lock = Arc::new(Mutex::new(bitvec![0; num_colors*sbwt_len])); // Concatenation of color sets
-            for thread_id in 0..n_threads {
-                let recv_clone = work_input_queue.1.clone();
-                let color_sets_lock_clone = color_sets_lock.clone();
-                let consumer_handle = scope.spawn(move || {
-                    loop {
-                        match recv_clone.recv() {
-                            Ok((color, seq)) => {
-                                mark_all_kmers_of_seq(color_sets_lock_clone.clone(), num_colors, color, seq, k, 100000, streaming_index);
-                            },
-                            Err(RecvError) => {
-                                log::info!("Thread {} finished", thread_id);
-                                break;
-                            }
+        // Spawn worker threads
+        let mut worker_handles = Vec::new();
+        let color_sets_lock = Arc::new(Mutex::new(bitvec![0; num_colors*sbwt_len])); // Concatenation of color sets
+        for thread_id in 0..n_threads {
+            let recv_clone = work_input_queue.1.clone();
+            let color_sets_lock_clone = color_sets_lock.clone();
+            let consumer_handle = scope.spawn(move || {
+                loop {
+                    match recv_clone.recv() {
+                        Ok((color, seq)) => {
+                            mark_all_kmers_of_seq(color_sets_lock_clone.clone(), num_colors, color, seq, k, 100000, streaming_index);
+                        },
+                        Err(RecvError) => {
+                            log::info!("Thread {} finished", thread_id);
+                            break;
                         }
                     }
-                });
-                worker_handles.push(consumer_handle);
-            }
+                }
+            });
+            worker_handles.push(consumer_handle);
+        }
 
-            // Wait for all workers to finish
-            for handle in worker_handles {
-                handle.join().unwrap();
-            }
+        // Wait for all workers to finish
+        for handle in worker_handles {
+            handle.join().unwrap();
+        }
 
-            // Since we have joined the workers, there should be only one clone of the
-            // Arc<Mutex> (the one owned by this thread), so we can consume the lock and return the data.
-            Arc::try_unwrap(color_sets_lock).unwrap().into_inner().unwrap()
+        // Since we have joined the workers, there should be only one clone of the
+        // Arc<Mutex> (the one owned by this thread), so we can consume the lock and return the data.
+        Arc::try_unwrap(color_sets_lock).unwrap().into_inner().unwrap()
 
-        }); // End of thread scope 
+    }); // End of thread scope 
 
-        // Todo: deduplicate color sets
+    // Todo: deduplicate color sets
 
-        let colex_to_color_set_id: Vec<usize> = (0..sbwt_len).collect(); // Identity mapping
-
-        ColoredKmers{kmers: sbwt, lcs, distinct_color_sets: color_sets, empty_set: BitVec::new(), colex_to_color_set_id, n_colors: dbs.len()}
-
+    BitmapStorage{
+        bitmap: color_sets,
+        n_colors: num_colors,
     }
+}
 
-    #[allow(clippy::type_complexity)]
-    pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+#[allow(clippy::type_complexity)]
+pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
 
-        log::info!("Loading {} sequence files (colors) into memory", filenames.len());
-        let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs
+    log::info!("Loading {} sequence files (colors) into memory", filenames.len());
+    let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs
 
-        log::info!("Indexing");
-        Self::new_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
-    }
+    log::info!("Indexing");
+    Self::new_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
 }
 
 #[cfg(test)]
 mod tests {
-    use sbwt::BitPackedKmerSorting;
 
     use super::*;
 
