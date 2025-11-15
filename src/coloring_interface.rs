@@ -3,10 +3,6 @@
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
-pub struct ColorSetStorageVec {
-    v: Vec<Vec<usize>>,
-}
-
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
 // view class. 
@@ -99,140 +95,146 @@ impl ColorSetOwned for Vec<usize> {
 
 }
 
-impl ColorSetStorage for ColorSetStorageVec {
-    type SetView<'a> = SliceColorSet<'a> where Self: 'a;
-    type OwnedSet = Vec<usize>;
-
-    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
-        SliceColorSet { // Dummy implementation
-            slice: &self.v[id],
-        }
-    }
-    
-    fn get_empty_set(&self) -> Self::OwnedSet {
-        vec![]
-    }
-    
-    fn get_full_set(&self) -> Self::OwnedSet {
-        todo!()
-    }
-    
-    #[allow(unused_variables)] // It's a dummy anyway
-    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
-        for set in sets {
-            for elem in set {
-                println!("{}", elem);
-            }
-        }
-        todo!();
-    }
-    
-    #[allow(unused_variables)] // It's a dummy anyway
-    fn serialize<W: std::io::Write>(&self, out: &mut W) {
-        todo!()
-    }
-    
-    #[allow(unused_variables)] // It's a dummy anyway
-    fn load<R: std::io::Read>(input: &mut R) -> Self {
-        todo!()
-    }
-
-    fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
-        view.slice.to_vec()
-    } 
-
-    fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
-        SliceColorSet { // Dummy implementation
-            slice: owned.as_slice()
-        }
-    }
-    
-    #[allow(unused_variables)] // It's a dummy anyway
-    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
-        todo!()
-    }
-    
-    #[allow(unused_variables)] // It's a dummy anyway
-    fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
-        todo!()
-    }
-
-}
-
-
-#[derive(Debug, Clone)]
-pub struct SliceColorSet<'storage> {
-    slice: &'storage [usize],
-}
-
-impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
-
-    // The iterator type depends on the same lifetime as the ColorSet
-    type Iter = SliceColorSetIter<'storage>;
-
-    // The lifetime in the returned iter is NOT linked to the lifetime of the
-    // &self borrow. So it is allowed to last longer than the borrow and in fact
-    // even longer than Self.
-    fn iter(&self) -> Self::Iter {
-        SliceColorSetIter {
-            slice: self.slice,
-            pos: 0,
-        }
-    }
-    
-    fn len(&self) -> usize {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub struct SliceColorSetIter<'storage> {
-    slice: &'storage [usize],
-    pos: usize,
-}
-
-// We can keep the lifetime parameter anonymous because we do
-// not return references color color ids, but owned color ids instead.
-impl Iterator for SliceColorSetIter<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.slice.len() {
-            None
-        } else {
-            let item = self.slice[self.pos];
-            self.pos += 1;
-            Some(item)
-        }
-    }
-}
-
-#[derive(Debug)]
-struct OwnedColorSet {
-    set: Vec<usize>
-}
-
-struct OwnedColorSetIter<'a> {
-    pos: usize,
-    set: &'a [usize],
-}
-
-impl<'a> Iterator for OwnedColorSetIter<'a> {
-    type Item = usize;
-    fn next(&mut self) -> Option<usize> {
-        if self.pos >= self.set.len() {
-            None
-        } else {
-            let item = self.set[self.pos];
-            self.pos += 1;
-            Some(item)
-        }
-    }
-}
 
 mod tests {
 
     use super::*;
+
+    pub struct ColorSetStorageVec {
+        v: Vec<Vec<usize>>,
+    }
+
+    impl ColorSetStorage for ColorSetStorageVec {
+        type SetView<'a> = SliceColorSet<'a> where Self: 'a;
+        type OwnedSet = Vec<usize>;
+
+        fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
+            SliceColorSet { // Dummy implementation
+                slice: &self.v[id],
+            }
+        }
+        
+        fn get_empty_set(&self) -> Self::OwnedSet {
+            vec![]
+        }
+        
+        fn get_full_set(&self) -> Self::OwnedSet {
+            todo!()
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
+            for set in sets {
+                for elem in set {
+                    println!("{}", elem);
+                }
+            }
+            todo!();
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn serialize<W: std::io::Write>(&self, out: &mut W) {
+            todo!()
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn load<R: std::io::Read>(input: &mut R) -> Self {
+            todo!()
+        }
+
+        fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
+            view.slice.to_vec()
+        } 
+
+        fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
+            SliceColorSet { // Dummy implementation
+                slice: owned.as_slice()
+            }
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+            todo!()
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+            todo!()
+        }
+
+    }
+
+
+    #[derive(Debug, Clone)]
+    pub struct SliceColorSet<'storage> {
+        slice: &'storage [usize],
+    }
+
+    impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
+
+        // The iterator type depends on the same lifetime as the ColorSet
+        type Iter = SliceColorSetIter<'storage>;
+
+        // The lifetime in the returned iter is NOT linked to the lifetime of the
+        // &self borrow. So it is allowed to last longer than the borrow and in fact
+        // even longer than Self.
+        fn iter(&self) -> Self::Iter {
+            SliceColorSetIter {
+                slice: self.slice,
+                pos: 0,
+            }
+        }
+        
+        fn len(&self) -> usize {
+            todo!()
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct SliceColorSetIter<'storage> {
+        slice: &'storage [usize],
+        pos: usize,
+    }
+
+    // We can keep the lifetime parameter anonymous because we do
+    // not return references color color ids, but owned color ids instead.
+    impl Iterator for SliceColorSetIter<'_> {
+        type Item = usize;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.pos >= self.slice.len() {
+                None
+            } else {
+                let item = self.slice[self.pos];
+                self.pos += 1;
+                Some(item)
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct OwnedColorSet {
+        set: Vec<usize>
+    }
+
+    struct OwnedColorSetIter<'a> {
+        pos: usize,
+        set: &'a [usize],
+    }
+
+    impl<'a> Iterator for OwnedColorSetIter<'a> {
+        type Item = usize;
+        fn next(&mut self) -> Option<usize> {
+            if self.pos >= self.set.len() {
+                None
+            } else {
+                let item = self.set[self.pos];
+                self.pos += 1;
+                Some(item)
+            }
+        }
+    }
+
 
     fn generic<CSS: ColorSetStorage>(storage: CSS, true_sets: &[Vec<usize>]) {
         // 'a is is the generic lifetime associated with color set objects from CSS 
