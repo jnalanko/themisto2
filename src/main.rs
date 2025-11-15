@@ -3,13 +3,12 @@
 use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
-use colored_kmers::ColoredKmers;
 use compact_colored_kmers::ColorSets;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{LcsArray, SbwtIndexVariant};
 
 mod EM;
-mod colored_kmers;
+mod bitmap_storage;
 //mod themisto1_compatibility; // Out of date after updating sbwt-rs
 mod compatibility_criteria;
 mod compact_colored_kmers;

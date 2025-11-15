@@ -1,41 +1,95 @@
 use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
 
 use crossbeam::channel::{Receiver, RecvError, Sender};
-use sbwt::{self, BitPackedKmerSorting, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
+use sbwt::{self, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
 use crate::{coloring_interface::ColorSetStorage, compact_colored_kmers::CompactColexColoring};
 
-#[derive(Debug, Clone)]
-pub struct ColoredKmers {
-    kmers: sbwt::SbwtIndex<sbwt::SubsetMatrix>,
-    lcs: sbwt::LcsArray,
-    distinct_color_sets: BitVec, // Concatenation of distinct color sets
-    colex_to_color_set_id: Vec<usize>,
-    empty_set: BitVec, // So that we can return a bitslice to an empty set
+pub struct BitmapStorage {
+    bitmap: BitVec, // Concatenation of distinct color sets
     n_colors: usize,
 }
 
-#[derive(serde::Serialize)]
-pub struct PseudoalignmentData {
-    pub hit_counts: Vec<usize>,
-    pub distinguishing_hit_counts: Vec<usize>,
-    pub unique_hit_counts: Vec<usize>,
-    pub n_unique_kmers: usize,
-    pub n_relevant_kmers: usize,
-    pub n_all_kmers: usize,
+pub struct BitSliceSetView<'storage> {
+    bs: &'storage BitSlice<usize, Lsb0>,
+}
+pub struct BitSliceSetViewIter<'storage> {
+    it: bitvec::slice::IterOnes<'storage, usize, Lsb0>,
 }
 
-impl PseudoalignmentData {
-    pub fn new_empty(n_colors: usize) -> Self {
-        Self {
-            hit_counts: vec![0; n_colors],
-            distinguishing_hit_counts: vec![0; n_colors],
-            unique_hit_counts: vec![0; n_colors],
-            n_unique_kmers: 0,
-            n_relevant_kmers: 0,
-            n_all_kmers: 0,
-        }
+impl<'a> Iterator for BitSliceSetViewIter<'a> {
+    type Item = usize;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.it.next()
+    }
+
+}
+ 
+impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage BitSliceSetView<'storage> {
+    type Iter = BitSliceSetViewIter<'storage>;
+
+    fn iter(&self) -> Self::Iter {
+        BitSliceSetViewIter{it: self.bs.iter_ones()}
+
+    }
+
+    fn len(&self) -> usize {
+        todo!()
+    }
+}
+
+impl crate::coloring_interface::ColorSetOwned for BitVec {
+    type Iter<'a> where Self: 'a;
+
+    fn intersect(&mut self, other: &impl crate::coloring_interface::ColorSetOwned) {
+        todo!()
+    }
+
+    fn union(&mut self, other: &impl crate::coloring_interface::ColorSetOwned) {
+        todo!()
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        todo!()
+    }
+}
+
+impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
+    type SetView<'a> = &'a BitSlice where Self: 'a;
+    type OwnedSet = BitVec;
+
+    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
+        todo!()
+    }
+
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
+        todo!()
+    }
+
+    fn get_empty_set(&self) -> Self::OwnedSet {
+        todo!()
+    }
+
+    fn get_full_set(&self) -> Self::OwnedSet {
+        todo!()
+    }
+
+    fn serialize<W: std::io::Write>(&self, out: &mut W) {
+        todo!()
+    }
+
+    fn load<R: std::io::Read>(input: &mut R) -> Self {
+        todo!()
+    }
+
+    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+        todo!()
+    }
+
+    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+        todo!()
     }
 }
 
