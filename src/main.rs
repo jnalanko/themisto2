@@ -239,7 +239,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColori
     let mut query_idx = 0_usize;
     log::info!("Performing intersection pseudoalignment for query sequences in {}", query_path.display());
     while let Some(rec) = reader.read_next().unwrap(){
-        let mut intersection = index.get_set_storage().get_empty_set();
+        let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;
         for set in index.lookup_kmer_color_sets(rec.seq) {
             if let Some(set) = set {
