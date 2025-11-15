@@ -201,6 +201,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
 }
 
+/*
+ *
+ * Implementation of non-trait functions
+ *
+ */
+
 impl SparseDenseStorage {
 
     pub fn get(&self, id: usize) -> ColorSet {
@@ -253,7 +259,6 @@ impl IntVecs {
     }
 
 }
-
 
 impl BitMaps {
     fn new(individual_length: usize) -> Self {
