@@ -314,7 +314,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<
 }
 
 fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
-    let n_rounds = infiles.len().div_ceil(2);
+    let n_rounds = (infiles.len().next_power_of_two()).trailing_zeros() as usize;
     let mut current_files: Vec<PathBuf> = infiles.to_vec();
     for round in 0..n_rounds {
         log::info!("Merge round {}", round);
