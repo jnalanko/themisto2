@@ -330,20 +330,6 @@ pub enum Subcommands {
 
 }
 
-
-fn main() {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info")
-    }
-    env_logger::init();
-
-    let args = Cli::parse();
-    match args.command {
-        Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
-            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let index = ColoredKmers::new_from_files(input_paths.as_slice(), k, n_threads, &temp_dir);
-            index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
-        },
 /*
         Subcommands::Import { sbwt_ascii_dump, color_dump_prefix, out: out_path } => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
@@ -361,6 +347,22 @@ fn main() {
             index.serialize(&mut out);
         },
 */
+
+
+fn main() {
+/* 
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
+    let args = Cli::parse();
+    match args.command {
+        Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
+            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+            let index = ColoredKmers::new_from_files(input_paths.as_slice(), k, n_threads, &temp_dir);
+            index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
+        },
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits} => {
             log::info!("Loading index");
             let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
@@ -598,8 +600,10 @@ fn main() {
             index.serialize(&mut out);
         }
     } 
+*/
 }
 
+/*
 fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
     let n_rounds = infiles.len().div_ceil(2);
     let mut current_files: Vec<PathBuf> = infiles.to_vec();
@@ -635,6 +639,7 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,3 +664,5 @@ mod tests {
         assert_eq!(counts, vec![3, 1, 3, 1]);
     }
 }
+
+*/
