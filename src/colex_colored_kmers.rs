@@ -265,6 +265,10 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
 
         sets
     }
+
+    pub fn get_k(&self) -> usize {
+        self.sbwt.k()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
