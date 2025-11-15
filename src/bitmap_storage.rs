@@ -319,7 +319,7 @@ pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db:
 }
 
 #[allow(clippy::type_complexity)]
-pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> BitmapStorage {
+pub fn build_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> BitmapStorage {
 
     log::info!("Loading {} sequence files (colors) into memory", filenames.len());
     let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs

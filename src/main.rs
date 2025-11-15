@@ -1,10 +1,14 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
 use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
+use bitmap_storage::BitmapStorage;
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
+use colex_colored_kmers::CompactColexColoring;
+use coloring_interface::ColorSetStorage;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant};
+use serde_json::value::Index;
 
 mod EM;
 mod bitmap_storage;
@@ -15,70 +19,6 @@ mod coloring_interface;
 mod sparse_dense_storage;
 mod queries;
 mod io;
-
-
-struct SimpleLikelihood {} // Based on compatibility vectors
-
-impl EM::Likelihood for SimpleLikelihood {
-    type Observation = BitVec; // Compatibility vector
-    fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
-        if *x_i.get(k).unwrap() {
-            0.99
-        }  else {
-            0.01
-        }
-    }
-}
-
-struct LikelihoodMatrix {
-    matrix: Vec<Vec<f64>>,
-}
-
-impl EM::Likelihood for LikelihoodMatrix {
-    type Observation = usize; // Index of the read
-    fn likelihood(&self, x_i: &Self::Observation, k: usize) -> f64 {
-        self.matrix[*x_i][k]
-    }
-}
-
-// Removes duplicates and returns the count of each distinct element remaining
-// in the vector.
-fn reduce_to_classes(compatibility_vectors: &mut Vec<BitVec>) -> Vec<usize> {
-    compatibility_vectors.sort_unstable();
-    
-    let n = compatibility_vectors.len();
-    let mut counts = Vec::<usize>::new();
-    let mut i = 0_usize;
-    let mut j = 0_usize;
-    let mut insert_pos = 0_usize;
-
-    let mut borrow_checker_workaround = bitvec![0; compatibility_vectors[0].len()];
-    while i < n {
-        while j + 1 < n && compatibility_vectors[j+1] == compatibility_vectors[i] {
-            j += 1;
-        }
-        j += 1;
-        // vectors [i, j) are the same
-        counts.push(j-i);
-
-        borrow_checker_workaround.copy_from_bitslice(compatibility_vectors[i].as_bitslice());
-        compatibility_vectors[insert_pos].copy_from_bitslice(&borrow_checker_workaround);
-        i = j;
-        insert_pos += 1;
-    }
-
-    compatibility_vectors.resize(insert_pos, bitvec![]);
-    compatibility_vectors.shrink_to_fit();
-
-    counts
-
-}
-
-fn softmax(values: &[f64]) -> Vec<f64> {
-    let exp_values: Vec<f64> = values.iter().map(|&x| x.exp()).collect();
-    let sum_exp_values: f64 = exp_values.iter().sum();
-    exp_values.iter().map(|&x| x / sum_exp_values).collect()
-}
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -92,6 +32,12 @@ pub enum Denominator {
     All,
     Relevant,
     MaxHits,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum IndexType{
+    BitMaps,
+    SparseDense,
 }
 
 /*
@@ -125,11 +71,14 @@ pub enum Subcommands {
         #[arg(short, required = true)]
         k: usize,
 
+        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
+        sample_distance: usize,
+
         #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize,
 
-        #[arg(long = "index-type", default_value = "bitmap", value_parser = PossibleValuesParser::new(["bitmap", "sparse-dense"]))]
-        numerator: String,
+        #[arg(long = "index-type")]
+        index_type: IndexType,
 
     },
 
@@ -208,17 +157,34 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, numerator } => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance} => {
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            let input_stream = io::ChainedInputStream::new(input_paths.clone());
+            let mut out = BufWriter::new(File::create(&output).unwrap());
+
+            let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
                 .add_rev_comp(true)
                 .k(k)
                 .build_lcs(true)
                 .n_threads(n_threads)
                 .precalc_length(8)
                 .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
-            .run(input)
-            
+            .run(input_stream);
+            let sbwt = Arc::new(sbwt);
+            let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
+
+            match index_type {
+                IndexType::BitMaps => {
+                    log::info!("Building uncompressed color bitmap");
+                    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
+                    log::info!("Compressing with unitig sampling");
+                    let index = CompactColexColoring::<BitmapStorage>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads);
+                    log::info!("Writing to {}", output.display());
+                    index.serialize(&mut out);
+                },
+                IndexType::SparseDense => todo!(),
+            }
+
         },
         Subcommands::IntersectionPseudoalign { index, query, min_hits } => todo!(),
         Subcommands::ThresholdPseudoalign { index, query, min_hits, threshold, denominator, unique_weight } => todo!(),
