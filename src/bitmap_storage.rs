@@ -124,19 +124,19 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         Self{n_colors, bitmap}
     }
 
-    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+    fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
         BitSetOwned{bv: view.bs.to_bitvec()}
     }
 
-    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+    fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
         BitSetView{bs: &owned.bv}
     }
     
-    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         a.bv &= b.bs;
     }
     
-    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         a.bv |= b.bs;
     }
 

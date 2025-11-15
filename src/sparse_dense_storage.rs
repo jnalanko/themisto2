@@ -262,15 +262,15 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         Self {is_dense_marks, sparse_sets, dense_sets, n_colors}
     }
     
-    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+    fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
         todo!()
     }
     
-    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+    fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
         todo!()
     }
     
-    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         // Really slow dummy implementation
         let elements = a.iter().collect::<HashSet<usize>>()
             .intersection(&b.iter().collect::<HashSet<usize>>())
@@ -279,7 +279,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         *a = SparseDenseColorSetOwned::new(elements.into_iter(), a.n_colors);
     }
     
-    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         // Really slow dummy implementation
         let elements = a.iter().chain(b.iter())
             .collect::<HashSet<usize>>()

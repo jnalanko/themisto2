@@ -32,7 +32,7 @@ pub trait ColorSetStorage {
     fn serialize<W: std::io::Write>(&self, out: &mut W);
     fn load<R: std::io::Read>(input: &mut R) -> Self;
 
-    // Associated functions to convert between views and owned sets.
+    // Functions to convert between views and owned sets.
     // One would think that these should be methods of SetView and Ownedset
     // called "to_owned" and "as_view". But those types do not know what is their
     // corresponding view or owned type. I did not want to add those as associated
@@ -43,14 +43,14 @@ pub trait ColorSetStorage {
     // Storage::View::Owned::View are the same type, but the compiler does not
     // see that. So the solution is to put the conversion functions here at the
     // Storage trait, and now the types do not nest like that.
-    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet;
-    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_>;
+    fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet;
+    fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a>;
 
     // Set intersection: a := a ∩ b
-    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
+    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
 
     // Set union: a := a ∪ b
-    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
+    fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
 }
 
 // A color set view that does not own the data, but can return an
@@ -134,21 +134,21 @@ impl ColorSetStorage for ColorSetStorageVec {
         todo!()
     }
 
-    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+    fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
         view.slice.to_vec()
     } 
 
-    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+    fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
         SliceColorSet { // Dummy implementation
             slice: owned.as_slice()
         }
     }
     
-    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         todo!()
     }
     
-    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+    fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         todo!()
     }
 
@@ -252,9 +252,9 @@ mod tests {
         for id in 0..true_sets.len() {
             let view = storage.get_set_view(id);
             assert_eq!(view.iter().collect::<Vec::<usize>>(), true_sets[id]);
-            let owned = CSS::view_to_owned(&view);
+            let owned = storage.view_to_owned(&view);
             assert_eq!(owned.iter().collect::<Vec::<usize>>(), true_sets[id]);
-            let owned_view = CSS::owned_to_view(&owned);
+            let owned_view = storage.owned_to_view(&owned);
             assert_eq!(owned_view.iter().collect::<Vec::<usize>>(), true_sets[id]);
         }
 
