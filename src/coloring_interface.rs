@@ -31,6 +31,20 @@ pub trait ColorSetStorage {
 
     fn serialize<W: std::io::Write>(&self, out: &mut W);
     fn load<R: std::io::Read>(input: &mut R) -> Self;
+
+    // Associated functions to covert between views and owned sets.
+    // One would think that these should be methods of SetView and Ownedset
+    // called "to_owned" and "as_view". But those types do not know what is their
+    // corresponding view or owned type. I did not want to add those as associated
+    // types to the view and owned types because then they are not linked to the
+    // associated types here, or to each other, so for example if we had a view,
+    // and made it owned, and again a view, the type would have been 
+    // Storage::View::Owned::View even though Storage::View and 
+    // Storage::View::Owned::View are the same type, but the compiler does not
+    // see that. So the solution is to put the conversion functions here at the
+    // Storage trait, and now the types do not nest like that.
+    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet;
+    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_>;
 }
 
 // A color set view that does not own the data, but can return an
@@ -42,7 +56,6 @@ pub trait ColorSetView<'a> {
     // This associated iterator type may have lifetime parameters even though they
     // are not listed here.
     type Iter: Iterator<Item = usize>;
-    type Owned: ColorSetOwned;
 
     // The returned iterator may have lifetime parameters even though they are 
     // not listed here. It is just a generic type that implements Iterator<usize>. 
@@ -58,13 +71,10 @@ pub trait ColorSetView<'a> {
     fn iter<'me>(&'me self) -> Self::Iter;
     
     fn len(&self) -> usize;
-
-    fn to_owned(&self) -> Self::Owned;
 }
 
 pub trait ColorSetOwned {
     type Iter<'a>: Iterator<Item = usize> where Self: 'a;
-    type View<'a>: ColorSetView<'a> where Self: 'a;
 
     fn intersect(&mut self, other: &impl ColorSetOwned);
     fn union(&mut self, other: &impl ColorSetOwned);
@@ -73,15 +83,12 @@ pub trait ColorSetOwned {
     // iterator is tied to the &self borrow, allowing us to return values
     // that borrow from &self.
     fn iter(&self) -> Self::Iter<'_>; 
-
-    fn as_view(&self) -> Self::View<'_>;
 }
 
 impl ColorSetOwned for Vec<usize> {
 
     //type Iter = std::vec::IntoIter<usize>;
     type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
-    type View<'a> = SliceColorSet<'a>;
 
     fn intersect(&mut self, other: &impl ColorSetOwned) {
         todo!()
@@ -93,12 +100,6 @@ impl ColorSetOwned for Vec<usize> {
 
     fn iter(&self) -> Self::Iter<'_> {
         self.as_slice().iter().copied()
-    }
-
-    fn as_view(&self) -> Self::View<'_> {
-        SliceColorSet { // Dummy implementation
-            slice: self.as_slice()
-        }
     }
 
 }
@@ -138,6 +139,16 @@ impl ColorSetStorage for ColorSetStorageVec {
         todo!()
     }
 
+    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+        view.slice.to_vec()
+    } 
+
+    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+        SliceColorSet { // Dummy implementation
+            slice: owned.as_slice()
+        }
+    }
+
 
 }
 
@@ -151,7 +162,6 @@ impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
 
     // The iterator type depends on the same lifetime as the ColorSet
     type Iter = SliceColorSetIter<'storage>;
-    type Owned = Vec<usize>;
 
     // The lifetime in the returned iter is NOT linked to the lifetime of the
     // &self borrow. So it is allowed to last longer than the borrow and in fact
@@ -166,10 +176,6 @@ impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
     fn len(&self) -> usize {
         todo!()
     }
-
-    fn to_owned(&self) -> Self::Owned {
-        self.slice.to_vec()
-    } 
 }
 
 #[derive(Debug)]
@@ -244,9 +250,9 @@ mod tests {
         for id in 0..true_sets.len() {
             let view = storage.get_set_view(id);
             assert_eq!(view.iter().collect::<Vec::<usize>>(), true_sets[id]);
-            let owned = view.to_owned();
+            let owned = CSS::view_to_owned(&view);
             assert_eq!(owned.iter().collect::<Vec::<usize>>(), true_sets[id]);
-            let owned_view = owned.as_view();
+            let owned_view = CSS::owned_to_view(&owned);
             assert_eq!(owned_view.iter().collect::<Vec::<usize>>(), true_sets[id]);
         }
 
