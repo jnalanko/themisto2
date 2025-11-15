@@ -860,7 +860,7 @@ mod tests {
 
             let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
             let bms2 = build_from_seq_dbs(dbs2, &sbwt2, &lcs2, n_threads);
-            let bms_both = build_from_seq_dbs(dbs_both, &sbwt1, &lcs1, n_threads);
+            let bms_both = build_from_seq_dbs(dbs_both, &sbwt_both, &lcs_both, n_threads);
 
             let sample_distance = 3;
 
