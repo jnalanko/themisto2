@@ -204,7 +204,6 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
 fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, print_kmers: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
     while let Some(rec) = reader.read_next().unwrap() {
-        println!(">{}", String::from_utf8(rec.head.to_vec()).unwrap());
         let sets = index.lookup_kmer_color_sets(rec.seq);
         for (set_idx, set) in sets.iter().enumerate() {
             if print_kmers {
@@ -218,6 +217,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
                     print!(" {}", s);
                 }
             }); 
+            println!();
         }
     }
 }
