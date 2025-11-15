@@ -5,7 +5,7 @@ use bitmap_storage::BitmapStorage;
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colex_colored_kmers::CompactColexColoring;
-use coloring_interface::ColorSetStorage;
+use coloring_interface::{ColorSetStorage, ColorSetView};
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant, SubsetMatrix};
 use serde_json::value::Index;
@@ -228,6 +228,21 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
     }
 }
 
+fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, min_hits: usize) {
+    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+    // Buffered writing to stdout
+    let stdout = std::io::stdout();
+    let mut out = BufWriter::new(stdout);
+    log::info!("Performing intersection pseudoalignment for query sequences in {}", query_path.display());
+    while let Some(rec) = reader.read_next().unwrap(){
+        let mut intersection = index.get_set_storage().get_empty_set();
+        let mut n_hits = 0_usize;
+        for set in index.lookup_kmer_color_sets(rec.seq) {
+            index.get_set_storage().intersect(&mut intersection, &set);
+            todo!();
+        }
+    }
+}
 
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
@@ -270,7 +285,15 @@ fn main() {
             }
 
         },
-        Subcommands::IntersectionPseudoalign { index, query, min_hits } => todo!(),
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits } => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path);
+            match index {
+                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
+                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
+            };
+
+        },
         Subcommands::ThresholdPseudoalign { index, query, min_hits, threshold, denominator, unique_weight } => todo!(),
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
             log::info!("Loading index");

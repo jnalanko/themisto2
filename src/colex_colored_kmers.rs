@@ -231,7 +231,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         CompactColexColoring{sbwt, lcs, sets, map}
     }
 
-    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Vec<usize>> {
+    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<CSS::SetView<'_>> {
         let k = self.sbwt.k();
         if seq.len() < k {
             return vec![];
@@ -239,9 +239,9 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
 
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
-        let mut sets = Vec::<Vec::<usize>>::with_capacity(seq.len()-k+1);
+        let mut set_views = Vec::<CSS::SetView<'_>>::with_capacity(seq.len()-k+1);
         let mut prev_set_id: Option<usize> = None;
-        let mut prev_set: Vec<usize> = vec![]; 
+        let mut prev_set_view: Option<CSS::SetView<'_>> = None;
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
             if len == k {
                 assert!(range.len() == 1);
@@ -249,25 +249,28 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
                 let set_id = self.colex_to_set_id(colex);
                 if prev_set_id.is_some_and(|p| p == set_id) {
                     // Same as previous
-                    sets.push(prev_set.clone());
+                    set_views.push(prev_set_view.unwrap().clone());
                 } else {
-                    sets.push(self.set_id_to_set(set_id).iter().collect());
+                    set_views.push(self.set_id_to_set(set_id));
                 }
 
                 prev_set_id = Some(set_id);
-                prev_set.clear();
-                prev_set.extend_from_slice(sets.last().unwrap());
+                prev_set_view = Some(set_views.last().unwrap().clone());
             } else {
                 prev_set_id = None;
-                prev_set.clear();
+                prev_set_view = None;
             }
         }
 
-        sets
+        set_views
     }
 
     pub fn get_k(&self) -> usize {
         self.sbwt.k()
+    }
+
+    pub fn get_set_storage(&self) -> &CSS {
+        &self.sets
     }
 }
 

@@ -17,6 +17,7 @@ pub struct BitmapStorage {
     pub n_colors: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct BitSetView<'storage> {
     bs: &'storage BitSlice<usize, Lsb0>,
 }
@@ -24,6 +25,7 @@ pub struct BitSetViewIter<'storage> {
     it: bitvec::slice::IterOnes<'storage, usize, Lsb0>,
 }
 
+#[derive(Debug, Clone)]
 pub struct BitSetOwned {
     bv: BitVec<usize, Lsb0>,
 }

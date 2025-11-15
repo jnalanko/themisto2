@@ -14,10 +14,10 @@ pub trait ColorSetStorage {
 
     // A generic associated color set view type. We could have e.g.
     // ColorSetStorage<BitMapColorSet<'a>> and ColorSetStorage<VecColorSet<'a>>.
-    type SetView<'a>: ColorSetView<'a> where Self: 'a;
+    type SetView<'a>: ColorSetView<'a> + Clone where Self: 'a;
 
     // An owned version of SetView
-    type OwnedSet: ColorSetOwned;
+    type OwnedSet: ColorSetOwned + Clone;
 
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
@@ -155,7 +155,7 @@ impl ColorSetStorage for ColorSetStorageVec {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SliceColorSet<'storage> {
     slice: &'storage [usize],
 }
