@@ -95,7 +95,7 @@ impl ColorSetOwned for Vec<usize> {
 
 }
 
-
+#[cfg(test)]
 mod tests {
 
     use super::*;
