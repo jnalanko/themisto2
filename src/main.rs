@@ -162,7 +162,7 @@ fn main() {
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
-            let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
                 .add_rev_comp(true)
                 .k(k)
                 .build_lcs(true)
@@ -170,6 +170,8 @@ fn main() {
                 .precalc_length(8)
                 .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
             .run(input_stream);
+            log::info!("Building SBWT select support");
+            sbwt.build_select();
             let sbwt = Arc::new(sbwt);
             let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
 
