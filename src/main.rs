@@ -190,11 +190,11 @@ fn load_index_variant(path: &Path) -> IndexVariant {
 fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     match index {
         IndexVariant::BitmapIndex(idx) => {
-            out.write_all(&ColoringType::Bitmaps.serialization_id());
+            out.write_all(&ColoringType::Bitmaps.serialization_id()).unwrap();
             idx.serialize(out);
         },
         IndexVariant::SparseDenseIndex(idx) => {
-            out.write_all(&ColoringType::SparseDense.serialization_id());
+            out.write_all(&ColoringType::SparseDense.serialization_id()).unwrap();
             idx.serialize(out);
         },
     }
