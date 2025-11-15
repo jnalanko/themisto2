@@ -3,7 +3,7 @@
 use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
-use compact_colored_kmers::ColorSets;
+use colex_colored_kmers::ColorSets;
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{LcsArray, SbwtIndexVariant};
 
@@ -11,7 +11,7 @@ mod EM;
 mod bitmap_storage;
 //mod themisto1_compatibility; // Out of date after updating sbwt-rs
 mod compatibility_criteria;
-mod compact_colored_kmers;
+mod colex_colored_kmers;
 mod coloring_interface;
 mod queries;
 
