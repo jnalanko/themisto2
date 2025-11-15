@@ -203,21 +203,25 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
 
 fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, print_kmers: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+    // Buffered writing to stdout
+    let stdout = std::io::stdout();
+    let mut out = BufWriter::new(stdout);
+
     while let Some(rec) = reader.read_next().unwrap() {
         let sets = index.lookup_kmer_color_sets(rec.seq);
         for (set_idx, set) in sets.iter().enumerate() {
             if print_kmers {
-                print!("{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap())
+                write!(out, "{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap()).unwrap();
             }
             // Print the set as space-separated list of color IDs
             set.iter().enumerate().map(|(i, id)| (i,id.to_string())).for_each(|(i,s)| {
                 if i == 0 {
-                    print!("{}", s);
+                    write!(out,"{}", s).unwrap();
                 } else {
-                    print!(" {}", s);
+                    write!(out," {}", s).unwrap();
                 }
             }); 
-            println!();
+            writeln!(out).unwrap();
         }
     }
 }
