@@ -4,7 +4,7 @@
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
 pub struct ColorSetStorageVec {
-    v: Vec<usize>,
+    v: Vec<Vec<usize>>,
 }
 
 // This trait represents a read-only storage struct that stores many color sets.
@@ -42,7 +42,7 @@ pub trait ColorSetView<'a> {
     // This associated iterator type may have lifetime parameters even though they
     // are not listed here.
     type Iter: Iterator<Item = usize>;
-    type Owned;
+    type Owned: ColorSetOwned;
 
     // The returned iterator may have lifetime parameters even though they are 
     // not listed here. It is just a generic type that implements Iterator<usize>. 
@@ -107,9 +107,9 @@ impl ColorSetStorage for ColorSetStorageVec {
     type SetView<'a> = SliceColorSet<'a> where Self: 'a;
     type OwnedSet = Vec<usize>;
 
-    fn get_set_view<'borrow>(&'borrow self, index: usize) -> Self::SetView<'borrow> {
+    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
         SliceColorSet { // Dummy implementation
-            slice: &self.v[index..index + 5],
+            slice: &self.v[id],
         }
     }
     
@@ -221,7 +221,7 @@ mod tests {
 
     use super::*;
 
-    fn generic<CSS: ColorSetStorage>(storage: CSS) {
+    fn generic<CSS: ColorSetStorage>(storage: CSS, true_sets: &[Vec<usize>]) {
         // 'a is is the generic lifetime associated with color set objects from CSS 
 
         // Calling get_set returns a color set with the same lifetime as the borrow
@@ -235,22 +235,29 @@ mod tests {
         // lifetime of the storage instead
         drop(set0);
         iter0.for_each(|x| println!("{}", x));
-
         iter1.for_each(|x| println!("{}", x));
 
         let owned = storage.get_empty_set();
         owned.iter().for_each(|x| println!("{}", x));
-        owned.iter().for_each(|x| println!("{}", x));
+        owned.iter().for_each(|x| println!("{}", x)); // Can iterate multiple times
 
-        let set2_view = storage.get_set_view(2);
-        let set2_owned = set2_view.into_owned();
+        for id in 0..true_sets.len() {
+            let view = storage.get_set_view(id);
+            assert_eq!(view.iter().collect::<Vec::<usize>>(), true_sets[id]);
+            let owned = view.into_owned();
+            assert_eq!(owned.iter().collect::<Vec::<usize>>(), true_sets[id]);
+            let owned_view = owned.as_view();
+            assert_eq!(owned_view.iter().collect::<Vec::<usize>>(), true_sets[id]);
+        }
+
 
     }
 
     #[test]
     fn color_set_traits() {
-        let storage = ColorSetStorageVec { v: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]};
-        generic(storage);
+        let true_sets = vec![vec![1,2,3], vec![4,5,6], vec![7,8,9]];
+        let storage = ColorSetStorageVec { v: true_sets.clone()};
+        generic(storage, &true_sets);
     }
 
 }
