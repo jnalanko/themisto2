@@ -36,7 +36,7 @@ pub enum Denominator {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum IndexType{
-    BitMaps,
+    Bitmaps,
     SparseDense,
 }
 
@@ -174,7 +174,7 @@ fn main() {
             let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
 
             match index_type {
-                IndexType::BitMaps => {
+                IndexType::Bitmaps => {
                     log::info!("Building uncompressed color bitmap");
                     let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
                     log::info!("Compressing with unitig sampling");
