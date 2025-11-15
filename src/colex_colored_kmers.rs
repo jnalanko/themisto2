@@ -880,7 +880,7 @@ fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec,
 
     log::info!("{} distinct color sets found", distinct_sets.len());
 
-    // Create and iterator of iterators, each inner iterator iterating over one color set
+    // Create an iterator of iterators, each inner iterator iterating over one color set
     let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
         let set = &bm[colex*n_colors .. (colex+1)*n_colors];
         set.iter_ones()

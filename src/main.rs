@@ -1,13 +1,13 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colex_colored_kmers::CompactColexColoring;
 use coloring_interface::ColorSetStorage;
 use compatibility_criteria::unique_support_combination_method;
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant, SubsetMatrix};
 use serde_json::value::Index;
 use sparse_dense_storage::SparseDenseStorage;
 
@@ -39,6 +39,15 @@ pub enum Denominator {
 pub enum IndexType{
     Bitmaps,
     SparseDense,
+}
+
+impl IndexType {
+    pub fn serialization_id(&self) -> [u8; 8] {
+        match self {
+            IndexType::Bitmaps => [0, 0, 0, 0, 0, 0, 0, 1],
+            IndexType::SparseDense => [0, 0, 0, 0, 0, 0, 0, 2],
+        }
+    }
 }
 
 /*
@@ -148,6 +157,16 @@ pub enum Subcommands {
 
 }
 
+fn build_coloring<CSS: ColorSetStorage>(
+    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], k: usize,
+    n_threads: usize, sample_distance: usize, temp_dir: &Path,
+) -> CompactColexColoring<CSS> {
+    log::info!("Building uncompressed color bitmap");
+    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
+    log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
+    CompactColexColoring::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
+}
+
 
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
@@ -178,19 +197,14 @@ fn main() {
 
             match index_type {
                 IndexType::Bitmaps => {
-                    log::info!("Building uncompressed color bitmap");
-                    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
-                    log::info!("Compressing to bitmap sets with unitig sampling distance {}", sample_distance);
-                    let index = CompactColexColoring::<BitmapStorage>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads);
-                    log::info!("Writing to {}", output.display());
+                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, k, n_threads, sample_distance, &temp_dir);
+                    log::info!("Serializing index to {}", output.display());
+                    out.write_all(&IndexType::Bitmaps.serialization_id());
                     index.serialize(&mut out);
                 },
                 IndexType::SparseDense => {
-                    log::info!("Building uncompressed color bitmap");
-                    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
-                    log::info!("Compressing to sparse-dense sets with unitig sampling distance {}", sample_distance);
-                    let index = CompactColexColoring::<SparseDenseStorage>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads);
-                    log::info!("Writing to {}", output.display());
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, k, n_threads, sample_distance, &temp_dir);
+                    out.write_all(&IndexType::SparseDense.serialization_id());
                     index.serialize(&mut out);
                 },
             }
@@ -198,7 +212,23 @@ fn main() {
         },
         Subcommands::IntersectionPseudoalign { index, query, min_hits } => todo!(),
         Subcommands::ThresholdPseudoalign { index, query, min_hits, threshold, denominator, unique_weight } => todo!(),
-        Subcommands::PrintColorSets { index, query, print_kmers } => todo!(),
+        Subcommands::PrintColorSets { index, query, print_kmers } => {
+            log::info!("Loading index");
+            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
+            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+            while let Some(rec) = reader.read_next().unwrap() {
+                println!(">{}", String::from_utf8(rec.head.to_vec()).unwrap());
+                let sets = index.get_all_color_sets(rec.seq);
+                for (set_idx, set) in sets.iter().enumerate() {
+                    if print_kmers {
+                        print!("{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap())
+                    }
+                    set.to_string();
+                    let bitstring: String = set.iter().by_vals().map(|b| if b { '1' } else { '0' }).collect();
+                    println!("{}", bitstring);
+                }
+            }
+        },
         Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => todo!(),
     }
 
