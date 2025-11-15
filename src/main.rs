@@ -285,6 +285,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<
             }
             n_all += 1;
         }
+        nonzero_count_indices.sort_unstable(); // Sort to output in sorted order by colors 
 
         // Write to output all colors that pass the threshold
         write!(out, "{}", query_idx).unwrap();
