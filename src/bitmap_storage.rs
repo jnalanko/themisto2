@@ -124,11 +124,11 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     }
 
     fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
-        todo!()
+        BitSetOwned{bv: view.bs.to_bitvec()}
     }
 
     fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
-        todo!()
+        BitSetView{bs: &owned.bv}
     }
 }
 
