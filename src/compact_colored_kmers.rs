@@ -1036,7 +1036,7 @@ impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
         ColorSet::len(&self) // Fully qualified syntax to avoid recursion
     }
 
-    fn into_owned(&self) -> Self::Owned {
+    fn to_owned(&self) -> Self::Owned {
         todo!();
     }
 }
