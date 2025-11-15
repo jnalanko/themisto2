@@ -127,6 +127,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
     
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> SparseDenseStorage {
+        log::info!("Encoding color sets");
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
