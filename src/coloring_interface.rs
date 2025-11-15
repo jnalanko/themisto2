@@ -32,7 +32,7 @@ pub trait ColorSetStorage {
     fn serialize<W: std::io::Write>(&self, out: &mut W);
     fn load<R: std::io::Read>(input: &mut R) -> Self;
 
-    // Associated functions to covert between views and owned sets.
+    // Associated functions to convert between views and owned sets.
     // One would think that these should be methods of SetView and Ownedset
     // called "to_owned" and "as_view". But those types do not know what is their
     // corresponding view or owned type. I did not want to add those as associated
