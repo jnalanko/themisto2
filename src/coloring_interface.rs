@@ -74,7 +74,7 @@ pub trait ColorSetView<'a> {
     //   to 'a, so it can not do required the lifetime subtyping.
     // * The iterator may outlive the set because it does not borrow from the
     //   set itself but rather from some external structure with lifetime 'a.
-    fn iter<'me>(&'me self) -> Self::Iter;
+    fn iter(&self) -> Self::Iter;
     
     fn len(&self) -> usize;
 }
@@ -117,6 +117,7 @@ impl ColorSetStorage for ColorSetStorageVec {
         todo!()
     }
     
+    #[allow(unused_variables)] // It's a dummy anyway
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
         for set in sets {
             for elem in set {
@@ -126,10 +127,12 @@ impl ColorSetStorage for ColorSetStorageVec {
         todo!();
     }
     
+    #[allow(unused_variables)] // It's a dummy anyway
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
         todo!()
     }
     
+    #[allow(unused_variables)] // It's a dummy anyway
     fn load<R: std::io::Read>(input: &mut R) -> Self {
         todo!()
     }
@@ -144,10 +147,12 @@ impl ColorSetStorage for ColorSetStorageVec {
         }
     }
     
+    #[allow(unused_variables)] // It's a dummy anyway
     fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         todo!()
     }
     
+    #[allow(unused_variables)] // It's a dummy anyway
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         todo!()
     }
@@ -168,7 +173,7 @@ impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
     // The lifetime in the returned iter is NOT linked to the lifetime of the
     // &self borrow. So it is allowed to last longer than the borrow and in fact
     // even longer than Self.
-    fn iter<'me>(&'me self) -> Self::Iter {
+    fn iter(&self) -> Self::Iter {
         SliceColorSetIter {
             slice: self.slice,
             pos: 0,
