@@ -213,7 +213,6 @@ mod tests {
     }
 
     fn generic<CSS: ColorSetStorage>(storage: CSS, true_sets: &[Vec<usize>]) {
-        // 'a is is the generic lifetime associated with color set objects from CSS 
 
         // Calling get_set returns a color set with the same lifetime as the borrow
         let set0 = storage.get_set_view(0);
