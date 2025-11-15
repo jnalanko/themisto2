@@ -5,6 +5,12 @@ use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 
+/*
+ *
+ * Structs
+ * 
+ */
+
 /// A data structure for storing arbitary set of sets of integers, such that dense
 /// sets are encoded as bitmaps, and sparse sets as lists of integers.
 pub struct SparseDenseStorage{
@@ -14,6 +20,186 @@ pub struct SparseDenseStorage{
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
 }
 
+// A set of lists of integers, stored in concatenated form.
+struct IntVecs {
+    intvec_data: IntVector, // Concatenation of IntVecs
+
+    // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
+    // exclusive end of the i-th vector.
+    ends: Vec<usize>, 
+}
+
+#[derive(Copy, Clone)]
+pub struct IntVecSlice<'a> {
+    vec: &'a IntVector,
+    start: usize,
+    end: usize, // Exclusive end
+}
+
+// A set of sets encoded as bitmaps.
+struct BitMaps {
+    bitmap_data: bitvec::vec::BitVec, // Concatenation of bit vectors
+    individual_length: usize, // Length of each bitmap in bitmap_data
+}
+
+// This enum is only for passing references to individual sets around. The actual
+// sets are stored in concatenated form somewhere else in memory. 
+#[derive(Copy, Clone)]
+pub enum ColorSet<'a> {
+    Dense(&'a BitSlice),
+    Sparse(IntVecSlice<'a>),
+}
+
+pub struct ColorSetViewIterator<'a> {
+    set: ColorSet<'a>,
+    pos: usize, // Interpreted differently depending of whether this is Sparse or Dense
+}
+
+/*
+ *
+ * Trait implementations for above structs 
+ * 
+ */
+
+
+impl<'a> Iterator for ColorSetViewIterator<'a> {
+    type Item = usize;
+
+    #[allow(clippy::bool_comparison)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match &self.set {
+            ColorSet::Dense(bit_slice) => {
+                // Rewind to the next 1-bit (todo: word parallelism)
+                while self.pos < bit_slice.len() && bit_slice[self.pos] == false {
+                    self.pos += 1;
+                }
+
+                if self.pos < bit_slice.len() {
+                    let ret = self.pos;
+                    self.pos += 1; // Starting point for the next iteration
+                    Some(ret)
+                } else {
+                    None
+                }
+            },
+            ColorSet::Sparse(int_vec_slice) => {
+                if self.pos == int_vec_slice.end - int_vec_slice.start {
+                    None
+                } else {
+                    let x = int_vec_slice.vec.get(int_vec_slice.start + self.pos);
+                    self.pos += 1;
+                    Some(x as usize)
+                }
+            },
+        }
+    }
+}
+
+impl<'a> crate::coloring_interface::ColorSetView<'a> for ColorSet<'a> {
+    type Iter = ColorSetViewIterator<'a>;
+
+    fn iter(&self) -> Self::Iter {
+        ColorSetViewIterator{
+            set: *self,
+            pos: 0,
+        }
+    }
+    
+    fn len(&self) -> usize {
+        ColorSet::len(&self) // Fully qualified syntax to avoid recursion
+    }
+}
+
+impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
+    type SetView<'a> = ColorSet<'a>; 
+    type OwnedSet = Vec<usize>; // TODO
+
+    fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
+        self.get(id)
+    }
+
+    fn get_empty_set(&self) -> Self::OwnedSet {
+        vec![]
+    }
+
+    fn get_full_set(&self) -> Self::OwnedSet {
+        (0..self.n_colors).collect()
+    }
+    
+    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> SparseDenseStorage {
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
+
+        let mut sparse_sets = IntVecs::new(color_id_bit_width);
+        let mut dense_sets = BitMaps::new(n_colors);
+
+        let mut buf = Vec::<usize>::new();
+        let mut n_sets_total = 0_usize;
+        for set in sets {
+            buf.clear();
+            buf.extend(set);
+            if is_dense_set(buf.len(), color_id_bit_width, n_colors) {
+                let mut bm = bitvec![0; n_colors];
+                for color in buf.iter() {
+                    bm.set(*color, true);
+                }
+                dense_sets.push(&bm);
+                is_dense_marks.push_bit(true);
+            } else {
+                sparse_sets.push(buf.iter().copied());
+                is_dense_marks.push_bit(false);
+            }
+
+            n_sets_total += 1;
+        }
+
+        sparse_sets.shrink_to_fit();
+        dense_sets.shrink_to_fit();
+
+        log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / n_sets_total as f64 * 100.0);
+
+        // Add rank support to dense marks
+        log::info!("Building rank support for dense marks");
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
+
+        SparseDenseStorage {
+            is_dense_marks, 
+            sparse_sets,
+            dense_sets,
+            n_colors
+        }
+    }
+
+    fn serialize<W: std::io::Write>(&self, out: &mut W) {
+        bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
+        self.is_dense_marks.serialize(out).unwrap();
+        self.sparse_sets.serialize(out);
+        self.dense_sets.serialize(out);
+    }
+
+    fn load<R: std::io::Read>(input: &mut R) -> Self {
+        let n_colors: usize = bincode::deserialize_from(input.by_ref()).unwrap();
+        let is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
+        let sparse_sets = IntVecs::load(input);
+        let dense_sets = BitMaps::load(input);
+
+        assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
+        assert_eq!(n_colors, dense_sets.individual_length);
+        assert!(sparse_sets.intvec_data.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
+
+        Self {is_dense_marks, sparse_sets, dense_sets, n_colors}
+    }
+    
+    fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
+        todo!()
+    }
+    
+    fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
+        todo!()
+    }
+
+}
 
 impl SparseDenseStorage {
 
@@ -107,35 +293,6 @@ impl BitMaps {
     }
 }
 
-// A set of lists of integers, stored in concatenated form.
-struct IntVecs {
-    intvec_data: IntVector, // Concatenation of IntVecs
-
-    // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
-    // exclusive end of the i-th vector.
-    ends: Vec<usize>, 
-}
-
-#[derive(Copy, Clone)]
-pub struct IntVecSlice<'a> {
-    vec: &'a IntVector,
-    start: usize,
-    end: usize, // Exclusive end
-}
-
-// A set of sets encoded as bitmaps.
-struct BitMaps {
-    bitmap_data: bitvec::vec::BitVec, // Concatenation of bit vectors
-    individual_length: usize, // Length of each bitmap in bitmap_data
-}
-
-// This enum is only for passing references to individual sets around. The actual
-// sets are stored in concatenated form somewhere else in memory. 
-#[derive(Copy, Clone)]
-pub enum ColorSet<'a> {
-    Dense(&'a BitSlice),
-    Sparse(IntVecSlice<'a>),
-}
 
 impl ColorSet<'_> {
 
@@ -199,3 +356,8 @@ fn is_dense(bv: &BitSlice) -> bool {
     bitmap_size <= intvec_size
 }
 
+fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bool {
+    let intvec_size = n_elements * bits_per_color;
+    let bitmap_size = n_colors;
+    bitmap_size <= intvec_size
+}
