@@ -430,11 +430,13 @@ fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(color
     let mut colex2 = 0_usize;
 
     let mut color_set_sample_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(merged_len, false);
+    log::info!("Building DBG support");
     let dbg1 = sbwt::dbg::Dbg::new(&(*coloring1.map.sbwt), Some(lcs1), n_threads);
     let dbg2 = sbwt::dbg::Dbg::new(&(*coloring2.map.sbwt), Some(lcs2), n_threads);
     let mut outlabel_buf_1 = Vec::<u8>::new();
     let mut outlabel_buf_2 = Vec::<u8>::new();
 
+    log::info!("Computing new color set id pairs and merged unitig sampling");
     #[derive(Debug)]
     enum Case { // Three cases in a loop below
         Sampled(usize),
