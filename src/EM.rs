@@ -1,3 +1,5 @@
+#![allow(dead_code)] // This code will be re-integrated at some point
+
 pub trait Likelihood {
 
     type Observation;
@@ -66,6 +68,8 @@ pub fn fit_model<O: Sync, L: Likelihood<Observation = O> + Sync + Send>(likeliho
     let K = initital_theta.len();
 
     let mut prev_theta = initital_theta.to_owned();
+
+    #[allow(clippy::manual_div_ceil)]
     let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
 
     for _ in 0..max_iterations {
@@ -169,7 +173,7 @@ impl Likelihood for IntersectionLikelihood {
 // initial_w is the likelihood ratio of compatible and incompatible colors. It is optimized
 // as the algorithm progresses if optimize_w is true.
 // Returns the vector of optimized mixing fractions, and the final likelihood ratio w.
-pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observation_counts: &[usize], initital_theta: &[f64], initial_w: f64, optimize_w: bool, n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
+pub fn fit_model_with_intersection_inputs(observations: &[Vec<u8>], observation_counts: &[usize], initital_theta: &[f64], initial_w: f64, optimize_w: bool, n_threads: usize, max_iterations: usize) -> (Vec<f64>, f64) {
 
     // The update rule for theta is the same as in `fit_model`.
     // We just add an update rule for w. The deriviation of the rule
@@ -181,6 +185,8 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
 
     let mut prev_w = initial_w; // Likelihood ratio initial guess
     let mut prev_theta = initital_theta.to_owned();
+
+    #[allow(clippy::manual_div_ceil)]
     let slice_len = (n_distinct_observations + n_threads - 1) / n_threads; // ceil(n_distinct_observations / n_threads)
 
     for _ in 0..max_iterations {
@@ -274,7 +280,6 @@ pub fn fit_model_with_intersection_inputs(observations: &Vec<Vec<u8>>, observati
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::Rng;
     use rand_distr::{Dirichlet, Distribution};
 
     struct MyLikelihood {}
@@ -328,7 +333,7 @@ mod tests {
         let initial_theta: Vec<f64> = vec![0.2, 0.2, 0.2, 0.2, 0.2];
         let true_theta: Vec<f64> = vec![0.1, 0.2, 0.3, 0.4, 0.0];
         let cat_theta = rand_distr::WeightedIndex::new(&true_theta).unwrap(); // Categorical distribution with weights theta
-        let dirichlets = vec![ // The log likelihoods will be samples from one of these
+        let dirichlets = [ // The log likelihoods will be samples from one of these
             Dirichlet::new(&[10.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
             Dirichlet::new(&[1.0, 10.0, 1.0, 1.0, 1.0]).unwrap(),
             Dirichlet::new(&[1.0, 1.0, 10.0, 1.0, 1.0]).unwrap(),
