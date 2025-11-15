@@ -2,7 +2,7 @@ use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
 use clap::builder::styling::Color;
-use sbwt::MergeInterleaving;
+use sbwt::{MergeInterleaving, SeqStream};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::bit_vector::BitVector;
@@ -410,6 +410,41 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         let sets = CSS::load(input);
         let map = ColexToColorSetMap::load(input, sbwt.clone());
         CompactColexColoring{sbwt, lcs, sets, map}
+    }
+
+    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Vec<usize>> {
+        let k = self.sbwt.k();
+        if seq.len() < k {
+            return vec![];
+        }
+
+        let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
+
+        let mut sets = Vec::<Vec::<usize>>::with_capacity(seq.len()-k+1);
+        let mut prev_set_id: Option<usize> = None;
+        let mut prev_set: Vec<usize> = vec![]; 
+        for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
+            if len == k {
+                assert!(range.len() == 1);
+                let colex = range.start;
+                let set_id = self.colex_to_set_id(colex);
+                if prev_set_id.is_some_and(|p| p == set_id) {
+                    // Same as previous
+                    sets.push(prev_set.clone());
+                } else {
+                    sets.push(self.set_id_to_set(set_id).iter().collect());
+                }
+
+                prev_set_id = Some(set_id);
+                prev_set.clear();
+                prev_set.extend_from_slice(sets.last().unwrap());
+            } else {
+                prev_set_id = None;
+                prev_set.clear();
+            }
+        }
+
+        sets
     }
 }
 
