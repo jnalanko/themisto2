@@ -750,7 +750,6 @@ mod tests {
 
             let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (i + k.pow(4)) as u64)).collect();
             let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (123456 + i + k.pow(4)) as u64)).collect();
-            let n_colors = input_seqs_1.len() + input_seqs_2.len();
 
             let mut all_input_seq_slices = Vec::<&[u8]>::new();
             all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
@@ -823,9 +822,9 @@ mod tests {
 
             let sample_distance = 3;
 
-            let ccc1 = CompactColexColoring::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, n_colors, sample_distance, n_threads);
-            let ccc2 = CompactColexColoring::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, n_colors, sample_distance, n_threads);
-            let ccc_both = CompactColexColoring::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, n_colors, sample_distance, n_threads);
+            let ccc1 = CompactColexColoring::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, input_seqs_1.len(), sample_distance, n_threads);
+            let ccc2 = CompactColexColoring::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, input_seqs_2.len(), sample_distance, n_threads);
+            let ccc_both = CompactColexColoring::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, all_input_seq_slices.len(), sample_distance, n_threads);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;
