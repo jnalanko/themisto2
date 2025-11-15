@@ -159,11 +159,12 @@ fn build_coloring<CSS: ColorSetStorage>(
     n_threads: usize, sample_distance: usize, temp_dir: &Path,
 ) -> CompactColexColoring<CSS> {
     log::info!("Building uncompressed color bitmap");
-    let color_storage = bitmap_storage::build_from_files(&input_paths, k, n_threads, &temp_dir);
+    let color_storage = bitmap_storage::build_from_files(input_paths, k, n_threads, temp_dir);
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
     CompactColexColoring::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
 }
 
+#[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
 enum IndexVariant {
     BitmapIndex(CompactColexColoring<BitmapStorage>),
     SparseDenseIndex(CompactColexColoring<SparseDenseStorage>),
