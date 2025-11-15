@@ -36,7 +36,7 @@ impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage B
     }
 
     fn len(&self) -> usize {
-        todo!()
+        self.bs.count_ones()
     }
 }
 
