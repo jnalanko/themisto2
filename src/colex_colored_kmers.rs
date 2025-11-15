@@ -714,9 +714,9 @@ mod tests {
     use jseqio::seq_db::SeqDB;
     use simple_sds_sbwt::ops::BitVec;
 
-    use crate::colored_kmers::ColoredKmers;
+    use crate::sparse_dense_storage::SparseDenseStorage;
 
-    use super::{ColorSets, merge_compact_colorings};
+    use super::merge_compact_colorings;
 
 
     #[cfg(test)]
