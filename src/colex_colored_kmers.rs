@@ -231,7 +231,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         CompactColexColoring{sbwt, lcs, sets, map}
     }
 
-    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<CSS::SetView<'_>> {
+    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
         let k = self.sbwt.k();
         if seq.len() < k {
             return vec![];
@@ -239,9 +239,8 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
 
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
-        let mut set_views = Vec::<CSS::SetView<'_>>::with_capacity(seq.len()-k+1);
+        let mut set_views = Vec::<Option<CSS::SetView<'_>>>::with_capacity(seq.len()-k+1);
         let mut prev_set_id: Option<usize> = None;
-        let mut prev_set_view: Option<CSS::SetView<'_>> = None;
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
             if len == k {
                 assert!(range.len() == 1);
@@ -249,16 +248,14 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
                 let set_id = self.colex_to_set_id(colex);
                 if prev_set_id.is_some_and(|p| p == set_id) {
                     // Same as previous
-                    set_views.push(prev_set_view.unwrap().clone());
+                    let prev = set_views.last().unwrap();
+                    set_views.push(prev.clone());
                 } else {
-                    set_views.push(self.set_id_to_set(set_id));
+                    set_views.push(Some(self.set_id_to_set(set_id)));
                 }
-
                 prev_set_id = Some(set_id);
-                prev_set_view = Some(set_views.last().unwrap().clone());
             } else {
                 prev_set_id = None;
-                prev_set_view = None;
             }
         }
 

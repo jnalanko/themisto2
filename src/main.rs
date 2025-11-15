@@ -215,14 +215,16 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
             if print_kmers {
                 write!(out, "{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap()).unwrap();
             }
-            // Print the set as space-separated list of color IDs
-            set.iter().enumerate().map(|(i, id)| (i,id.to_string())).for_each(|(i,s)| {
-                if i == 0 {
-                    write!(out,"{}", s).unwrap();
-                } else {
-                    write!(out," {}", s).unwrap();
-                }
-            }); 
+            if let(Some(set)) = set {
+                // Print the set as space-separated list of color IDs
+                set.iter().enumerate().map(|(i, id)| (i,id.to_string())).for_each(|(i,s)| {
+                    if i == 0 {
+                        write!(out,"{}", s).unwrap();
+                    } else {
+                        write!(out," {}", s).unwrap();
+                    }
+                }); 
+            }
             writeln!(out).unwrap();
         }
     }
@@ -238,9 +240,12 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColori
         let mut intersection = index.get_set_storage().get_empty_set();
         let mut n_hits = 0_usize;
         for set in index.lookup_kmer_color_sets(rec.seq) {
-            index.get_set_storage().intersect(&mut intersection, &set);
-            todo!();
+            if let Some(set) = set {
+                index.get_set_storage().intersect(&mut intersection, &set);
+                n_hits += 1;
+            }
         }
+        todo!(); // Print the intersection set if n_hits >= min_hits
     }
 }
 
