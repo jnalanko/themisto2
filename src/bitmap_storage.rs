@@ -6,6 +6,12 @@ use bitvec::prelude::*;
 
 use crate::{coloring_interface::{self, ColorSetStorage}, compact_colored_kmers::CompactColexColoring};
 
+/*
+ *
+ * Structs
+ * 
+ */
+
 pub struct BitmapStorage {
     bitmap: BitVec, // Concatenation of distinct color sets
     n_colors: usize,
@@ -18,21 +24,26 @@ pub struct BitSetViewIter<'storage> {
     it: bitvec::slice::IterOnes<'storage, usize, Lsb0>,
 }
 
-impl<'a> Iterator for BitSetViewIter<'a> {
-    type Item = usize;
-    
-    fn next(&mut self) -> Option<Self::Item> {
-        self.it.next()
-    }
-
+pub struct BitSetOwned {
+    bv: BitVec<usize, Lsb0>,
 }
- 
+pub struct BitSetOwnedIter<'a> {
+    it: bitvec::slice::IterOnes<'a, usize, Lsb0>,
+}
+
+
+/*
+ *
+ * Trait implementations for above structs 
+ * 
+ */
+
+
 impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage BitSetView<'storage> {
     type Iter = BitSetViewIter<'storage>;
 
     fn iter(&self) -> Self::Iter {
-        BitSliceSetIter{it: self.bs.iter_ones()}
-
+        BitSetViewIter{it: self.bs.iter_ones()}
     }
 
     fn len(&self) -> usize {
@@ -40,11 +51,13 @@ impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage B
     }
 }
 
-pub struct BitSetOwned {
-    bv: BitVec<usize, Lsb0>,
-}
-pub struct BitSetOwnedIter<'a> {
-    it: bitvec::slice::IterOnes<'a, usize, Lsb0>,
+impl<'a> Iterator for BitSetViewIter<'a> {
+    type Item = usize;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.it.next()
+    }
+
 }
 
 impl coloring_interface::ColorSetOwned for BitSetOwned {
