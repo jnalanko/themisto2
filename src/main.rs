@@ -1,14 +1,11 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{any::Any, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
-use bitvec::prelude::*;
-use clap::{builder::PossibleValuesParser, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexColoring;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
-use compatibility_criteria::unique_support_combination_method;
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant, SubsetMatrix};
-use serde_json::value::Index;
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
 mod EM;
