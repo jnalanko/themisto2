@@ -1023,6 +1023,7 @@ impl<'a> Iterator for ColorSetViewIterator<'a> {
 
 impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
     type Iter = ColorSetViewIterator<'a>;
+    type Owned = Vec<usize>; // TODO
 
     fn iter(&self) -> Self::Iter {
         ColorSetViewIterator{
@@ -1035,7 +1036,9 @@ impl<'a> coloring_interface::ColorSetView<'a> for ColorSet<'a> {
         ColorSet::len(&self) // Fully qualified syntax to avoid recursion
     }
 
-    
+    fn into_owned(&self) -> Self::Owned {
+        todo!();
+    }
 }
 
 impl coloring_interface::ColorSetStorage for ColorSets {
@@ -1044,10 +1047,6 @@ impl coloring_interface::ColorSetStorage for ColorSets {
 
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
         self.get(id)
-    }
-
-    fn get_owned_set(&self, id: usize) -> Self::OwnedSet {
-        self.get(id).iter().collect()
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {
