@@ -1,9 +1,13 @@
+use std::collections::HashSet;
+
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+
+use crate::coloring_interface::ColorSetView;
 
 /*
  *
@@ -199,6 +203,24 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
         todo!()
     }
+    
+    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        // Really slow dummy implementation
+        *a = a.iter().copied().collect::<HashSet<usize>>()
+            .intersection(&b.iter().collect::<HashSet<usize>>())
+            .copied()
+            .collect::<Vec::<usize>>();
+    }
+    
+    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        // Really slow dummy implementation
+        *a = a.iter().copied().collect::<HashSet<usize>>()
+            .union(&b.iter().collect::<HashSet<usize>>())
+            .copied()
+            .collect::<Vec::<usize>>();
+    }
+
+     
 
 }
 

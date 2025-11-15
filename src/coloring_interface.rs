@@ -45,6 +45,12 @@ pub trait ColorSetStorage {
     // Storage trait, and now the types do not nest like that.
     fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet;
     fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_>;
+
+    // Set intersection: a := a ∩ b
+    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
+
+    // Set union: a := a ∪ b
+    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
 }
 
 // A color set view that does not own the data, but can return an
@@ -76,9 +82,6 @@ pub trait ColorSetView<'a> {
 pub trait ColorSetOwned {
     type Iter<'a>: Iterator<Item = usize> where Self: 'a;
 
-    fn intersect(&mut self, other: &impl ColorSetOwned);
-    fn union(&mut self, other: &impl ColorSetOwned);
-
     // This is different from ColorSetView because here the borrow in the
     // iterator is tied to the &self borrow, allowing us to return values
     // that borrow from &self.
@@ -89,14 +92,6 @@ impl ColorSetOwned for Vec<usize> {
 
     //type Iter = std::vec::IntoIter<usize>;
     type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
-
-    fn intersect(&mut self, other: &impl ColorSetOwned) {
-        todo!()
-    }
-
-    fn union(&mut self, other: &impl ColorSetOwned) {
-        todo!()
-    }
 
     fn iter(&self) -> Self::Iter<'_> {
         self.as_slice().iter().copied()
@@ -148,7 +143,14 @@ impl ColorSetStorage for ColorSetStorageVec {
             slice: owned.as_slice()
         }
     }
-
+    
+    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        todo!()
+    }
+    
+    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        todo!()
+    }
 
 }
 

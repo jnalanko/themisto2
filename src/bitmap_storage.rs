@@ -63,14 +63,6 @@ impl<'a> Iterator for BitSetViewIter<'a> {
 impl coloring_interface::ColorSetOwned for BitSetOwned {
     type Iter<'a> = BitSetOwnedIter<'a> where Self: 'a;
 
-    fn intersect(&mut self, other: &impl coloring_interface::ColorSetOwned) {
-        todo!()
-    }
-
-    fn union(&mut self, other: &impl coloring_interface::ColorSetOwned) {
-        todo!()
-    }
-
     fn iter(&self) -> Self::Iter<'_> {
         BitSetOwnedIter{it: self.bv.iter_ones()}
     }
@@ -139,6 +131,16 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     fn owned_to_view(owned: &Self::OwnedSet) -> Self::SetView<'_> {
         BitSetView{bs: &owned.bv}
     }
+    
+    fn intersect(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        a.bv &= b.bs;
+    }
+    
+    fn union(a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        a.bv |= b.bs;
+    }
+
+    
 }
 
 /*
