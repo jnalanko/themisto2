@@ -2,9 +2,8 @@ use std::collections::HashSet;
 
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::serialize::Serialize;
-use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
-use bitvec::order::Lsb0;
-use bitvec::{field::BitField, slice::BitSlice};
+use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
+use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
@@ -124,7 +123,7 @@ impl crate::coloring_interface::ColorSetOwned for SparseDenseColorSetOwned {
             SetType::Sparse(iv) => {
                 ColorSetViewIterator{
                     set: SparseDenseColorSetView::Sparse(IntVecSlice{
-                        vec: &iv,
+                        vec: iv,
                         start: 0,
                         end: iv.len(),
                     }),
@@ -168,7 +167,14 @@ impl<'a> crate::coloring_interface::ColorSetView<'a> for SparseDenseColorSetView
     }
     
     fn len(&self) -> usize {
-        SparseDenseColorSetView::len(&self) // Fully qualified syntax to avoid recursion
+        match self {
+            SparseDenseColorSetView::Dense(bv) => {
+                bv.count_ones()
+            },
+            SparseDenseColorSetView::Sparse(iv) => {
+                iv.end - iv.start
+            },
+        }
     }
 }
 
@@ -297,7 +303,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
 impl SparseDenseStorage {
 
-    pub fn get(&self, id: usize) -> SparseDenseColorSetView {
+    pub fn get(&self, id: usize) -> SparseDenseColorSetView<'_> {
         if self.is_dense_marks.get(id) {
             let set_idx = self.is_dense_marks.rank(id);
             SparseDenseColorSetView::Dense(self.dense_sets.get(set_idx))
@@ -324,7 +330,7 @@ impl IntVecs {
         self.intvec_data.resize(self.intvec_data.len(), 0);
     }
 
-    fn get(&self, vec_idx: usize) -> IntVecSlice {
+    fn get(&self, vec_idx: usize) -> IntVecSlice<'_> {
         IntVecSlice{vec: &self.intvec_data, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
     }
 
@@ -384,69 +390,6 @@ impl BitMaps {
         assert!(individual_length > 0);
         BitMaps{bitmap_data, individual_length}
     }
-}
-
-
-impl SparseDenseColorSetView<'_> {
-
-    pub fn extract_and_push_colors_to(&self, buf: &mut Vec<usize>) {
-        match self {
-            SparseDenseColorSetView::Dense(bv) => {
-                for i in bv.iter_ones() {
-                    buf.push(i);
-                }
-            },
-            SparseDenseColorSetView::Sparse(iv) => {
-                for i in iv.start..iv.end {
-                    buf.push(iv.vec.get(i) as usize);
-                }
-            },
-        }
-    }
-
-    // Number of elements in the set
-    pub fn len(&self) -> usize {
-        match self {
-            SparseDenseColorSetView::Dense(bv) => {
-                bv.count_ones()
-            },
-            SparseDenseColorSetView::Sparse(iv) => {
-                iv.end - iv.start
-            },
-        }
-    }
-
-    pub fn as_bitvec(&self, n_colors: usize) -> bitvec::vec::BitVec {
-        match self {
-            SparseDenseColorSetView::Dense(bv) => {
-                (*bv).into()
-            },
-            SparseDenseColorSetView::Sparse(iv) => {
-                let mut bv = bitvec![0; n_colors];
-                for i in iv.start..iv.end {
-                    bv.set(iv.vec.get(i) as usize, true);
-                }
-                bv
-            },
-        }
-    }
-
-    pub fn as_intvec(&self) -> Vec<usize> {
-        let mut buf = Vec::<usize>::with_capacity(self.len());
-        self.extract_and_push_colors_to(&mut buf);
-        buf
-    }
-
-}
-
-fn is_dense(bv: &BitSlice) -> bool {
-    let n_colors = bv.len();
-    let n_elements = bv.count_ones();
-    let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-    let bitmap_size = n_colors;
-    let intvec_size = n_elements * bits_per_color;
-
-    bitmap_size <= intvec_size
 }
 
 fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bool {
