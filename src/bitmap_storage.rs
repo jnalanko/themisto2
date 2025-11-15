@@ -319,17 +319,19 @@ pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db:
 }
 
 #[allow(clippy::type_complexity)]
-pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> Self {
+pub fn new_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], k: usize, n_threads: usize, temp_dir: &Path) -> BitmapStorage {
 
     log::info!("Loading {} sequence files (colors) into memory", filenames.len());
     let dbs = Arc::try_unwrap(InputStream::new(filenames).dbs).ok().unwrap(); // Also appends reverse complements to the dbs
 
     log::info!("Indexing");
-    Self::new_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
+    build_from_seq_dbs(dbs, k, n_threads, Some(temp_dir))
 }
 
 #[cfg(test)]
 mod tests {
+
+    use sbwt::BitPackedKmerSorting;
 
     use super::*;
 
@@ -347,7 +349,7 @@ mod tests {
         let distinct_color_sets = bitvec![0,0,0, 1,0,0, 0,1,0, 0,0,1, 1,1,0, 1,1,1];
         let seq_color_set_ids: Vec<usize> = vec![1, 2, 3, 0, 4, 5];
 
-        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::<BitPackedKmerSorting>::new().k(k).build_lcs(true).run_from_slices(all_seqs);
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::<BitPackedKmerSortingMem>::new().k(k).build_lcs(true).run_from_slices(all_seqs);
         let lcs = lcs.unwrap();
 
         // Build colex to color id mapping
