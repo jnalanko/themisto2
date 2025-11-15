@@ -5,7 +5,7 @@ use bitmap_storage::BitmapStorage;
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use colex_colored_kmers::CompactColexColoring;
-use coloring_interface::{ColorSetStorage, ColorSetView};
+use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use compatibility_criteria::unique_support_combination_method;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant, SubsetMatrix};
 use serde_json::value::Index;
@@ -215,7 +215,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
             if print_kmers {
                 write!(out, "{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap()).unwrap();
             }
-            if let(Some(set)) = set {
+            if let Some(set) = set {
                 // Print the set as space-separated list of color IDs
                 set.iter().enumerate().map(|(i, id)| (i,id.to_string())).for_each(|(i,s)| {
                     if i == 0 {
@@ -230,11 +230,13 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
     }
 }
 
+#[allow(clippy::manual_flatten)]
 fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, min_hits: usize) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
     // Buffered writing to stdout
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout);
+    let mut query_idx = 0_usize;
     log::info!("Performing intersection pseudoalignment for query sequences in {}", query_path.display());
     while let Some(rec) = reader.read_next().unwrap(){
         let mut intersection = index.get_set_storage().get_empty_set();
@@ -245,7 +247,18 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColori
                 n_hits += 1;
             }
         }
-        todo!(); // Print the intersection set if n_hits >= min_hits
+
+        // Write output
+        write!(out, "{}", query_idx).unwrap();
+        if n_hits >= min_hits {
+            for color in intersection.iter() {
+                write!(out, " {}", color).unwrap();
+            }
+        }
+        writeln!(out).unwrap();
+
+        query_idx += 1;
+
     }
 }
 
