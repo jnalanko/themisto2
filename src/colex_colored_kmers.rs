@@ -1,13 +1,11 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use sbwt::{MergeInterleaving, SeqStream};
+use sbwt::MergeInterleaving;
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::bit_vector::BitVector;
-use simple_sds_sbwt::raw_vector::RawVector;
 use simple_sds_sbwt::serialize::Serialize;
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::{AccessRaw, PushRaw}};
+use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
 use std::cmp::max;
 use std::sync::Arc;
@@ -177,7 +175,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         let int_bitwidth = 1;
 
         // Iterator of iterators giving a single singleton set
-        let iter_of_iters = (0..1).into_iter().map(|_| vec![0_usize].into_iter());
+        let iter_of_iters = (0..1).map(|_| vec![0_usize].into_iter());
         let sets = CSS::new(iter_of_iters, n_colors);
 
         log::info!("Sampling nodes");

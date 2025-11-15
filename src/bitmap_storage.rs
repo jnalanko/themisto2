@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{coloring_interface::{self, ColorSetStorage}};
+use crate::coloring_interface;
 
 /*
  *
@@ -271,6 +271,7 @@ pub fn build_from_seq_dbs<P: AsRef<Path> + Send + Sync>(dbs: Vec<jseqio::seq_db:
 
         log::info!("Building colors");
 
+        #[allow(clippy::type_complexity)]
         let work_input_queue: (Sender<(usize, &[u8])>, Receiver<(usize, &[u8])>) = crossbeam::channel::unbounded();
 
         // Push work to the input queue

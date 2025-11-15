@@ -1,6 +1,6 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{any::Any, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
@@ -170,15 +170,15 @@ enum IndexVariant {
     SparseDenseIndex(CompactColexColoring<SparseDenseStorage>),
 }
 
-fn load_index_variant(path: &Path) -> IndexVariant {
+fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
     let mut input = BufReader::new(File::open(path).unwrap());
     let mut id_buf = [0u8; 8];
     input.read_exact(&mut id_buf).unwrap();
     if id_buf == ColoringType::Bitmaps.serialization_id() {
-        let index = CompactColexColoring::<BitmapStorage>::load(&mut input, false);
+        let index = CompactColexColoring::<BitmapStorage>::load(&mut input, build_select);
         IndexVariant::BitmapIndex(index)
     } else if id_buf == ColoringType::SparseDense.serialization_id() {
-        let index = CompactColexColoring::<SparseDenseStorage>::load(&mut input, false);
+        let index = CompactColexColoring::<SparseDenseStorage>::load(&mut input, build_select);
         IndexVariant::SparseDenseIndex(index)
     } else {
         panic!("Unrecognized index serialization ID: {:?}", id_buf);
@@ -318,6 +318,53 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<
     }
 }
 
+fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
+    let n_rounds = infiles.len().div_ceil(2);
+    let mut current_files: Vec<PathBuf> = infiles.to_vec();
+    for round in 0..n_rounds {
+        log::info!("Merge round {}", round);
+        let mut next_files: Vec<PathBuf> = Vec::new();
+        for pair in current_files.chunks(2) {
+            if pair.len() == 2 {
+                let outpath = if round == n_rounds - 1 {
+                    outfile.to_path_buf() // Final output file
+                } else {
+                    temp_dir.join(format!("merge_round{}_{}.thm2c", round, next_files.len()))
+                };
+                log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
+                let mut out = BufWriter::new(File::create(&outpath).unwrap());
+                let colors1 = load_index_variant(&pair[0], true); // Select support is required
+                let colors2 = load_index_variant(&pair[1], true); // Select support is required
+
+                match (colors1, colors2) {
+                    (IndexVariant::BitmapIndex(c1), IndexVariant::BitmapIndex(c2)) => {
+                        log::info!("Merging bitmap indexes");
+                        let merged_colored_kmers = colex_colored_kmers::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
+                        log::info!("Serializing merged index to {}", outpath.display());
+                        merged_colored_kmers.serialize(&mut out);
+                    },
+                    (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
+                        log::info!("Merging sparse-dense indexes");
+                        let merged_colored_kmers = colex_colored_kmers::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
+                        log::info!("Serializing merged index to {}", outpath.display());
+                        merged_colored_kmers.serialize(&mut out);
+                    },
+                    (IndexVariant::SparseDenseIndex(_), IndexVariant::BitmapIndex(_)) => {
+                        panic!("Mismatched index types when merging: {} and {}", pair[0].display(), pair[1].display());
+                    }
+                    (IndexVariant::BitmapIndex(_), IndexVariant::SparseDenseIndex(_)) => {
+                        panic!("Mismatched index types when merging: {} and {}", pair[0].display(), pair[1].display());
+                    }
+                }
+                next_files.push(outpath);
+            } else {
+                next_files.push(pair[0].clone());
+            }
+        }
+        current_files = next_files;
+    }
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -361,7 +408,7 @@ fn main() {
         },
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits } => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path);
+            let index = load_index_variant(&index_path, false); // No select support required
             match index {
                 IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
                 IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
@@ -370,7 +417,7 @@ fn main() {
         },
         Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator} => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path);
+            let index = load_index_variant(&index_path, false); // No select support required
             match index {
                 IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator),
                 IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator),
@@ -378,13 +425,16 @@ fn main() {
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path);
+            let index = load_index_variant(&index_path, false); // No select support required
             match index {
                 IndexVariant::BitmapIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
                 IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
             };
         },
-        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => todo!(),
+        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => {
+            let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
+        },
     }
 
 /* 
@@ -635,40 +685,6 @@ fn main() {
 }
 
 /*
-fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
-    let n_rounds = infiles.len().div_ceil(2);
-    let mut current_files: Vec<PathBuf> = infiles.to_vec();
-    for round in 0..n_rounds {
-        log::info!("Merge round {}", round);
-        let mut next_files: Vec<PathBuf> = Vec::new();
-        for pair in current_files.chunks(2) {
-            if pair.len() == 2 {
-                let outpath = if round == n_rounds - 1 {
-                    outfile.to_path_buf() // Final output file
-                } else {
-                    temp_dir.join(format!("merge_round{}_{}.thm2c", round, next_files.len()))
-                };
-                log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
-                let mut out = BufWriter::new(File::create(&outpath).unwrap());
-                let mut in1 = BufReader::new(File::open(&pair[0]).unwrap());
-                let mut in2 = BufReader::new(File::open(&pair[1]).unwrap());
-
-                let colors1 = compact_colored_kmers::CompactColexColoring::<ColorSets>::load(&mut in1, true); // Select support is required
-                let colors2 = compact_colored_kmers::CompactColexColoring::<ColorSets>::load(&mut in2, true); // Select support is required
-
-                let merged_colored_kmers = compact_colored_kmers::merge_compact_colorings(colors1, colors2, low_ram_mode, n_threads);
-
-                log::info!("Serializing merged index to {}", outpath.display());
-                merged_colored_kmers.serialize(&mut out);
-
-                next_files.push(outpath);
-            } else {
-                next_files.push(pair[0].clone());
-            }
-        }
-        current_files = next_files;
-    }
-}
 
 
 #[cfg(test)]
