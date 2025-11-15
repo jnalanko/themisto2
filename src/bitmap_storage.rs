@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, BitPackedKmerSortingMem, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{coloring_interface::{self, ColorSetStorage}, compact_colored_kmers::CompactColexColoring};
+use crate::{coloring_interface::{self, ColorSetStorage}};
 
 /*
  *
