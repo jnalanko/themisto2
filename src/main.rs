@@ -207,7 +207,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout);
 
-    log::info!("Printing color sets for query sequences in {}", query_path.display());
+    log::info!("Retrieving color sets for query sequences in {}", query_path.display());
 
     while let Some(rec) = reader.read_next().unwrap() {
         let sets = index.lookup_kmer_color_sets(rec.seq);
