@@ -39,7 +39,7 @@ pub struct BitSetOwnedIter<'a> {
  */
 
 
-impl<'storage> crate::coloring_interface::ColorSetView<'storage> for &'storage BitSetView<'storage> {
+impl<'storage> crate::coloring_interface::ColorSetView<'storage> for BitSetView<'storage> {
     type Iter = BitSetViewIter<'storage>;
 
     fn iter(&self) -> Self::Iter {
@@ -85,11 +85,11 @@ impl<'a> Iterator for BitSetOwnedIter<'a> {
 }
 
 impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
-    type SetView<'a> = &'a BitSlice where Self: 'a;
-    type OwnedSet = BitVec;
+    type SetView<'a> = BitSetView<'a> where Self: 'a;
+    type OwnedSet = BitSetOwned;
 
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
-        todo!()
+        BitSetView{bs: &self.bitmap[id*self.n_colors..(id+1)*self.n_colors]}
     }
 
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
@@ -97,19 +97,30 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {
-        todo!()
+        BitSetOwned{bv: bitvec![]}
     }
 
     fn get_full_set(&self) -> Self::OwnedSet {
-        todo!()
+        BitSetOwned{bv: bitvec![usize, Lsb0; 1; self.n_colors]}
     }
 
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
-        todo!()
+        out.write_all(&(self.n_colors as u64).to_le_bytes()).unwrap();
+        out.write_all(&(self.bitmap.len() as u64).to_le_bytes()).unwrap();
+        bincode::serialize_into(out, &self.bitmap).unwrap();
     }
 
     fn load<R: std::io::Read>(input: &mut R) -> Self {
-        todo!()
+        let mut buf = [0_u8; 8];
+        input.read_exact(&mut buf).unwrap();
+        let n_colors = u64::from_le_bytes(buf) as usize;
+
+        input.read_exact(&mut buf).unwrap();
+        let _ = u64::from_le_bytes(buf); // Total length of distinct color sets
+
+        let bitmap: BitVec = bincode::deserialize_from(input).unwrap();
+
+        Self{n_colors, bitmap}
     }
 
     fn view_to_owned(view: &Self::SetView<'_>) -> Self::OwnedSet {
