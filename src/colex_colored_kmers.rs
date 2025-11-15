@@ -823,24 +823,23 @@ mod tests {
 
             let sample_distance = 3;
 
-            let ccc1 = CompactColexColoring::new(sbwt1, lcs1, &bms1.bitmap, n_colors, sample_distance, n_threads);
-            let ccc2 = CompactColexColoring::new(sbwt2, lcs2, &bms2.bitmap, n_colors, sample_distance, n_threads);
-            let ccc_both = CompactColexColoring::new(sbwt_both, lcs_both, &bms_both.bitmap, n_colors, sample_distance, n_threads);
+            let ccc1 = CompactColexColoring::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, n_colors, sample_distance, n_threads);
+            let ccc2 = CompactColexColoring::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, n_colors, sample_distance, n_threads);
+            let ccc_both = CompactColexColoring::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, n_colors, sample_distance, n_threads);
 
-            let ccc_merged = merge_compact_colorings::<SparseDenseStorage>(ccc1, ccc2, true, n_threads);
+            let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;
 
             for colex in 0..ccc_both.sbwt.n_sets() {
                 let kmer = ccc_both.sbwt.access_kmer(colex);
-                let true_colors: sparse_dense_storage::ColorSet<'_> = ccc_both.colex_to_set(colex);
-                let true_colors: Vec<usize> = true_colors.iter().collect();
+                let true_colors: Vec<usize> = ccc_both.colex_to_set(colex).iter().collect();
 
                 if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
                     let range = sbwt_merged.search(&kmer).unwrap();
                     assert_eq!(range.len(), 1);
                     let colex_merged = range.start;
                     //let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(ccc_both.n_colors);
-                    let merged_colors = ccc_merged.colex_to_set(colex_merged).iter().collect();
+                    let merged_colors: Vec<usize> = ccc_merged.colex_to_set(colex_merged).iter().collect();
 
                     eprintln!("{} {} {:?} {:?} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors, sbwt_merged.search(&kmer), ccc_merged.map.sampling.get(colex_merged), ccc_merged.colex_to_set_id(colex_merged));
                     assert_eq!(true_colors, merged_colors);
