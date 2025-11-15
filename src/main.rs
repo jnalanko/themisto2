@@ -4,7 +4,7 @@ use std::{fs::File, io::{BufRead, BufReader, BufWriter}, path::{Path, PathBuf}, 
 use bitvec::prelude::*;
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use compatibility_criteria::unique_support_combination_method;
-use sbwt::{LcsArray, SbwtIndexVariant};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndexVariant};
 
 mod EM;
 mod bitmap_storage;
@@ -14,6 +14,8 @@ mod colex_colored_kmers;
 mod coloring_interface;
 mod sparse_dense_storage;
 mod queries;
+mod io;
+
 
 struct SimpleLikelihood {} // Based on compatibility vectors
 
@@ -124,22 +126,12 @@ pub enum Subcommands {
         k: usize,
 
         #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
-        n_threads: usize
+        n_threads: usize,
+
+        #[arg(long = "index-type", default_value = "bitmap", value_parser = PossibleValuesParser::new(["bitmap", "sparse-dense"]))]
+        numerator: String,
+
     },
-
-/*
-    #[command(arg_required_else_help = true)]
-    Import {
-        #[arg(long = "sbwt-ascii-dump", short = 's', required = true)]
-        sbwt_ascii_dump: PathBuf,
-
-        #[arg(long = "color-dump-prefix", short = 'c', required = true)]
-        color_dump_prefix: PathBuf,
-
-        #[arg(long = "out", short = 'o', required = true)]
-        out: PathBuf,
-    },
-*/
 
     #[command(arg_required_else_help = true, name = "intersection-pseudoalign")]
     IntersectionPseudoalign {
@@ -174,97 +166,6 @@ pub enum Subcommands {
         unique_weight: f64,
     },
 
-    #[command(arg_required_else_help = true, name = "segment-consensus-pseudoalign")]
-    SegmentConsensusPseudoalign{
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-
-        #[arg(long = "min-hits", short = 'm', required = true, help = "This is applied for each segment")]
-        min_hits: usize,
-
-        #[arg(long = "segment-length", required = true, default_value = "100")]
-        segment_length: usize,
-
-        #[arg(long = "min-unique-segments", required = true, default_value = "1")]
-        min_unique_segments: usize,
-
-        #[arg(long = "min-shared-segments", required = true, default_value = "5")]
-        min_shared_segments: usize,
-
-        #[arg(long = "consensus-threshold", short = 'd', required = true)]
-        consensus_threshold: f64,
-    },
-
-    #[command(arg_required_else_help = true, name = "dump-pseudoalignment-data")]
-    DumpPseudoalignmentData {
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-    
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-    
-        #[arg(long = "min-hits", short = 'm', required = true)]
-        min_hits: usize,
-    },
-
-    #[command(arg_required_else_help = true, name = "pseudoalign-into-EM")]
-    PseudoalignIntoEM {
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-    
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-    
-        #[arg(long = "min-hits", short = 'm', required = true)]
-        min_hits: usize,
-    
-        #[arg(long = "n-threads", short = 't', default_value = "1")]
-        n_threads: usize,
-    
-        #[arg(long = "max-iterations", default_value = "2000")]
-        max_iterations: usize,
-    
-        #[arg(long = "numerator", default_value = "hits", 
-            value_parser = PossibleValuesParser::new(["hits", "distinguishing"]))]
-        numerator: String,
-    
-        #[arg(long = "denominator", default_value = "all", 
-            value_parser = PossibleValuesParser::new(["all", "relevant", "max-distinguishing"]))]
-        denominator: String,
-    
-        #[arg(long = "likelihood", default_value = "linear", 
-            value_parser = PossibleValuesParser::new(["linear", "softmax", "99p"]))]
-        likelihood: String,
-
-    },
-
-    #[command(arg_required_else_help = true, name = "intersection-pseudoalign-into-EM")]
-    IntersectionPseudoalignIntoEM {
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-    
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
-    
-        #[arg(long = "min-hits", short = 'm', required = true)]
-        min_hits: usize,
-    
-        #[arg(long = "n-threads", short = 't', default_value = "1")]
-        n_threads: usize,
-    
-        #[arg(long = "max-iterations", default_value = "2000")]
-        max_iterations: usize,
-    
-        #[arg(long = "initial-likelihood-ratio", short = 'w', default_value = "99")]
-        initial_likelihood_ratio: f64,
-    
-        #[arg(long = "static-likelihood", action = clap::ArgAction::SetTrue)]
-        static_likelihood: bool,
-    },
-
     #[command(arg_required_else_help = true, name = "print-color-sets")]
     PrintColorSets {
         #[arg(long = "index", short = 'i', required = true)]
@@ -275,24 +176,6 @@ pub enum Subcommands {
 
         #[arg(long = "print-kmers", short = 'p', help = "Also print the k-mers on each line")]
         print_kmers: bool,
-    },
-
-    #[command(arg_required_else_help = true, name = "compress-colors")]
-    CompressColors {
-        #[arg(long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "output", short = 'o', required = true)]
-        outfile: PathBuf,
-
-        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
-        sample_distance: usize,
-
-        #[arg(long = "n-threads", short = 't', default_value = "4")]
-        n_threads: usize,
-
-        #[arg(long = "validation-queries", help = "For debugging: checks that the compressed colors match the original colors for all k-mers in the input file.")]
-        validation_queries: Option<PathBuf>,
     },
 
     #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
@@ -313,50 +196,37 @@ pub enum Subcommands {
         low_ram_mode: bool,
     },
 
-    #[command(arg_required_else_help = true, name = "build-from-sbwt")]
-    BuildFromSbwt{
-        #[arg(long = "sbwt_file", short = 'i', required = true)]
-        sbwt_file: PathBuf,
-
-        #[arg(long = "output", short = 'o', required = true)]
-        outfile: PathBuf,
-
-        #[arg(long = "n-threads", short = 't', default_value = "4")]
-        n_threads: usize,
-
-        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
-        sample_distance: usize,
-    },
-
 }
-
-/*
-        Subcommands::Import { sbwt_ascii_dump, color_dump_prefix, out: out_path } => {
-            let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
-            let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
-            let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
-
-            let sbwt_in = BufReader::new(File::open(sbwt_ascii_dump).unwrap());
-            let unitigs_in = BufReader::new(File::open(unitig_filename).unwrap());
-            let color_sets_in = BufReader::new(File::open(color_sets_filename).unwrap());
-            let metadata_in = BufReader::new(File::open(metadata_filename).unwrap());
-
-            let mut out = BufWriter::new(File::create(out_path).unwrap());
-
-            let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
-            index.serialize(&mut out);
-        },
-*/
 
 
 fn main() {
-/* 
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
     env_logger::init();
 
     let args = Cli::parse();
+
+    match args.command {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, numerator } => {
+            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+            let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(true)
+                .k(k)
+                .build_lcs(true)
+                .n_threads(n_threads)
+                .precalc_length(8)
+                .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
+            .run(input)
+            
+        },
+        Subcommands::IntersectionPseudoalign { index, query, min_hits } => todo!(),
+        Subcommands::ThresholdPseudoalign { index, query, min_hits, threshold, denominator, unique_weight } => todo!(),
+        Subcommands::PrintColorSets { index, query, print_kmers } => todo!(),
+        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => todo!(),
+    }
+
+/* 
     match args.command {
         Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();

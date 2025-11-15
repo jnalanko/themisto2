@@ -1,7 +1,6 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use clap::builder::styling::Color;
 use sbwt::{MergeInterleaving, SeqStream};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
