@@ -48,12 +48,12 @@ pub struct ColexToColorSetMap {
 impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
-    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
+    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
         log::info!("Building mapping from colex to color set id");
 
 
         let get_colorset_fn = |colex| &color_bitmap[colex*n_colors..(colex+1)*n_colors];
-        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, None, get_colorset_fn, n_threads);
+        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, lcs, get_colorset_fn, n_threads);
 
         let color_set_id_bit_width = sets.len().next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
@@ -168,7 +168,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexColoring<CSS> {
         let (sets, hashmap) = hash_and_encode_distinct_sets::<CSS>(bm, n_colors);
-        let colex_map = ColexToColorSetMap::new(sbwt.clone(), sample_distance, bm, &hashmap, n_colors, n_threads);
+        let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, bm, &hashmap, n_colors, n_threads);
         Self {sbwt, lcs, sets, map: colex_map}
     }
 
