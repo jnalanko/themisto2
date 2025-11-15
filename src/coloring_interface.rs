@@ -59,7 +59,7 @@ pub trait ColorSetView<'a> {
     
     fn len(&self) -> usize;
 
-    fn into_owned(&self) -> Self::Owned;
+    fn to_owned(&self) -> Self::Owned;
 }
 
 pub trait ColorSetOwned {
@@ -167,7 +167,7 @@ impl<'storage> ColorSetView<'storage> for SliceColorSet<'storage> {
         todo!()
     }
 
-    fn into_owned(&self) -> Self::Owned {
+    fn to_owned(&self) -> Self::Owned {
         self.slice.to_vec()
     } 
 }
@@ -244,7 +244,7 @@ mod tests {
         for id in 0..true_sets.len() {
             let view = storage.get_set_view(id);
             assert_eq!(view.iter().collect::<Vec::<usize>>(), true_sets[id]);
-            let owned = view.into_owned();
+            let owned = view.to_owned();
             assert_eq!(owned.iter().collect::<Vec::<usize>>(), true_sets[id]);
             let owned_view = owned.as_view();
             assert_eq!(owned_view.iter().collect::<Vec::<usize>>(), true_sets[id]);
