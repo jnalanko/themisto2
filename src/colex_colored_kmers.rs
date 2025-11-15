@@ -831,9 +831,9 @@ mod tests {
 
             for colex in 0..ccc_both.sbwt.n_sets() {
                 let kmer = ccc_both.sbwt.access_kmer(colex);
-                let true_colors: Vec<usize> = ccc_both.colex_to_set(colex).iter().collect();
 
                 if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
+                    let true_colors: Vec<usize> = ccc_both.colex_to_set(colex).iter().collect();
                     let range = sbwt_merged.search(&kmer).unwrap();
                     assert_eq!(range.len(), 1);
                     let colex_merged = range.start;
