@@ -65,7 +65,7 @@ pub enum Subcommands {
         #[arg(help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
-        #[arg(help = "Directory for temporary files", short = 'd', long = "temp-dir", required = true)]
+        #[arg(help = "Directory for temporary files", long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
         #[arg(short, required = true)]
