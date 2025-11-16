@@ -5,8 +5,6 @@ use bitvec::vec::BitVec;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
-// THIS FILE IS OUT OF DATE SINCE UPDATING TO sbwt-rs 0.4.1. Does not compile anymore.
-
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
     .expect("Unitig id is not valid utf-8").parse()
@@ -105,7 +103,7 @@ pub fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead,
     };
     buf.clear();
 
-    let mut rows: Vec<simple_sds_sbwt::raw_vector::RawVector> = vec![simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false); 4];
+    let mut rows: Vec<BitVec<u64, Lsb0>> = vec![bitvec![u64, Lsb0; n_sets; 0]; 4];
 
     // Read from sbwt_ascii_dump byte by byte
     let mut one_byte = [0_u8; 1];
@@ -122,16 +120,16 @@ pub fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead,
             c.make_ascii_uppercase();
             match c {
                 b'A' => {
-                    rows[0].set_bit(colex, true);
+                    rows[0].set(colex, true);
                 },
                 b'C' => {
-                    rows[1].set_bit(colex, true);
+                    rows[1].set(colex, true);
                 },
                 b'G' => {
-                    rows[2].set_bit(colex, true);
+                    rows[2].set(colex, true);
                 },
                 b'T' => {
-                    rows[3].set_bit(colex, true);
+                    rows[3].set(colex, true);
                 },
                 _ => panic!("Invalid character in SBWT ascii dump"),
             }
@@ -143,7 +141,7 @@ pub fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead,
 
     assert_eq!(colex, n_sets); // There should be one set for each colex position
 
-    let mut subsetseq = sbwt::SubsetMatrix::new_from_bit_vectors(rows.into_iter().map(simple_sds_sbwt::bit_vector::BitVector::from).collect());
+    let mut subsetseq = sbwt::SubsetMatrix::new_from_bit_vectors(rows);
     subsetseq.build_rank();
 
     sbwt::SbwtIndex::from_subset_seq(subsetseq, n_kmers, k, precalc_prefix_length)

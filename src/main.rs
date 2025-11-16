@@ -10,7 +10,7 @@ use sparse_dense_storage::SparseDenseStorage;
 
 mod EM;
 mod bitmap_storage;
-//mod themisto1_compatibility; // Out of date after updating sbwt-rs
+mod index_import;
 mod compatibility_criteria;
 mod colex_colored_kmers;
 mod coloring_interface;
