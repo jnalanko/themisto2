@@ -454,6 +454,11 @@ mod tests {
         let iter_of_iter = sets.iter().map(|s| s.iter());
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
+        // Serialize and load
+        let mut buf: Vec<u8> = vec![];
+        storage.serialize(&mut buf);
+        let storage = SparseDenseStorage::load(&mut buf.as_slice());
+
         // Check that we can retrieve the sets correctly
         for (i, true_set) in sets.iter().enumerate() {
             let view = storage.get(i);
