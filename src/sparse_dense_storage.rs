@@ -58,7 +58,7 @@ pub enum OwnedSparseDense {
 
 // This enum is only for passing references to individual sets around. The actual
 // sets are stored in concatenated form somewhere else in memory. 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SparseDenseColorSetView<'a> {
     Dense(&'a BitSlice),
     Sparse(IntVecSlice<'a>),
@@ -75,6 +75,25 @@ pub struct ColorSetViewIterator<'a> {
  * 
  */
 
+impl PartialEq for IntVecSlice<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.end - self.start != other.end - other.start {
+            return false; // Different length
+        }
+
+        let len = self.end - self.start;
+        (0..len).into_iter().all(|i| self.vec.get(self.start + i) == other.vec.get(other.start + i))
+    }
+}
+impl Eq for IntVecSlice<'_> {}
+
+impl std::hash::Hash for IntVecSlice<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for i in self.start..self.end {
+            self.vec.get(i).hash(state);
+        }
+    }
+}
 
 impl<'a> Iterator for ColorSetViewIterator<'a> {
     type Item = usize;
@@ -154,7 +173,7 @@ impl<'a> crate::coloring_interface::ColorSetView<'a> for SparseDenseColorSetView
 impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     type SetView<'a> = SparseDenseColorSetView<'a>; 
     type OwnedSet = OwnedSparseDense;
-
+    
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
         self.get(id)
     }
@@ -340,6 +359,10 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         elements.sort_unstable();
         elements.dedup();
         *a = self.new_owned_set(elements.into_iter());
+    }
+    
+    fn n_sets(&self) -> usize {
+        self.is_dense_marks.len()
     }
 }
 
