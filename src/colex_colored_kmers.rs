@@ -161,7 +161,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     ///   color j is present in set i.
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_to_color_set_id: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexKmers<CSS> {
-        //let (sets, hashmap) = hash_and_encode_distinct_sets::<CSS>(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, n_colors, n_threads);
         Self {sbwt, lcs, sets: color_sets, map: colex_map}
     }
@@ -215,8 +214,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let sets = CSS::new(iter_of_iters, n_colors);
 
         log::info!("Sampling nodes");
-        let singleton = bitvec![1];
-        let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| &singleton, n_threads);
+        let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| 0, n_threads);
         unitig_samples.enable_rank();
         log::info!("Storing color set ids for sampled nodes");
         let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
