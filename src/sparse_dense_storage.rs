@@ -299,12 +299,27 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
     
     fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
-        // Really slow dummy implementation
-        let elements = a.iter().collect::<HashSet<usize>>()
-            .intersection(&b.iter().collect::<HashSet<usize>>())
-            .copied()
-            .collect::<Vec::<usize>>();
-        *a = SparseDenseColorSetOwned::new(elements.into_iter(), self.n_colors);
+        match (&mut a.set, b) {
+            (SetType::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
+                // Both dense -> bitwise AND
+                *a_bv &= *b_bv;
+            },
+            (SetType::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
+                // Intersection of Sparse and Dense will be Sparse   
+                let s = b_iv_slice.start;
+                let e = b_iv_slice.end;
+                let v = &b_iv_slice.vec;
+                let mut new_elements = IntVector::with_capacity(e-s, v.width()).unwrap();
+                (s..e).filter(|v_idx| a_bv[v.get(*v_idx) as usize])
+                      .for_each(|x| { new_elements.push(x as u64); });
+                *a = SparseDenseColorSetOwned { set: SetType::Sparse(new_elements) };
+            },
+            (SetType::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
+            },
+            (SetType::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
+            },
+        }
+        todo!();
     }
     
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
@@ -425,8 +440,6 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
 
 #[cfg(test)]
 mod tests {
-    use std::hash::Hash;
-
     use crate::coloring_interface::*;
     use super::*;
 
