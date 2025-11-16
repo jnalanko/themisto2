@@ -18,14 +18,15 @@ use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 /// sets are encoded as bitmaps, and sparse sets as lists of integers.
 pub struct SparseDenseStorage{
     dense_sets: BitMaps,
-    sparse_sets: IntVecs,
+    sparse_sets: SortedIntVecs,
     n_colors: usize,
     is_dense_marks: simple_sds_sbwt::bit_vector::BitVector, // Has rank support.
 }
 
-// A set of lists of integers, stored in concatenated form.
-struct IntVecs {
-    intvec_data: IntVector, // Concatenation of IntVecs
+// A set of lists of integers, stored in concatenated form. Each
+// list is assumed to be sorted.
+struct SortedIntVecs {
+    concat: IntVector, // Concatenation of IntVecs
 
     // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
     // exclusive end of the i-th vector.
@@ -199,7 +200,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-        let mut sparse_sets = IntVecs::new(color_id_bit_width);
+        let mut sparse_sets = SortedIntVecs::new(color_id_bit_width);
         let mut dense_sets = BitMaps::new(n_colors);
 
         let mut buf = Vec::<usize>::new();
@@ -250,12 +251,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     fn load<R: std::io::Read>(input: &mut R) -> Self {
         let n_colors: usize = bincode::deserialize_from(input.by_ref()).unwrap();
         let is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
-        let sparse_sets = IntVecs::load(input);
+        let sparse_sets = SortedIntVecs::load(input);
         let dense_sets = BitMaps::load(input);
 
         assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
         assert_eq!(n_colors, dense_sets.individual_length);
-        assert!(sparse_sets.intvec_data.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
+        assert!(sparse_sets.concat.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
 
         Self {is_dense_marks, sparse_sets, dense_sets, n_colors}
     }
@@ -384,24 +385,24 @@ impl SparseDenseStorage {
     }
 }
 
-impl IntVecs {
+impl SortedIntVecs {
     fn new(bit_width: usize) -> Self {
-        IntVecs{intvec_data: IntVector::new(bit_width).unwrap(), ends: vec![0]}
+        SortedIntVecs{concat: IntVector::new(bit_width).unwrap(), ends: vec![0]}
     }
 
     fn push(&mut self, set: impl IntoIterator<Item = usize>) { // Pushes a new set of integers
         for x in set {
-            self.intvec_data.push(x as u64);
+            self.concat.push(x as u64);
         }
-        self.ends.push(self.intvec_data.len());
+        self.ends.push(self.concat.len());
     }
 
     fn shrink_to_fit(&mut self) {
-        self.intvec_data.resize(self.intvec_data.len(), 0);
+        self.concat.resize(self.concat.len(), 0);
     }
 
     fn get(&self, vec_idx: usize) -> IntVecSlice<'_> {
-        IntVecSlice{vec: &self.intvec_data, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
+        IntVecSlice{vec: &self.concat, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
     }
 
     fn n_sets(&self) -> usize {
@@ -410,7 +411,7 @@ impl IntVecs {
 
     fn serialize(&self, out: &mut impl std::io::Write) {
         // Serialize using bincode
-        self.intvec_data.serialize(out).unwrap();
+        self.concat.serialize(out).unwrap();
         bincode::serialize_into(out, &self.ends).unwrap();
     }
 
@@ -419,7 +420,7 @@ impl IntVecs {
         let intvec_data = IntVector::load(input).unwrap();
         let ends: Vec<usize> = bincode::deserialize_from(input).unwrap();
         assert!(!ends.is_empty() && ends[0] == 0); // The first end must be 0
-        IntVecs{intvec_data, ends}
+        SortedIntVecs{concat: intvec_data, ends}
     }
 
 }
