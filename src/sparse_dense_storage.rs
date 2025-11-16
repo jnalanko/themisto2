@@ -294,6 +294,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         }
     }
     
+    // This is where we need the assumption that the IntVecs are sorted.
+    // After this call, `a` has the intersection of `a` and `b`, in sorted
+    // order when it's in IntVec form.
     fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         match (&mut a.set, b) {
             (SetType::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
@@ -353,12 +356,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         }
     }
     
+    // This should main the sorted order of a
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         // Really slow dummy implementation
-        let elements = a.iter().chain(b.iter())
-            .collect::<HashSet<usize>>()
-            .into_iter()
-            .collect::<Vec::<usize>>();
+        let mut elements: Vec<usize> = a.iter().chain(b.iter()).collect();
+        elements.sort_unstable();
+        elements.dedup();
         *a = SparseDenseColorSetOwned::new(elements.into_iter(), self.n_colors);
     }
 
