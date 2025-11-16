@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crossbeam::epoch::Owned;
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
@@ -51,14 +52,9 @@ struct BitMaps {
 }
 
 #[derive(Clone)]
-pub enum SetType {
+pub enum OwnedSparseDense {
     Dense(bitvec::vec::BitVec),
     Sparse(IntVector),
-}
-
-#[derive(Clone)]
-pub struct SparseDenseColorSetOwned {
-    set: SetType,
 }
 
 // This enum is only for passing references to individual sets around. The actual
@@ -109,18 +105,18 @@ impl<'a> Iterator for ColorSetViewIterator<'a> {
     }
 }
 
-impl crate::coloring_interface::ColorSetOwned for SparseDenseColorSetOwned {
+impl crate::coloring_interface::ColorSetOwned for OwnedSparseDense {
     type Iter<'a> = ColorSetViewIterator<'a> where Self: 'a;
 
     fn iter(&self) -> Self::Iter<'_> {
-        match &self.set {
-            SetType::Dense(bv) => {
+        match &self {
+            OwnedSparseDense::Dense(bv) => {
                 ColorSetViewIterator{
                     set: SparseDenseColorSetView::Dense(bv.as_bitslice()),
                     pos: 0,
                 }
             },
-            SetType::Sparse(iv) => {
+            OwnedSparseDense::Sparse(iv) => {
                 ColorSetViewIterator{
                     set: SparseDenseColorSetView::Sparse(IntVecSlice{
                         vec: iv,
@@ -134,7 +130,7 @@ impl crate::coloring_interface::ColorSetOwned for SparseDenseColorSetOwned {
     }
 }
 
-impl SparseDenseColorSetOwned {
+impl OwnedSparseDense {
 
     // n_colors-1 is the maximum color id supported by this set
     pub fn new(elements: impl Iterator<Item = usize>, n_colors: usize) -> Self {
@@ -145,13 +141,13 @@ impl SparseDenseColorSetOwned {
             for color in elements.iter() {
                 bv.set(color, true);
             }
-            SparseDenseColorSetOwned {set: SetType::Dense(bv)}
+            OwnedSparseDense::Dense(bv)
         } else {
             let mut iv = IntVector::new(bits_per_color).unwrap();
             for color in elements.iter() {
                 iv.push(color as u64);
             }
-            SparseDenseColorSetOwned {set: SetType::Sparse(iv)}
+            OwnedSparseDense::Sparse(iv)
         }
     }
 }
@@ -180,7 +176,7 @@ impl<'a> crate::coloring_interface::ColorSetView<'a> for SparseDenseColorSetView
 
 impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     type SetView<'a> = SparseDenseColorSetView<'a>; 
-    type OwnedSet = SparseDenseColorSetOwned;
+    type OwnedSet = OwnedSparseDense;
 
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow> {
         self.get(id)
@@ -188,15 +184,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
     fn get_empty_set(&self) -> Self::OwnedSet {
         let bit_width = self.n_colors.next_power_of_two().trailing_zeros() as usize;
-        Self::OwnedSet {
-            set: SetType::Sparse(IntVector::new(bit_width).unwrap()),
-        }
+        OwnedSparseDense::Sparse(IntVector::new(bit_width).unwrap())
     }
 
     fn get_full_set(&self) -> Self::OwnedSet {
-        Self::OwnedSet {
-            set: SetType::Dense(bitvec![1; self.n_colors]),
-        }
+        OwnedSparseDense::Dense(bitvec![1; self.n_colors])
     }
     
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> SparseDenseStorage {
@@ -267,29 +259,27 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
     
     fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet {
-        SparseDenseColorSetOwned {
-            set: match view {
-                SparseDenseColorSetView::Dense(bv) => {
-                    SetType::Dense(bv.to_bitvec())
-                },
-                SparseDenseColorSetView::Sparse(iv_slice) => {
-                    let len = iv_slice.end - iv_slice.start;
-                    let mut new_iv = IntVector::with_capacity(len, iv_slice.vec.width()).unwrap();
-                    for i in iv_slice.start..iv_slice.end {
-                        new_iv.push(iv_slice.vec.get(i));
-                    }
-                    SetType::Sparse(new_iv)
-                },
-            }
+        match view {
+            SparseDenseColorSetView::Dense(bv) => {
+                OwnedSparseDense::Dense(bv.to_bitvec())
+            },
+            SparseDenseColorSetView::Sparse(iv_slice) => {
+                let len = iv_slice.end - iv_slice.start;
+                let mut new_iv = IntVector::with_capacity(len, iv_slice.vec.width()).unwrap();
+                for i in iv_slice.start..iv_slice.end {
+                    new_iv.push(iv_slice.vec.get(i));
+                }
+                OwnedSparseDense::Sparse(new_iv)
+            },
         }
     }
     
     fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
-        match &owned.set {
-            SetType::Dense(bv) => {
+        match &owned {
+            OwnedSparseDense::Dense(bv) => {
                 SparseDenseColorSetView::Dense(bv.as_bitslice())
             },
-            SetType::Sparse(iv) => {
+            OwnedSparseDense::Sparse(iv) => {
                 SparseDenseColorSetView::Sparse(IntVecSlice{
                     vec: iv,
                     start: 0,
@@ -302,14 +292,14 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     // This is where we need the assumption that the IntVecs are sorted.
     // After this call, `a` has the intersection of `a` and `b`, in sorted
     // order when it's in IntVec form.
-    fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
-        match (&mut a.set, b) {
-            (SetType::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
+    fn intersect(&self, mut a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+        match (&mut a, b) {
+            (OwnedSparseDense::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
                 // Both dense -> bitwise AND
                 *a_bv &= *b_bv;
                 // Todo: re-encode into sparse if the intersection is small? 
             },
-            (SetType::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
+            (OwnedSparseDense::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
                 // Intersection of Sparse and Dense will be Sparse   
                 let s = b_iv_slice.start;
                 let e = b_iv_slice.end;
@@ -321,9 +311,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                         new_elements.push(x as u64);
                     }
                 }
-                *a = SparseDenseColorSetOwned { set: SetType::Sparse(new_elements) };
+                *a = OwnedSparseDense::Sparse(new_elements);
             },
-            (SetType::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
+            (OwnedSparseDense::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
                 // Intersection of Sparse and Dense will be Sparse.
                 // Remove the elements of a that do not occur in b.
                 // We do this in-place.
@@ -336,7 +326,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 }
                 a_iv.resize(new_set_end, 0);
             },
-            (SetType::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
+            (OwnedSparseDense::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
                 // Intersection of sparse and sparse will be sparse.
                 // We assume that the sets are sorted.
                 // Let's do a scanning in-place intersection into a.
@@ -367,11 +357,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut elements: Vec<usize> = a.iter().chain(b.iter()).collect();
         elements.sort_unstable();
         elements.dedup();
-        *a = SparseDenseColorSetOwned::new(elements.into_iter(), self.n_colors);
+        *a = OwnedSparseDense::new(elements.into_iter(), self.n_colors);
     }
-
-     
-
 }
 
 /*
@@ -523,11 +510,11 @@ mod tests {
 
             if should_be_sparse[i] {
                 assert!(matches!(view, SparseDenseColorSetView::Sparse(_)));
-                assert!(matches!(owned.set, SetType::Sparse(_)));
+                assert!(matches!(owned, OwnedSparseDense::Sparse(_)));
                 assert!(matches!(view_of_owned, SparseDenseColorSetView::Sparse(_)));
             } else {
                 assert!(matches!(view, SparseDenseColorSetView::Dense(_)));
-                assert!(matches!(owned.set, SetType::Dense(_)));
+                assert!(matches!(owned, OwnedSparseDense::Dense(_)));
                 assert!(matches!(view_of_owned, SparseDenseColorSetView::Dense(_)));
             }
 
