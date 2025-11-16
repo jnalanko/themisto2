@@ -425,6 +425,8 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use crate::coloring_interface::*;
     use super::*;
 
@@ -435,7 +437,7 @@ mod tests {
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Sparse
             (100..900).collect(), // Dense
             (0..n_colors).collect(), // Dense
-            vec![0, 999], // Sparse
+            vec![0, 400, 700, 999], // Sparse
             vec![], // Sparse
             vec![42], // Sparse
         ];
@@ -452,6 +454,7 @@ mod tests {
         let iter_of_iter = sets.iter().map(|s| s.iter());
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
+        // Check that we can retrieve the sets correctly
         for (i, true_set) in sets.iter().enumerate() {
             let view = storage.get(i);
             let owned = storage.view_to_owned(&view);
@@ -474,6 +477,47 @@ mod tests {
             assert_eq!(view.iter().collect::<Vec::<usize>>(), *true_set);
             assert_eq!(owned.iter().collect::<Vec::<usize>>(), *true_set);
             assert_eq!(view_of_owned.iter().collect::<Vec::<usize>>(), *true_set);
+        }
+
+        // Check all pairwise unions and intersections
+        for i in 0..sets.len() {
+            for j in 0..sets.len() {
+
+                // Compute true union 
+                let mut true_union: Vec<usize> = vec![];
+                true_union.extend(sets[i].iter());
+                true_union.extend(sets[j].iter());
+                true_union.sort();
+                true_union.dedup();
+
+                // Compute true intersection
+                let mut i_hash: HashSet<usize> = HashSet::new();
+                i_hash.extend(sets[i].iter());
+                let mut true_intersection: Vec<usize> = vec![];
+                for x in sets[j].iter() {
+                    if i_hash.contains(&x) {
+                        true_intersection.push(x);
+                    }
+                }
+                true_intersection.sort();
+
+                // Compare to our union
+                let mut owned_i = storage.view_to_owned(&storage.get(i));
+                let view_j = storage.get(j);
+                storage.union(&mut owned_i, &view_j);
+                let mut our_union = owned_i.iter().collect::<Vec::<usize>>();
+                our_union.sort();
+
+                assert_eq!(our_union, true_union);
+
+                // Compare to our intersection
+                let mut owned_i = storage.view_to_owned(&storage.get(i));
+                let view_j = storage.get(j);
+                storage.intersect(&mut owned_i, &view_j);
+                let mut our_intersection = owned_i.iter().collect::<Vec::<usize>>();
+                our_intersection.sort();
+                assert_eq!(our_intersection, true_intersection);
+            }
         }
     }
 }
