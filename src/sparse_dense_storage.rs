@@ -311,8 +311,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let e = b_iv_slice.end;
                 let v = &b_iv_slice.vec;
                 let mut new_elements = IntVector::with_capacity(e-s, v.width()).unwrap();
-                (s..e).filter(|v_idx| a_bv[v.get(*v_idx) as usize])
-                      .for_each(|x| { new_elements.push(x as u64); });
+                for v_idx in s..e {
+                    let x = v.get(v_idx) as usize;
+                    if a_bv[x] {
+                        new_elements.push(x as u64);
+                    }
+                }
                 *a = SparseDenseColorSetOwned { set: SetType::Sparse(new_elements) };
             },
             (SetType::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
