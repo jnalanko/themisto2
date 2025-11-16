@@ -216,6 +216,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 dense_sets.push(&bm);
                 is_dense_marks.push_bit(true);
             } else {
+                buf.sort_unstable(); // We need sorted sets for intersections
                 sparse_sets.push(buf.iter());
                 is_dense_marks.push_bit(false);
             }
