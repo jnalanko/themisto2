@@ -422,3 +422,58 @@ fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bo
     let bitmap_size = n_colors;
     bitmap_size <= intvec_size
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::coloring_interface::*;
+    use super::*;
+
+    #[test]
+    fn test_sparse_dense_storage() {
+        let n_colors = 1000;
+        let sets = [
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Sparse
+            (100..900).collect(), // Dense
+            (0..n_colors).collect(), // Dense
+            vec![0, 999], // Sparse
+            vec![], // Sparse
+            vec![42], // Sparse
+        ];
+
+        let should_be_sparse = [
+            true,
+            false,
+            false,
+            true,
+            true,
+            true,
+        ];
+
+        let iter_of_iter = sets.iter().map(|s| s.iter());
+        let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
+
+        for (i, true_set) in sets.iter().enumerate() {
+            let view = storage.get(i);
+            let owned = storage.view_to_owned(&view);
+            let view_of_owned = storage.owned_to_view(&owned);
+
+            eprintln!("{:?}", view.iter().collect::<Vec<usize>>());
+            eprintln!("{:?}", owned.iter().collect::<Vec<usize>>());
+            eprintln!("{:?}", view_of_owned.iter().collect::<Vec<usize>>());
+
+            if should_be_sparse[i] {
+                assert!(matches!(view, SparseDenseColorSetView::Sparse(_)));
+                assert!(matches!(owned.set, SetType::Sparse(_)));
+                assert!(matches!(view_of_owned, SparseDenseColorSetView::Sparse(_)));
+            } else {
+                assert!(matches!(view, SparseDenseColorSetView::Dense(_)));
+                assert!(matches!(owned.set, SetType::Dense(_)));
+                assert!(matches!(view_of_owned, SparseDenseColorSetView::Dense(_)));
+            }
+
+            assert_eq!(view.iter().collect::<Vec::<usize>>(), *true_set);
+            assert_eq!(owned.iter().collect::<Vec::<usize>>(), *true_set);
+            assert_eq!(view_of_owned.iter().collect::<Vec::<usize>>(), *true_set);
+        }
+    }
+}
