@@ -769,8 +769,7 @@ pub fn hash_and_encode_distinct_sets<'a, CSS: ColorSetStorage>(colex_to_set: &'a
 
     // Create an iterator of iterators, each inner iterator iterating over one color set
     let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
-        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-        set.iter_ones()
+        colex_to_set.get_set_view(colex).iter()
     });
 
     let colorsets = CSS::new(color_sets_iterator, n_colors);
