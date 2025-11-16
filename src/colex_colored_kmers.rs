@@ -13,6 +13,7 @@ use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex}
 use std::hash::{Hash, Hasher};
 
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
+use crate::index_import;
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
@@ -169,6 +170,30 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, bm, &hashmap, n_colors, n_threads);
         Self {sbwt, lcs, sets, map: colex_map}
     }
+
+    pub fn new_from_colored_unitig_dump(
+        sbwt: SbwtIndex<SubsetMatrix>, 
+        lcs: LcsArray, 
+        metadata_dump: impl std::io::BufRead, 
+        unitig_dump: impl std::io::BufRead + Send + 'static, 
+        color_dump: impl std::io::BufRead) 
+        -> Self {
+
+        log::info!("Reading metadata");
+        let metadata = index_import::read_index_dump_metadata(metadata_dump);
+
+        log::info!("Reading Distinct color sets");
+        // TODO: read into color set storage
+        let distinct_color_sets = index_import::read_color_sets(color_dump, metadata.num_color_sets, metadata.num_colors); 
+
+        log::info!("Building colex to color set id mapping");
+        let colex_to_color_set_id = index_import::build_colex_to_color_set_mapping(unitig_dump, &sbwt, &lcs);
+
+        // TODO: color set sampling
+
+        Self { kmers: sbwt_index, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0; metadata.num_colors], n_colors: metadata.num_colors}
+    }
+
 
     pub fn new_single_colored(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, sample_distance: usize, n_threads: usize) -> Self {
         let n_colors = 1;
