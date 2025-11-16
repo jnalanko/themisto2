@@ -315,6 +315,17 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 *a = SparseDenseColorSetOwned { set: SetType::Sparse(new_elements) };
             },
             (SetType::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
+                // Intersection of Sparse and Dense will be Sparse.
+                // Remove the elements of a that do not occur in b.
+                // We do this in-place.
+                let mut new_set_end = 0_usize;
+                for i in 0..a_iv.len() {
+                    if b_bv[a_iv.get(i) as usize] {
+                        a_iv.set(new_set_end, a_iv.get(i));
+                        new_set_end += 1; 
+                    }
+                }
+                a_iv.resize(new_set_end, 0);
             },
             (SetType::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
             },
