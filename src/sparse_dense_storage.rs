@@ -351,7 +351,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 a_iv.resize(new_set_end, 0);
             },
         }
-        todo!();
     }
     
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
