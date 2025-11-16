@@ -81,6 +81,7 @@ impl PartialEq for IntVecSlice<'_> {
             return false; // Different length
         }
 
+        // Todo: could do word-by-word comparison
         let len = self.end - self.start;
         (0..len).into_iter().all(|i| self.vec.get(self.start + i) == other.vec.get(other.start + i))
     }
