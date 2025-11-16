@@ -83,14 +83,10 @@ impl<'a> Iterator for ColorSetViewIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match &self.set {
             SparseDenseColorSetView::Dense(bit_slice) => {
-                // Rewind to the next 1-bit (todo: word parallelism)
-                while self.pos < bit_slice.len() && bit_slice[self.pos] == false {
-                    self.pos += 1;
-                }
-
-                if self.pos < bit_slice.len() {
-                    let ret = self.pos;
-                    self.pos += 1; // Starting point for the next iteration
+                // Rewind to the next 1-bit
+                if let Some(offset) = bit_slice[self.pos..].first_one(){
+                    let ret = self.pos + offset;
+                    self.pos = ret + 1; // Starting point for the next iteration
                     Some(ret)
                 } else {
                     None
