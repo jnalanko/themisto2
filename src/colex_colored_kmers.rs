@@ -17,7 +17,7 @@ use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetVi
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
-pub struct CompactColexColoring<CSS: coloring_interface::ColorSetStorage> {
+pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
     // This is on the heap to allow map to refer to it (otherwise assuring lifetime 
     // guarantees becomes problematic). It's reference counted because this struct
     // will have two references to it, the one in self.sbwt, and one in self.map.sbwt.
@@ -158,13 +158,13 @@ impl ColexToColorSetMap {
 
 }
 
-impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
+impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, bm: &bitvec::vec::BitVec, n_colors: usize, sample_distance: usize, n_threads: usize)
-    -> CompactColexColoring<CSS> {
+    -> CompactColexKmers<CSS> {
         let (sets, hashmap) = hash_and_encode_distinct_sets::<CSS>(bm, n_colors);
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, bm, &hashmap, n_colors, n_threads);
         Self {sbwt, lcs, sets, map: colex_map}
@@ -226,7 +226,7 @@ impl<CSS: ColorSetStorage> CompactColexColoring<CSS> {
         let lcs = LcsArray::load(input).unwrap();
         let sets = CSS::load(input);
         let map = ColexToColorSetMap::load(input, sbwt.clone());
-        CompactColexColoring{sbwt, lcs, sets, map}
+        CompactColexKmers{sbwt, lcs, sets, map}
     }
 
     pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
@@ -417,7 +417,7 @@ impl PartitionedReadOnlyIdMap {
 }
 
 
-fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>, lcs1: &LcsArray, lcs2: &LcsArray, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
+fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, lcs1: &LcsArray, lcs2: &LcsArray, merge_plan: &MergeInterleaving, n_threads: usize) -> (PartitionedReadOnlyIdMap, simple_sds_sbwt::raw_vector::RawVector) {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
@@ -576,7 +576,7 @@ impl<L: Iterator<Item = usize>, R: Iterator<Item = usize>> Iterator for TwoSetMe
 }
 
 
-fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>) -> CSS {
+fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOnlyIdMap, coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>) -> CSS {
 
     let n_colors_1 = coloring1.sets.get_full_set().iter().count();
     let n_colors_2 = coloring2.sets.get_full_set().iter().count();
@@ -616,7 +616,7 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
 
 }
 
-fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexColoring<CSS>, coloring2: &CompactColexColoring<CSS>, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
+fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
@@ -651,7 +651,7 @@ fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usiz
     sampled_ids
 }
 
-pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexColoring<CSS>, coloring2: CompactColexColoring<CSS>, optimize_peak_ram: bool, n_threads: usize) -> CompactColexColoring<CSS> {
+pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, n_threads: usize) -> CompactColexKmers<CSS> {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::MergeInterleaving::new(&(*coloring1.map.sbwt), &(*coloring2.map.sbwt), optimize_peak_ram, n_threads);
@@ -689,7 +689,7 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexColo
     log::info!("Computing the merged LCS array"); // Todo: could we do this during the interleave?
     let merged_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
 
-    let new_coloring = CompactColexColoring { 
+    let new_coloring = CompactColexKmers { 
         sbwt: merged_sbwt.clone(),
         lcs: merged_lcs,
         sets: css, 
@@ -761,7 +761,7 @@ mod tests {
 
     use crate::{bitmap_storage::build_from_seq_dbs, coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
 
-    use super::{CompactColexColoring, merge_compact_colorings};
+    use super::{CompactColexKmers, merge_compact_colorings};
 
 
     #[cfg(test)]
@@ -866,9 +866,9 @@ mod tests {
 
             let sample_distance = 3;
 
-            let ccc1 = CompactColexColoring::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, input_seqs_1.len(), sample_distance, n_threads);
-            let ccc2 = CompactColexColoring::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, input_seqs_2.len(), sample_distance, n_threads);
-            let ccc_both = CompactColexColoring::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, all_input_seq_slices.len(), sample_distance, n_threads);
+            let ccc1 = CompactColexKmers::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, input_seqs_1.len(), sample_distance, n_threads);
+            let ccc2 = CompactColexKmers::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, input_seqs_2.len(), sample_distance, n_threads);
+            let ccc_both = CompactColexKmers::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, all_input_seq_slices.len(), sample_distance, n_threads);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;

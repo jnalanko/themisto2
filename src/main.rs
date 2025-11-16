@@ -3,7 +3,7 @@
 use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
-use colex_colored_kmers::CompactColexColoring;
+use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
@@ -151,18 +151,18 @@ pub enum Subcommands {
 }
 
 fn build_coloring<CSS: ColorSetStorage>(
-    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexColoring<CSS> {
+    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
     log::info!("Building uncompressed color bitmap");
     let color_storage = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexColoring::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
+    CompactColexKmers::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
 enum IndexVariant {
-    BitmapIndex(CompactColexColoring<BitmapStorage>),
-    SparseDenseIndex(CompactColexColoring<SparseDenseStorage>),
+    BitmapIndex(CompactColexKmers<BitmapStorage>),
+    SparseDenseIndex(CompactColexKmers<SparseDenseStorage>),
 }
 
 fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
@@ -170,10 +170,10 @@ fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
     let mut id_buf = [0u8; 8];
     input.read_exact(&mut id_buf).unwrap();
     if id_buf == ColoringType::Bitmaps.serialization_id() {
-        let index = CompactColexColoring::<BitmapStorage>::load(&mut input, build_select);
+        let index = CompactColexKmers::<BitmapStorage>::load(&mut input, build_select);
         IndexVariant::BitmapIndex(index)
     } else if id_buf == ColoringType::SparseDense.serialization_id() {
-        let index = CompactColexColoring::<SparseDenseStorage>::load(&mut input, build_select);
+        let index = CompactColexKmers::<SparseDenseStorage>::load(&mut input, build_select);
         IndexVariant::SparseDenseIndex(index)
     } else {
         panic!("Unrecognized index serialization ID: {:?}", id_buf);
@@ -194,7 +194,7 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
 }
 
 
-fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, print_kmers: bool) {
+fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
     // Buffered writing to stdout
     let stdout = std::io::stdout();
@@ -224,7 +224,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, que
 }
 
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, min_hits: usize) {
+fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
     // Buffered writing to stdout
     let stdout = std::io::stdout();
@@ -256,7 +256,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColori
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexColoring<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator) {
+fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
     // Buffered writing to stdout
     let stdout = std::io::stdout();
