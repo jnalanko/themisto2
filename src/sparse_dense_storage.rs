@@ -303,6 +303,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             (SetType::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
                 // Both dense -> bitwise AND
                 *a_bv &= *b_bv;
+                // Todo: re-encode into sparse if the intersection is small? 
             },
             (SetType::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
                 // Intersection of Sparse and Dense will be Sparse   
@@ -328,6 +329,26 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 a_iv.resize(new_set_end, 0);
             },
             (SetType::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
+                // Intersection of sparse and sparse will be sparse.
+                // We assume that the sets are sorted.
+                // Let's do a scanning in-place intersection into a.
+                let mut new_set_end = 0_usize;
+                let mut b_pos = b_iv_slice.start;
+                for i in 0..a_iv.len() {
+                    let a_elem = a_iv.get(i) as usize;
+                    while b_pos < b_iv_slice.end && (b_iv_slice.vec.get(b_pos) as usize) < a_elem {
+                        b_pos += 1;
+                    }
+                    if b_pos == b_iv_slice.end {
+                        break; // No more elements in b
+                    }
+                    if b_iv_slice.vec.get(b_pos) as usize == a_elem {
+                        // Element is in both sets -> keep it
+                        a_iv.set(new_set_end, a_iv.get(i));
+                        new_set_end += 1;
+                    }
+                }
+                a_iv.resize(new_set_end, 0);
             },
         }
         todo!();
