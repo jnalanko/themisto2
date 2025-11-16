@@ -194,13 +194,13 @@ fn build_coloring<CSS: ColorSetStorage>(
 
     let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
     let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).into_iter().map(|colex| {
-        let x = set_to_id[&distinct_css.get_set_view(colex)];
-        todo!();
+        set_to_id[&distinct_css.get_set_view(colex)]
     }).collect(); 
+    drop(set_to_id);
     drop(colex_to_css); // Free memory
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, distinct_css, n_colors, sample_distance, n_threads);
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, distinct_css, n_colors, sample_distance, n_threads)
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
