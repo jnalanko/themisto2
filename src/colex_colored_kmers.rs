@@ -159,11 +159,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, color_set_ids: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_to_color_set_id: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexKmers<CSS> {
         //let (sets, hashmap) = hash_and_encode_distinct_sets::<CSS>(bm, n_colors);
-        let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, bm, &hashmap, n_colors, n_threads);
-        Self {sbwt, lcs, sets, map: colex_map}
+        let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, n_colors, n_threads);
+        Self {sbwt, lcs, sets: color_sets, map: colex_map}
     }
 
     pub fn new_from_colored_unitig_dump(
