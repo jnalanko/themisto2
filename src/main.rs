@@ -182,6 +182,7 @@ fn build_coloring<CSS: ColorSetStorage>(
     let n_colors = input_paths.len();
     log::info!("Building uncompressed color bitmap");
     // Todo: do not go through bitmap storage
+    // Todo: Also: there is a very large memory overhead with all the happens here.
     let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
 
     // Compress to CSS format
@@ -191,12 +192,15 @@ fn build_coloring<CSS: ColorSetStorage>(
 
     drop(colex_to_bitset); // Free memory
 
-    let css_set_to_id = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
-    let colex_to_id: Vec<usize> = vec![sbwt.n_sets(); 0];
+    let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
+    let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).into_iter().map(|colex| {
+        let x = set_to_id[&distinct_css.get_set_view(colex)];
+        todo!();
+    }).collect(); 
+    drop(colex_to_css); // Free memory
 
-    drop(bitmap_storage); // Free memory
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_color_set_id, storage, n_colors, sample_distance, n_threads);
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, distinct_css, n_colors, sample_distance, n_threads);
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
