@@ -2,3 +2,6 @@
 	path = sbwt-rs-cli
 	url = https://github.com/jnalanko/sbwt-rs-cli
 	branch = sbwt-merge-segmentation
+[submodule "ggcat"]
+	path = ggcat
+	url = https://github.com/algbio/ggcat
