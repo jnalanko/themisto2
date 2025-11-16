@@ -356,7 +356,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         }
     }
     
-    // This should main the sorted order of a
+    // This should maintain the sorted order of a
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         // Really slow dummy implementation
         let mut elements: Vec<usize> = a.iter().chain(b.iter()).collect();
