@@ -148,14 +148,14 @@ pub fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub struct ThemistoDumpMetadata {
+pub struct IndexDumpMetadata {
     pub num_unitigs: usize,
     pub num_colors: usize,
     pub num_color_sets: usize,
     pub k: usize
 }
 
-pub fn read_themisto_dump_metadata(mut reader: impl BufRead) -> ThemistoDumpMetadata {
+pub fn read_index_dump_metadata(mut reader: impl BufRead) -> IndexDumpMetadata {
 
     // File should look like this:
     // num_colors=3682
@@ -188,7 +188,7 @@ pub fn read_themisto_dump_metadata(mut reader: impl BufRead) -> ThemistoDumpMeta
         line.clear();
     }
 
-    ThemistoDumpMetadata {
+    IndexDumpMetadata {
         num_unitigs: num_unitigs.expect("num_unitigs missing from metadata"),
         num_colors: num_colors.expect("num_colors missing from metadata"),
         num_color_sets: num_color_sets.expect("num_color_sets missing from metadata"),

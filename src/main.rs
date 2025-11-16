@@ -149,6 +149,23 @@ pub enum Subcommands {
         low_ram_mode: bool,
     },
 
+    #[command(arg_required_else_help = true)]
+    Import {
+        #[arg(help = "Precomputed bit matrix SBWT", long = "sbwt", short = 's')]
+        sbwt: Option<PathBuf>,
+
+        #[arg(help = "Index text dump file prefix, as written by Fulgor 4.0.0", long = "color-dump-prefix", short = 'c', required = true)]
+        color_dump_prefix: PathBuf,
+
+        #[arg(long = "temp-dir", required = true)]
+        temp_dir: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(help = "Index output file", long = "out", short = 'o', required = true)]
+        out: PathBuf,
+    },
 }
 
 fn build_coloring<CSS: ColorSetStorage>(
@@ -431,241 +448,58 @@ fn main() {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
         },
-    }
+        Subcommands::Import { sbwt: sbwt_path, color_dump_prefix, out: out_path, n_threads, temp_dir} => {
+            let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
+            let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
+            let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
 
-/* 
-    match args.command {
-        Subcommands::Build { input: input_fof, output: out_path, temp_dir, k, n_threads } => {
-            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let index = ColoredKmers::new_from_files(input_paths.as_slice(), k, n_threads, &temp_dir);
-            index.serialize(&mut BufWriter::new(File::create(&out_path).unwrap()));
-        },
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits} => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+            // Try to open to check that the files are found
+            BufReader::new(File::open(unitig_filename).unwrap());
+            BufReader::new(File::open(color_sets_filename).unwrap());
+            BufReader::new(File::open(metadata_filename).unwrap());
 
-            log::info!("Pseudoaligning (intersection method)");
-            while let Some(rec) = reader.read_next().unwrap(){
-                let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
-                println!("{:?}", intersection.iter_ones().collect::<Vec::<usize>>()); // Todo: print indices of non-zero
-            }
-        },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, unique_weight} => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+            log::info!("Reading metadata from {}", metadata_filename);
+            let metadata = index_import::read_index_dump_metadata(BufReader::new(File::open(metadata_filename).unwrap()));
 
-            log::info!("Pseudoaligning (threshold method, denominator = {:?})", denominator);
-            while let Some(rec) = reader.read_next().unwrap(){
-                let pa_data = index.compute_pseudoalignment_data(rec.seq, 0);
-                let den = match denominator {
-                    Denominator::All => pa_data.n_all_kmers as f64,
-                    Denominator::Relevant => pa_data.n_unique_kmers as f64 * unique_weight + pa_data.n_relevant_kmers as f64 * (1.0 - unique_weight),
-                    Denominator::MaxHits => {
-                        (0..index.n_colors()).map(|i| 
-                            pa_data.unique_hit_counts[i] as f64 * unique_weight +
-                            pa_data.hit_counts[i] as f64 * (1.0 - unique_weight)).
-                            max_by(|a,b| a.partial_cmp(b).unwrap())
-                            .expect("Programming error: no hit counts found")
-                    }
-                };
-                let compatible_colors = unique_support_combination_method(&pa_data.unique_hit_counts, &pa_data.hit_counts, unique_weight, 0, min_hits, den, threshold);
-                println!("{:?}", compatible_colors);
-            }
-
-        },
-        Subcommands::SegmentConsensusPseudoalign { index: index_path, query: query_path, min_hits, segment_length, min_shared_segments, min_unique_segments, consensus_threshold } => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            log::info!("Pseudoaligning (segment consensus method)");
-            while let Some(rec) = reader.read_next().unwrap(){
-                let color_sets: Vec<Vec<usize>> = rec.seq.windows(segment_length).step_by(segment_length).map(|segment| {
-                    let bitmap = index.intersection_pseudoalignment(segment, min_hits);
-                    bitmap.iter_ones().collect::<Vec::<usize>>()
-                }).collect();
-
-                let slices: Vec<&[usize]> = color_sets.iter().map(|v| v.as_slice()).collect();
-                let consensus = compatibility_criteria::resolve_consensus_compatibility(&slices, index.n_colors(), min_unique_segments, min_shared_segments, consensus_threshold);
-                println!("{:?}", consensus);
-            }
-        }
-        Subcommands::DumpPseudoalignmentData { index: index_path, query: query_path, min_hits } => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            log::info!("Pseudoaligning");
-            while let Some(rec) = reader.read_next().unwrap(){
-                let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
-                let json = serde_json::to_string(&data).unwrap();
-                println!("{}", json);
-            }
-        },
-        Subcommands::PseudoalignIntoEM { 
-                index: index_path, 
-                query: query_path, 
-                min_hits, 
-                n_threads, 
-                max_iterations, 
-                numerator, 
-                denominator, 
-                likelihood: likelihood_type } => {
-
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            log::info!("Loaded index with {} distinct k-mers and {} colors", index.n_kmers(), index.n_colors());
-
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            #[allow(clippy::type_complexity)] // Is fine, stop complaining
-            let likelihood_function: Box<dyn Fn(&[f64]) -> Vec<f64>> = match likelihood_type.as_str() { // Takes a row of scores, returns a row of likelihoods. That is, f: R^n -> R^n, where n is the number of colors
-                "linear" => Box::new(|v: &[f64]| v.to_vec()), // Identity function
-                "99p" => Box::new(|v: &[f64]| {
-                    let (argmax, _max) = v.iter().enumerate().max_by(|(_, a),(_, b)| a.total_cmp(b)).unwrap();
-                    let mut answer: Vec<f64> = vec![0.01; index.n_colors()];
-                    answer[argmax] = 0.99;
-                    answer
-                }),
-                //"betabinomial" => Box::new(|_: &[f64]| {
-                //    todo!(); // Issue: Beta binomial takes in an integer, not a float. But it's almost linear with our hyperparameters, so linear works as a good substitute for this.
-                //}),
-                "softmax" => Box::new(|v: &[f64]| softmax(v)),
-                _ => panic!("Invalid likelihood type: {}", likelihood_type)
-            };
-            let mut likelihood_matrix = Vec::<Vec<f64>>::new();
-            while let Some(rec) = reader.read_next().unwrap(){
-                let data = index.compute_pseudoalignment_data(rec.seq, min_hits);
-                
-                let mut row: Vec<f64> = vec![0.0; index.n_colors()];
-                for color in 0..index.n_colors() {
-                    let numerator_value = match numerator.as_str() {
-                        "hits" => data.hit_counts[color],
-                        "distinguishing" => data.distinguishing_hit_counts[color],
-                        _ => panic!("Invalid numerator type: {}", numerator)
-                    };
-                    let n_kmers = std::cmp::max(0, rec.seq.len() as isize - index.get_k() as isize + 1) as usize;
-                    let mut denominator_value = match denominator.as_str() {
-                        "all" => n_kmers,
-                        "relevant" => data.n_relevant_kmers,
-                        "max-distinguishing" => *data.distinguishing_hit_counts.iter().max().unwrap_or(&0),
-                        _ => panic!("Invalid denominator type: {}", denominator)
-                    };
-                    denominator_value = std::cmp::max(1, denominator_value); // Avoid division by zero
-
-                    row[color] = numerator_value as f64 / denominator_value as f64;
+            let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
+                log::info!("Loading SBWT from {}", sbwt_path.display());
+                let sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
+                let sbwt::SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+                if sbwt.k() != metadata.k {
+                    log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
+                    return;
                 }
 
-                // Add zero inflation
-                row.iter_mut().for_each(|x| *x = x.max(0.01));
-
-                // Apply the likelihood function
-                row = likelihood_function(&row);
-
-                // Normalize
-                let rowsum = row.iter().sum::<f64>();
-                row.iter_mut().for_each(|x| *x /= rowsum);
-
-                likelihood_matrix.push(row);
-            }
-
-            likelihood_matrix.shrink_to_fit(); // Saving some memory
-
-            // Observation is now a likelihood matrix row
-            let n_rows = likelihood_matrix.len();
-            let likelihood = LikelihoodMatrix{matrix: likelihood_matrix};
-            let observations: Vec<usize> = (0..n_rows).collect();
-            let observation_counts: Vec<usize> = vec![1; n_rows];
-
-            let mixing_fractions = EM::fit_model(&likelihood, &observations, &observation_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], n_threads, max_iterations);
-            println!("{:?}", &mixing_fractions);
-
-        },
-        Subcommands::IntersectionPseudoalignIntoEM { index: index_path, query: query_path, min_hits, n_threads, max_iterations, initial_likelihood_ratio: initial_w, static_likelihood } => {
-            let optimize_w = !static_likelihood;
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-
-            log::info!("Pseudoaligning");
-            let mut intersections = Vec::<BitVec>::new(); // Todo: store more compactly with 8 bits per byte?
-            while let Some(rec) = reader.read_next().unwrap(){
-                let intersection = index.intersection_pseudoalignment(rec.seq, min_hits);
-                intersections.push(intersection);
-            }
-
-            let class_counts = reduce_to_classes(&mut intersections);
-
-            // Represent with one byte per bit for compatibility with the EM algorithm
-            let intersections: Vec<Vec<u8>> = intersections.iter().map(|v| v.iter().map(|b| *b as u8).collect()).collect();
-
-            let (thetas, w) = EM::fit_model_with_intersection_inputs(&intersections, &class_counts, &vec![1.0 / index.n_colors() as f64; index.n_colors()], initial_w, optimize_w, n_threads, max_iterations);
-            println!("Final likelihood ratio w: {}", w);
-            println!("Mixing fractions: {:?}", thetas);
-        },
-        Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-            while let Some(rec) = reader.read_next().unwrap() {
-                println!(">{}", String::from_utf8(rec.head.to_vec()).unwrap());
-                let sets = index.get_all_color_sets(rec.seq);
-                for (set_idx, set) in sets.iter().enumerate() {
-                    if print_kmers {
-                        print!("{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap())
-                    }
-                    set.to_string();
-                    let bitstring: String = set.iter().by_vals().map(|b| if b { '1' } else { '0' }).collect();
-                    println!("{}", bitstring);
-                }
-            }
-        },
-        Subcommands::CompressColors { index: index_path, sample_distance, validation_queries, n_threads, outfile} => {
-            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
-
-            log::info!("Loading index");
-            let index = colored_kmers::ColoredKmers::load(&mut BufReader::new(File::open(index_path).unwrap()));
-            log::info!("Compressing colors");
-
-            if let Some(validation_queries) = validation_queries {
-                // Clone the original index before construction to be able to compare to it
-                let compressed = index.clone().compress_colors::<ColorSets>(sample_distance, n_threads);
-
-                log::info!("Serializing to {}", outfile.display());
-                compressed.serialize(&mut out); // Colors
-
-                log::info!("Validating compressed colors for {}", validation_queries.display());
-                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&validation_queries).unwrap();
-                while let Some(rec) = reader.read_next().unwrap() {
-                    for kmer in rec.seq.windows(index.get_k()) {
-                        let old_set: Vec<usize> = index.get_color_set(kmer).iter_ones().collect();
-
-                        let colex_range = index.sbwt().search(kmer);
-                        let mut new_set = Vec::<usize>::new();
-                        if let Some(colex_range) = colex_range {
-                            assert!(colex_range.len() == 1);
-                            compressed.colex_to_set(colex_range.start).extract_and_push_colors_to(&mut new_set)
-                        }
-
-                        assert_eq!(old_set, new_set);
-                    }
-                }
-                log::info!("All sets match");
+                log::info!("Building LCS array");
+                let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
+                (sbwt, lcs)
             } else {
-                log::info!("Copying SBWT to {}", outfile.display());
+                log::info!("No precomputed SBWT given. Building the SBWT and the LCS array");
+                let input_paths: Vec<PathBuf> = 
+                    BufReader::new(File::open(unitig_filename).unwrap())
+                    .lines().map(|f| PathBuf::from(f.unwrap())).collect();
 
-                let compressed = index.compress_colors::<ColorSets>(sample_distance, n_threads);
-                log::info!("Serializing colors to {}", outfile.display());
-                compressed.serialize(&mut out); // Colors
-                log::info!("Finished");
-            }
+                let input_stream = io::ChainedInputStream::new(input_paths.clone());
+                let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+                    .add_rev_comp(true)
+                    .k(metadata.k)
+                    .build_lcs(true)
+                    .n_threads(n_threads)
+                    .precalc_length(8)
+                    .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(false).temp_dir(&temp_dir))
+                .run(input_stream); // No batch dedup because unitigs should not have duplicates
+                log::info!("Building SBWT select support");
+                sbwt.build_select();
+                (sbwt, lcs.unwrap())
+            };
+
+            let mut out = BufWriter::new(File::create(out_path).unwrap());
+
+            let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
+            index.serialize(&mut out);
         },
-        Subcommands::MergeCompressedIndexes{ index_file_list, n_threads, outfile, temp_dir, low_ram_mode} => {
-            let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
-        },
+    }
+/*
         Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
             log::info!("Loading SBWT");
