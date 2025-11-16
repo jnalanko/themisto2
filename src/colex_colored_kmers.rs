@@ -47,7 +47,7 @@ pub struct ColexToColorSetMap {
 impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
-    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_colors: usize, n_threads: usize) -> Self {
+    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_threads: usize) -> Self {
 
         let get_colorset_fn = |colex| colex_to_color_set_id[colex];
         let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, lcs, get_colorset_fn, n_threads);
