@@ -16,6 +16,7 @@ mod colex_colored_kmers;
 mod coloring_interface;
 mod sparse_dense_storage;
 mod io;
+mod build_from_ggcat;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
