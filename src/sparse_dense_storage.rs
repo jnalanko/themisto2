@@ -284,7 +284,18 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
     
     fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a> {
-        todo!()
+        match &owned.set {
+            SetType::Dense(bv) => {
+                SparseDenseColorSetView::Dense(bv.as_bitslice())
+            },
+            SetType::Sparse(iv) => {
+                SparseDenseColorSetView::Sparse(IntVecSlice{
+                    vec: iv,
+                    start: 0,
+                    end: iv.len(),
+                })
+            },
+        }
     }
     
     fn intersect(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
