@@ -481,11 +481,7 @@ fn main() {
                 (sbwt, lcs)
             } else {
                 log::info!("No precomputed SBWT given. Building the SBWT and the LCS array");
-                let input_paths: Vec<PathBuf> = 
-                    BufReader::new(File::open(&unitig_filename).unwrap())
-                    .lines().map(|f| PathBuf::from(f.unwrap())).collect();
-
-                let input_stream = io::ChainedInputStream::new(input_paths.clone());
+                let input_stream = io::ChainedInputStream::new(vec![PathBuf::from(unitig_filename)]);
                 let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
                     .add_rev_comp(true)
                     .k(metadata.k)
