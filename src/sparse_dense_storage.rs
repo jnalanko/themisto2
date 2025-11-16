@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-
-use crossbeam::epoch::Owned;
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
@@ -26,6 +23,7 @@ pub struct SparseDenseStorage{
 
 // A set of lists of integers, stored in concatenated form. Each
 // list is assumed to be sorted.
+#[derive(Clone, Debug)]
 struct SortedIntVecs {
     // Concatenation of IntVecs. Better keep this private because the sets need
     // to maintained in sorted order for intersections. Since it's private, we only need 
@@ -46,6 +44,7 @@ pub struct IntVecSlice<'a> {
 }
 
 // A set of sets encoded as bitmaps.
+#[derive(Clone, Debug)]
 struct BitMaps {
     bitmap_data: bitvec::vec::BitVec, // Concatenation of bit vectors
     individual_length: usize, // Length of each bitmap in bitmap_data
@@ -130,28 +129,6 @@ impl crate::coloring_interface::ColorSetOwned for OwnedSparseDense {
     }
 }
 
-impl OwnedSparseDense {
-
-    // n_colors-1 is the maximum color id supported by this set
-    pub fn new(elements: impl Iterator<Item = usize>, n_colors: usize) -> Self {
-        let elements: Vec<usize> = elements.collect();
-        let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
-        if is_dense_set(elements.len(), bits_per_color, n_colors) {
-            let mut bv = bitvec![0; n_colors];
-            for color in elements.iter() {
-                bv.set(color, true);
-            }
-            OwnedSparseDense::Dense(bv)
-        } else {
-            let mut iv = IntVector::new(bits_per_color).unwrap();
-            for color in elements.iter() {
-                iv.push(color as u64);
-            }
-            OwnedSparseDense::Sparse(iv)
-        }
-    }
-}
-
 impl<'a> crate::coloring_interface::ColorSetView<'a> for SparseDenseColorSetView<'a> {
     type Iter = ColorSetViewIterator<'a>;
 
@@ -204,7 +181,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         for set in sets {
             buf.clear();
             buf.extend(set);
-            if is_dense_set(buf.len(), color_id_bit_width, n_colors) {
+            if is_dense_formula(buf.len(), color_id_bit_width, n_colors) {
                 let mut bm = bitvec![0; n_colors];
                 for color in buf.iter() {
                     bm.set(color, true);
@@ -299,9 +276,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 *a_bv &= *b_bv;
 
                 // Check if we need to re-encode as sparse
-                if is_dense_set(a_bv.count_ones(), self.sparse_bit_width(), self.n_colors) {
+                if self.is_dense(a_bv.count_ones()) {
                     // Re-encode
-                    *a = OwnedSparseDense::new(a_bv.iter_ones(), self.n_colors);
+                    *a = self.new_owned_set(a_bv.iter_ones());
                 }
             },
             (OwnedSparseDense::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
@@ -362,7 +339,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut elements: Vec<usize> = a.iter().chain(b.iter()).collect();
         elements.sort_unstable();
         elements.dedup();
-        *a = OwnedSparseDense::new(elements.into_iter(), self.n_colors);
+        *a = self.new_owned_set(elements.into_iter());
     }
 }
 
@@ -371,6 +348,15 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
  * Implementation of non-trait functions
  *
  */
+
+ // Returns true if a set with n_elements elements should be encoded as a sparse
+ // set with integer bit width sparse_bit_width, or as a dense set supporting up
+ // to n_colors.
+fn is_dense_formula(n_elements: usize, sparse_bit_width: usize, n_colors: usize) -> bool {
+    let intvec_size = n_elements * sparse_bit_width;
+    let bitmap_size = n_colors;
+    bitmap_size <= intvec_size
+}
 
 impl SparseDenseStorage {
 
@@ -387,6 +373,31 @@ impl SparseDenseStorage {
     fn sparse_bit_width(&self) -> usize {
         self.sparse_sets.concat.width()
     }
+
+    fn is_dense(&self, n_elements: usize) -> bool {
+        is_dense_formula(n_elements, self.sparse_bit_width(), self.n_colors)
+    }
+
+    // n_colors-1 is the maximum color id supported by this set
+    pub fn new_owned_set(&self, elements: impl Iterator<Item = usize>) -> OwnedSparseDense {
+        let n_colors = self.n_colors;
+        let elements: Vec<usize> = elements.collect();
+        let bits_per_color = n_colors.next_power_of_two().trailing_zeros() as usize;
+        if self.is_dense(elements.len()) {
+            let mut bv = bitvec![0; n_colors];
+            for color in elements.iter() {
+                bv.set(color, true);
+            }
+            OwnedSparseDense::Dense(bv)
+        } else {
+            let mut iv = IntVector::new(bits_per_color).unwrap();
+            for color in elements.iter() {
+                iv.push(color as u64);
+            }
+            OwnedSparseDense::Sparse(iv)
+        }
+    }
+
 }
 
 impl SortedIntVecs {
@@ -467,14 +478,10 @@ impl BitMaps {
     }
 }
 
-fn is_dense_set(n_elements: usize, bits_per_color: usize, n_colors: usize) -> bool {
-    let intvec_size = n_elements * bits_per_color;
-    let bitmap_size = n_colors;
-    bitmap_size <= intvec_size
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use crate::coloring_interface::*;
     use super::*;
 
