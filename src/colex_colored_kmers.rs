@@ -50,7 +50,6 @@ impl ColexToColorSetMap {
     fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, color_bitmap: &bitvec::vec::BitVec, sets: &HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>, n_colors: usize, n_threads: usize) -> Self {
         log::info!("Building mapping from colex to color set id");
 
-
         let get_colorset_fn = |colex| &color_bitmap[colex*n_colors..(colex+1)*n_colors];
         let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, lcs, get_colorset_fn, n_threads);
 
@@ -174,6 +173,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     pub fn new_from_colored_unitig_dump(
         sbwt: SbwtIndex<SubsetMatrix>, 
         lcs: LcsArray, 
+        sample_distance: usize,
+        n_threads: usize,
         metadata_dump: impl std::io::BufRead, 
         unitig_dump: impl std::io::BufRead + Send + 'static, 
         color_dump: impl std::io::BufRead) 
@@ -183,15 +184,31 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let metadata = index_import::read_index_dump_metadata(metadata_dump);
 
         log::info!("Reading Distinct color sets");
-        // TODO: read into color set storage
-        let distinct_color_sets = index_import::read_color_sets(color_dump, metadata.num_color_sets, metadata.num_colors); 
+
+        // TODO: Read directly into ColorSetStorage format without storing to bitmap
+        let bitmap = index_import::read_color_sets(color_dump, metadata.num_color_sets, metadata.num_colors); 
 
         log::info!("Building colex to color set id mapping");
-        let colex_to_color_set_id = index_import::build_colex_to_color_set_mapping(unitig_dump, &sbwt, &lcs);
+        let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
+        let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
+        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+        while let Some(rec) = reader.read_next().unwrap() {
+            let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
+            for (start, (match_len, colex_range)) in index.matching_statistics_iter(rec.seq).skip(sbwt.k()-1).enumerate() {
+                if match_len == sbwt.k() {
+                    assert_eq!(colex_range.len(), 1);
+                    colex_to_color_set_id[colex_range.start] = color_set_id;
+                } else {
+                    panic!( // TODO: return error instead
+                        "Error reading unitigs from dump: k-mer {} not found in SBWT", 
+                        String::from_utf8_lossy(&rec.seq[start..start+sbwt.k()])
+                    );
+                }
+            }
+        }
 
-        // TODO: color set sampling
+        Self::new(Arc::new(sbwt), lcs, &bitmap, metadata.num_colors, sample_distance, n_threads)
 
-        Self { kmers: sbwt_index, lcs, distinct_color_sets, colex_to_color_set_id, empty_set: bitvec![0; metadata.num_colors], n_colors: metadata.num_colors}
     }
 
 
