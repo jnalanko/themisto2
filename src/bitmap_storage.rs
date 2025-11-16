@@ -12,6 +12,7 @@ use crate::coloring_interface;
  * 
  */
 
+#[derive(Debug)]
 pub struct BitmapStorage {
     pub bitmap: BitVec, // Concatenation of distinct color sets
     pub n_colors: usize,
