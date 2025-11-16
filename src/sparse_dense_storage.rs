@@ -297,7 +297,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             (OwnedSparseDense::Dense(a_bv), SparseDenseColorSetView::Dense(b_bv)) => {
                 // Both dense -> bitwise AND
                 *a_bv &= *b_bv;
-                // Todo: re-encode into sparse if the intersection is small? 
+
+                // Check if we need to re-encode as sparse
+                if is_dense_set(a_bv.count_ones(), self.sparse_bit_width(), self.n_colors) {
+                    // Re-encode
+                    *a = OwnedSparseDense::new(a_bv.iter_ones(), self.n_colors);
+                }
             },
             (OwnedSparseDense::Dense(a_bv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
                 // Intersection of Sparse and Dense will be Sparse   
@@ -377,6 +382,10 @@ impl SparseDenseStorage {
             let set_idx = self.is_dense_marks.rank_zero(id);
             SparseDenseColorSetView::Sparse(self.sparse_sets.get(set_idx))
         }
+    }
+
+    fn sparse_bit_width(&self) -> usize {
+        self.sparse_sets.concat.width()
     }
 }
 
