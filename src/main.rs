@@ -157,6 +157,12 @@ pub enum Subcommands {
         #[arg(help = "Index text dump file prefix, as written by Fulgor 4.0.0", long = "color-dump-prefix", short = 'c', required = true)]
         color_dump_prefix: PathBuf,
 
+        #[arg(long = "index-type")]
+        index_type: ColoringType,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
+        sample_distance: usize,
+
         #[arg(long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
@@ -448,22 +454,22 @@ fn main() {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
         },
-        Subcommands::Import { sbwt: sbwt_path, color_dump_prefix, out: out_path, n_threads, temp_dir} => {
+        Subcommands::Import { sbwt: sbwt_path, color_dump_prefix, out: out_path, n_threads, temp_dir, index_type, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
             let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
             let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
 
             // Try to open to check that the files are found
-            BufReader::new(File::open(unitig_filename).unwrap());
-            BufReader::new(File::open(color_sets_filename).unwrap());
-            BufReader::new(File::open(metadata_filename).unwrap());
+            BufReader::new(File::open(&unitig_filename).unwrap());
+            BufReader::new(File::open(&color_sets_filename).unwrap());
+            BufReader::new(File::open(&metadata_filename).unwrap());
 
             log::info!("Reading metadata from {}", metadata_filename);
-            let metadata = index_import::read_index_dump_metadata(BufReader::new(File::open(metadata_filename).unwrap()));
+            let metadata = index_import::read_index_dump_metadata(BufReader::new(File::open(&metadata_filename).unwrap()));
 
             let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
                 log::info!("Loading SBWT from {}", sbwt_path.display());
-                let sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
+                let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
                 let sbwt::SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
                 if sbwt.k() != metadata.k {
                     log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
@@ -476,7 +482,7 @@ fn main() {
             } else {
                 log::info!("No precomputed SBWT given. Building the SBWT and the LCS array");
                 let input_paths: Vec<PathBuf> = 
-                    BufReader::new(File::open(unitig_filename).unwrap())
+                    BufReader::new(File::open(&unitig_filename).unwrap())
                     .lines().map(|f| PathBuf::from(f.unwrap())).collect();
 
                 let input_stream = io::ChainedInputStream::new(input_paths.clone());
@@ -493,10 +499,26 @@ fn main() {
                 (sbwt, lcs.unwrap())
             };
 
-            let mut out = BufWriter::new(File::create(out_path).unwrap());
+            let mut out = BufWriter::new(File::create(&out_path).unwrap());
 
-            let index = colored_kmers::ColoredKmers::new_from_new_themisto_index_dump(sbwt_in, metadata_in, unitigs_in, color_sets_in, 0);
-            index.serialize(&mut out);
+            let unitig_dump = BufReader::new(File::open(&unitig_filename).unwrap());
+            let color_dump = BufReader::new(File::open(&color_sets_filename).unwrap());
+            let metadata_dump = BufReader::new(File::open(&metadata_filename).unwrap());
+
+            match index_type {
+                ColoringType::Bitmaps => {
+                    let index = CompactColexKmers::<BitmapStorage>::new_from_colored_unitig_dump(
+                        sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
+                    log::info!("Serializing bitmap index to {}", out_path.display());
+                    write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
+                },
+                ColoringType::SparseDense => {
+                    let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
+                        sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
+                    log::info!("Serializing sparse-dense index to {}", out_path.display());
+                    write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+                },
+            }
         },
     }
 /*
