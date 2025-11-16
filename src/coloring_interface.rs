@@ -115,6 +115,10 @@ mod tests {
             }
         }
         
+        fn n_sets(&self) -> usize {
+            self.v.len()
+        }
+        
         fn get_empty_set(&self) -> Self::OwnedSet {
             vec![]
         }
@@ -166,7 +170,7 @@ mod tests {
     }
 
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Hash, Eq, PartialEq)]
     pub struct SliceColorSet<'storage> {
         slice: &'storage [usize],
     }
