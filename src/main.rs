@@ -8,6 +8,8 @@ use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
+use crate::colex_colored_kmers::hash_and_encode_distinct_sets;
+
 mod EM;
 mod bitmap_storage;
 mod index_import;
@@ -177,10 +179,24 @@ pub enum Subcommands {
 fn build_coloring<CSS: ColorSetStorage>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
+    let n_colors = input_paths.len();
     log::info!("Building uncompressed color bitmap");
-    let color_storage = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
+    // Todo: do not go through bitmap storage
+    let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
+
+    // Compress to CSS format
+    let bm = &colex_to_bitset.bitmap;
+    let iter_of_iters = (0..sbwt.n_sets()).into_iter().map(|colex| bm[colex*n_colors..(colex+1)*n_colors].iter_ones());
+    let colex_to_css = CSS::new(iter_of_iters, n_colors);
+
+    drop(colex_to_bitset); // Free memory
+
+    let css_set_to_id = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
+    let colex_to_id: Vec<usize> = vec![sbwt.n_sets(); 0];
+
+    drop(bitmap_storage); // Free memory
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, &color_storage.bitmap, color_storage.n_colors, sample_distance, n_threads)
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_color_set_id, storage, n_colors, sample_distance, n_threads);
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.

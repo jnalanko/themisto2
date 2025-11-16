@@ -742,31 +742,25 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexKmer
 
 
 
-/// Input: 
-/// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
-///   color j is present in set i.
-/// 
 /// Output:
-/// - Distinct color sets encoded as something implementing ColorSetStorage
+/// - Distinct color sets encoded as ColorSetStorage
 /// - HashMap from color set to its index in ColorSets
-fn hash_and_encode_distinct_sets<CSS: ColorSetStorage>(bm: &bitvec::vec::BitVec, n_colors: usize) -> (CSS, HashMap::<BitKey<'_>, usize, BuildHasherDefault::<FxHasher>>) {
-    assert_eq!(bm.len() % n_colors, 0);
-    let n_sets = bm.len() / n_colors;
+pub fn hash_and_encode_distinct_sets<'a, CSS: ColorSetStorage>(colex_to_set: &'a CSS, n_colors: usize) -> (CSS, HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>) {
+    let n_sets = colex_to_set.n_sets();
 
     log::info!("Hashing distinct color sets");
 
-    let mut distinct_sets = HashMap::<BitKey, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+    let mut distinct_sets = HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
     let mut distinct_set_colex_ranks = Vec::<usize>::new();
     let bar = indicatif::ProgressBar::new(n_sets as u64);
     for colex in 0..n_sets {
-        let set = &bm[colex*n_colors .. (colex+1)*n_colors];
-        let key = BitKey{bits: set};
+        let key = colex_to_set.get_set_view(colex);
         if !distinct_sets.contains_key(&key) {
             distinct_sets.insert(key, distinct_sets.len());
             distinct_set_colex_ranks.push(colex);
         }
-        if colex % 100 == 0 {
-            bar.inc(100);
+        if colex % 1000 == 0 {
+            bar.inc(1000);
         }
     }
     bar.finish();

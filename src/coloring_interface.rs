@@ -10,7 +10,7 @@ pub trait ColorSetStorage {
 
     // A generic associated color set view type. We could have e.g.
     // ColorSetStorage<BitMapColorSet<'a>> and ColorSetStorage<VecColorSet<'a>>.
-    type SetView<'a>: ColorSetView<'a> + Clone where Self: 'a;
+    type SetView<'a>: ColorSetView<'a> + Clone + Eq + std::hash::Hash where Self: 'a;
 
     // An owned version of SetView
     type OwnedSet: ColorSetOwned + Clone;
@@ -22,6 +22,7 @@ pub trait ColorSetStorage {
     // The color ids are in the range 0..n_colors.
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self;
 
+    fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
     fn get_full_set(&self) -> Self::OwnedSet;
 
