@@ -783,10 +783,10 @@ mod tests {
     use std::sync::Arc;
 
     use jseqio::seq_db::SeqDB;
-    use sbwt::BitPackedKmerSortingMem;
+    use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
     use simple_sds_sbwt::ops::BitVec;
 
-    use crate::{bitmap_storage::build_from_seq_dbs, coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
+    use crate::{bitmap_storage::build_from_seq_dbs, build_coloring, colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::{ColorSetStorage, ColorSetView}, sparse_dense_storage::SparseDenseStorage};
 
     use super::{CompactColexKmers, merge_compact_colorings};
 
@@ -805,6 +805,23 @@ mod tests {
                 _ => panic!("Impossible")
             }
         }).collect()
+    }
+
+    fn build_color_sets<CSS: ColorSetStorage>(sbwt1: &SbwtIndex<SubsetMatrix>, lcs1: &LcsArray, dbs1: Vec<SeqDB>, n_threads: usize) 
+    -> (Vec<usize>, CSS){
+        let n_colors_1 = dbs1.len();
+        let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
+
+        let iter_of_iters_1 = (0..sbwt1.n_sets()).into_iter().map(|colex| bms1.get_set_view(colex).iter());
+        let colex_to_css_1 = CSS::new(iter_of_iters_1, n_colors_1);
+
+        let (distinct_css_1, set_to_id_1) = hash_and_encode_distinct_sets(&colex_to_css_1, n_colors_1);
+        let css_1_ref = &distinct_css_1;
+        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(move |colex| {
+            set_to_id_1[&css_1_ref.get_set_view(colex)]
+        }).collect(); 
+
+        (colex_to_id, distinct_css_1)
     }
 
     #[test]
@@ -887,15 +904,16 @@ mod tests {
             let lcs2 = lcs2.unwrap();
             let lcs_both = lcs_both.unwrap();
 
-            let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
-            let bms2 = build_from_seq_dbs(dbs2, &sbwt2, &lcs2, n_threads);
-            let bms_both = build_from_seq_dbs(dbs_both, &sbwt_both, &lcs_both, n_threads);
 
             let sample_distance = 3;
 
-            let ccc1 = CompactColexKmers::<SparseDenseStorage>::new(sbwt1, lcs1, &bms1.bitmap, input_seqs_1.len(), sample_distance, n_threads);
-            let ccc2 = CompactColexKmers::<SparseDenseStorage>::new(sbwt2, lcs2, &bms2.bitmap, input_seqs_2.len(), sample_distance, n_threads);
-            let ccc_both = CompactColexKmers::<SparseDenseStorage>::new(sbwt_both, lcs_both, &bms_both.bitmap, all_input_seq_slices.len(), sample_distance, n_threads);
+            let (colex_to_id_1, storage_1) = build_color_sets::<SparseDenseStorage>(&sbwt1, &lcs1, dbs1, n_threads); 
+            let (colex_to_id_2, storage_2) = build_color_sets::<SparseDenseStorage>(&sbwt2, &lcs2, dbs2, n_threads); 
+            let (colex_to_id_both, storage_both)= build_color_sets::<SparseDenseStorage>(&sbwt_both, &lcs_both, dbs_both, n_threads); 
+            
+            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_to_id_1, storage_1, input_seqs_1.len(), sample_distance, n_threads);
+            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_to_id_2, storage_2, input_seqs_2.len(), sample_distance, n_threads);
+            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_to_id_both, storage_both, input_seqs_1.len() + input_seqs_2.len(), sample_distance, n_threads);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;

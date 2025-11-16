@@ -186,8 +186,7 @@ fn build_coloring<CSS: ColorSetStorage>(
     let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
 
     // Compress to CSS format
-    let bm = &colex_to_bitset.bitmap;
-    let iter_of_iters = (0..sbwt.n_sets()).into_iter().map(|colex| bm[colex*n_colors..(colex+1)*n_colors].iter_ones());
+    let iter_of_iters = (0..sbwt.n_sets()).into_iter().map(|colex| colex_to_bitset.get_set_view(colex).iter());
     let colex_to_css = CSS::new(iter_of_iters, n_colors);
 
     drop(colex_to_bitset); // Free memory
