@@ -26,7 +26,11 @@ pub struct SparseDenseStorage{
 // A set of lists of integers, stored in concatenated form. Each
 // list is assumed to be sorted.
 struct SortedIntVecs {
-    concat: IntVector, // Concatenation of IntVecs
+    // Concatenation of IntVecs. Better keep this private because the sets need
+    // to maintained in sorted order for intersections. Since it's private, we only need 
+    // to make sure that code in this module respects that. Users can get
+    // immutable views to this via IntVecSlice.
+    concat: IntVector, 
 
     // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
     // exclusive end of the i-th vector.
