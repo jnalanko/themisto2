@@ -822,9 +822,8 @@ mod tests {
         let colex_to_css_1 = CSS::new(iter_of_iters_1, n_colors_1);
 
         let (distinct_css_1, set_to_id_1) = hash_and_encode_distinct_sets(&colex_to_css_1, n_colors_1);
-        let css_1_ref = &distinct_css_1;
-        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(move |colex| {
-            set_to_id_1[&css_1_ref.get_set_view(colex)]
+        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(|colex| {
+            set_to_id_1[&colex_to_css_1.get_set_view(colex)]
         }).collect(); 
 
         (colex_to_id, distinct_css_1)
