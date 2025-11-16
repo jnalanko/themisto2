@@ -202,8 +202,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let distinct_bitmap = index_import::read_color_sets(color_dump, metadata.num_color_sets, metadata.num_colors); 
         let n_sets = metadata.num_color_sets;
         let n_colors = metadata.num_colors;
-        let distinct_css = CSS::new((0..n_sets).into_iter().map(|id| {
-            distinct_bitmap[id*n_sets..(id+1)*n_sets].iter_ones()
+        let distinct_css = CSS::new((0..n_sets).map(|id| {
+            distinct_bitmap[id*n_colors..(id+1)*n_colors].iter_ones()
         }), n_colors);
 
         Self::new(Arc::new(sbwt), lcs, colex_to_color_set_id, distinct_css, metadata.num_colors, sample_distance, n_threads)
