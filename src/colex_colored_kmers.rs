@@ -1,7 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
-use sbwt::MergeInterleaving;
+use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
@@ -182,19 +182,29 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
         let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
-        while let Some(rec) = reader.read_next().unwrap() {
+        while let Some(rec) = reader.read_next_mut().unwrap() {
+
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
-            for (start, (match_len, colex_range)) in index.matching_statistics_iter(rec.seq).skip(sbwt.k()-1).enumerate() {
-                if match_len == sbwt.k() {
-                    assert_eq!(colex_range.len(), 1);
-                    colex_to_color_set_id[colex_range.start] = color_set_id;
-                } else {
-                    panic!( // TODO: return error instead
-                        "Error reading unitigs from dump: k-mer {} not found in SBWT", 
-                        String::from_utf8_lossy(&rec.seq[start..start+sbwt.k()])
-                    );
+
+            // Function to set color ids of all k-mers in this unitig
+            let mut set_ids_fn = |seq: &[u8]| {
+                for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(sbwt.k()-1).enumerate() {
+                    if match_len == sbwt.k() {
+                        assert_eq!(colex_range.len(), 1);
+                        colex_to_color_set_id[colex_range.start] = color_set_id;
+                    } else {
+                        panic!( // TODO: return error instead
+                            "Error reading unitigs from dump: k-mer {} not found in SBWT", 
+                            String::from_utf8_lossy(&seq[start..start+sbwt.k()])
+                        );
+                    }
                 }
-            }
+            };
+
+            // Process both forward and reverse complement directions
+            set_ids_fn(rec.seq);
+            reverse_complement_in_place(rec.seq);
+            set_ids_fn(rec.seq);
         }
 
         log::info!("Reading distinct color sets");
