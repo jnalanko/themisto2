@@ -196,7 +196,7 @@ fn build_coloring<CSS: ColorSetStorage>(
     let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).into_iter().map(|colex| {
         set_to_id[&distinct_css.get_set_view(colex)]
     }).collect(); 
-    drop(set_to_id);
+    drop(set_to_id); // Free memory
     drop(colex_to_css); // Free memory
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
