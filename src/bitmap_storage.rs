@@ -17,7 +17,7 @@ pub struct BitmapStorage {
     pub n_colors: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct BitSetView<'storage> {
     bs: &'storage BitSlice<usize, Lsb0>,
 }
@@ -86,6 +86,8 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         BitSetView{bs: &self.bitmap[id*self.n_colors..(id+1)*self.n_colors]}
     }
 
+    
+
     fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
         let mut bitmap = bitvec![];
         let empty_set = bitvec![0; n_colors];
@@ -140,6 +142,10 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
         a.bv |= b.bs;
+    }
+    
+    fn n_sets(&self) -> usize {
+        self.bitmap.len() / self.n_colors
     }
 
     
