@@ -193,8 +193,9 @@ fn build_coloring<CSS: ColorSetStorage>(
 
     let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
     let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).into_iter().map(|colex| {
-        set_to_id[&distinct_css.get_set_view(colex)]
+        set_to_id[&colex_to_css.get_set_view(colex)]
     }).collect(); 
+
     drop(set_to_id); // Free memory
     drop(colex_to_css); // Free memory
 

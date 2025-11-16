@@ -36,7 +36,7 @@ struct SortedIntVecs {
     ends: Vec<usize>, 
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct IntVecSlice<'a> {
     vec: &'a IntVector,
     start: usize,
@@ -58,7 +58,7 @@ pub enum OwnedSparseDense {
 
 // This enum is only for passing references to individual sets around. The actual
 // sets are stored in concatenated form somewhere else in memory. 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub enum SparseDenseColorSetView<'a> {
     Dense(&'a BitSlice),
     Sparse(IntVecSlice<'a>),
