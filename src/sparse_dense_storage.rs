@@ -79,7 +79,6 @@ pub struct ColorSetViewIterator<'a> {
 impl<'a> Iterator for ColorSetViewIterator<'a> {
     type Item = usize;
 
-    #[allow(clippy::bool_comparison)]
     fn next(&mut self) -> Option<Self::Item> {
         match &self.set {
             SparseDenseColorSetView::Dense(bit_slice) => {
