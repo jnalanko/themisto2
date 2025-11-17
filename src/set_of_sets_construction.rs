@@ -21,12 +21,12 @@ fn construct(
     // Build fingerprints
     let mut A: Vec<u128> = vec![0; max_n_sets]; // Fingerprints
     for new in element_generator {
-        let c = new.element as u64;
+        let c = new.element as u128;
         A[new.set_id] = (A[new.set_id] + mod_pow(b, c, p)) % p;
     } 
 
     // Mark the lowest set id where each distinct fingerprint occurs 
-    let mut distinct_fingerprints = HashSet::<u64>::new();
+    let mut distinct_fingerprints = HashSet::<u128>::new();
     let mut marked_sets = bitvec::bitvec![0; max_n_sets];
     for (set_id, fingerprint) in A.into_iter().enumerate() {
         if !distinct_fingerprints.contains(&fingerprint) {
@@ -47,7 +47,7 @@ fn construct(
     distinct_sets
 }
 
-fn mod_pow(mut base: u128, mut exp: u64, modulo: u128) -> u64 {
+fn mod_pow(mut base: u128, mut exp: u128, modulo: u128) -> u128 {
     let mut result = 1_u128;
     base %= modulo;
 
@@ -60,13 +60,13 @@ fn mod_pow(mut base: u128, mut exp: u64, modulo: u128) -> u64 {
         exp >>= 1;
     }
 
-    result
+    result as u128
 }
 
 /// Compute (a * b) % m over u128.
 /// Uses the ancient egyptian multiplication algorithm:
 /// https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication 
-/// IMPORTANT: assumes a < m and b < m.
+/// IMPORTANT: assumes a < m and b < m (and of course m > 0)
 pub fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
     debug_assert!(m > 0);
     debug_assert!(a < m);
@@ -108,6 +108,13 @@ fn add_mod(r: u128, a: u128, m: u128) -> u128 {
 #[cfg(test)]
 mod tests{
     use super::*;
+
+    #[test]
+    fn modular_arithmetic() {
+        // Prime close to 2^128
+        let p = 340282366920938463463374607431768211297 as u128;
+        assert_eq!(mod_pow(5, 128, p), 254180508483831189725652759319465601041);
+    }
 
     #[test]
     fn set_of_sets_test() {
