@@ -87,7 +87,7 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         BitSetView{bs: &self.bitmap[id*self.n_colors..(id+1)*self.n_colors]}
     }
 
-    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
+    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Box<Self> {
         let mut bitmap = bitvec![];
         let empty_set = bitvec![0; n_colors];
         let mut id = 0_usize;
@@ -100,7 +100,7 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
             id += 1;
         }
 
-        Self{bitmap, n_colors}
+        Box::new(Self{bitmap, n_colors})
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {

@@ -188,7 +188,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         OwnedSparseDense::Dense(bitvec![1; self.n_colors])
     }
     
-    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
+    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Box<Self> {
         log::info!("Encoding color sets");
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
@@ -227,12 +227,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
         is_dense_marks.enable_rank();
 
-        SparseDenseStorage {
+        Box::new(SparseDenseStorage {
             is_dense_marks, 
             sparse_sets,
             dense_sets,
             n_colors
-        }
+        })
     }
 
     fn serialize<W: std::io::Write>(&self, out: &mut W) {

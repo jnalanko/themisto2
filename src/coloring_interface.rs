@@ -206,7 +206,7 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
+        fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Box<Self> {
             while let Some(set) = sets.next() {
                 for elem in set {
                     println!("{}", elem);

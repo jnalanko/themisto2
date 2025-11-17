@@ -213,6 +213,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Reading distinct color sets");
         let color_set_stream = index_import::ColorSetDumpStream::new(color_dump);
         let distinct_css = CSS::new(color_set_stream, n_colors);
+        let distinct_css = *distinct_css; // Unbox
 
         Self::new(Arc::new(sbwt), lcs, colex_to_color_set_id, distinct_css, metadata.num_colors, sample_distance, n_threads)
 
@@ -236,7 +237,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             sampling: unitig_samples,
             color_set_ids,
         };
-        Self {sbwt, lcs, sets, map: colex_map}
+        Self {sbwt, lcs, sets: *sets, map: colex_map}
     }
 
     pub fn colex_to_set_id(&self, colex: usize) -> usize {
@@ -659,7 +660,7 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
         }
     });
 
-    CSS::new(iter_of_iters, n_colors_1 + n_colors_2)
+    *CSS::new_from_iter_of_iters(iter_of_iters, n_colors_1 + n_colors_2)
 
 }
 
@@ -785,9 +786,9 @@ pub fn hash_and_encode_distinct_sets<'a, CSS: ColorSetStorage>(colex_to_set: &'a
         colex_to_set.get_set_view(colex).iter()
     });
 
-    let colorsets = CSS::new(color_sets_iterator, n_colors);
+    let colorsets = CSS::new_from_iter_of_iters(color_sets_iterator, n_colors);
 
-    (colorsets, distinct_sets)
+    (*colorsets, distinct_sets)
 
 }
 
@@ -826,7 +827,7 @@ mod tests {
         let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
 
         let iter_of_iters_1 = (0..sbwt1.n_sets()).into_iter().map(|colex| bms1.get_set_view(colex).iter());
-        let colex_to_css_1 = CSS::new(iter_of_iters_1, n_colors_1);
+        let colex_to_css_1 = *CSS::new_from_iter_of_iters(iter_of_iters_1, n_colors_1);
 
         let (distinct_css_1, set_to_id_1) = hash_and_encode_distinct_sets(&colex_to_css_1, n_colors_1);
         let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(|colex| {
