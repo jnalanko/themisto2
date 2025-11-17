@@ -21,7 +21,7 @@ pub trait ColorSetStorage {
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
 
     // A fully generic way to construct the storage from a stream of color sets.
-    // Returning box so that I can provide the method new_form_iter_of_iters
+    // Returning box so that I can provide the method new_from_iter_of_iters
     // because there the size of the return value must be known at compile time.
     fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>;
 
@@ -52,7 +52,8 @@ pub trait ColorSetStorage {
     // Set union: a := a ∪ b
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
 
-    // Provided method: new from an iterator that gives iterators to color sets
+    // Provided method: new from an iterator that gives iterators to color sets.
+    // While iterating, stores the color sets in a reused local buffer.
     fn new_from_iter_of_iters<
         InnerIter: Iterator<Item = usize>, 
         OuterIter: Iterator<Item = InnerIter>>
