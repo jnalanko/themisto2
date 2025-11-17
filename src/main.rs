@@ -19,6 +19,7 @@ mod coloring_interface;
 mod sparse_dense_storage;
 mod io;
 mod build_from_ggcat;
+mod set_of_sets_construction;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
