@@ -2,8 +2,10 @@ use std::io::BufRead;
 
 use bitvec::prelude::*;
 use bitvec::vec::BitVec;
+use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
+use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
@@ -21,8 +23,18 @@ pub fn get_color_set_id_from_fasta_header(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
+/*
+pub struct ColorSetStream<B: BufRead> {
+    input: B,
+    set_buf: Vec<u8>,
+}
+*/
+
 // Parses the set and pushed it to `push_set_to`. Returns the color set id.
 pub fn parse_color_set_line(line: &String, push_set_to: &mut Vec<usize>) -> usize {
+
+    let mut test = Vec::<usize>::new();
+    let mut test2: streaming_iterator::Convert<std::slice::Iter<'_, usize>> = streaming_iterator::convert(test.iter());
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 

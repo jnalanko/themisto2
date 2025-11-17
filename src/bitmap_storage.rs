@@ -3,9 +3,8 @@ use std::{ops::DerefMut, path::Path, sync::{Arc, Mutex}};
 use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
-use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
 
-use crate::coloring_interface;
+use crate::coloring_interface::{self, ColorSetStream};
 
 /*
  *
@@ -88,16 +87,14 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         BitSetView{bs: &self.bitmap[id*self.n_colors..(id+1)*self.n_colors]}
     }
 
-    
-
-    fn new(mut sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self {
+    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
         let mut bitmap = bitvec![];
         let empty_set = bitvec![0; n_colors];
         let mut id = 0_usize;
 
-        while let Some(set) = sets.next_mut() {
+        while let Some(set) = sets.next() {
             bitmap.extend_from_bitslice(&empty_set);
-            while let Some(color) = set.next() {
+            for color in set {
                 bitmap.set(id*n_colors + color, true);
             }
             id += 1;

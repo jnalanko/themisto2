@@ -219,7 +219,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let mut line = String::new();
         let mut set_buf = Vec::<usize>::new();
         let mut iteration_count = 0_usize;
-        let iter_of_iters = std::iter::from_fn(|| {
+        let iter_of_iters = streaming_iterator::from_fn(|| {
             set_buf.clear();
             line.clear();
             if color_dump.read_line(&mut line).unwrap() > 0 {
@@ -232,7 +232,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // iteration. If we borrow, that is not the case because we
                 // clear the set at the start of each iteration. A solution to this
                 // would be to use a streaming iterator trait at CSS:new(). TODO.
-                Some(set_buf.clone().into_iter())
+                Some(streaming_iterator::convert(set_buf.iter()))
             } else {
                 None
             }

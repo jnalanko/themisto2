@@ -1,9 +1,9 @@
+// This file described an interface to a color set storage.
+
 // There are two traits for color sets: one where the underlying data is borrows, and one
 // where it is owned. They are separate because abstracting over ownership in Rust is 
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
-
-use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
 
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
@@ -20,10 +20,7 @@ pub trait ColorSetStorage {
     // Gives a set with a lifetime linked to the lifetime of the &self borrow.
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
 
-    // Takes an iterator of iterators: Each inner iterator iterates the elements of one color set.
-    // The color ids are in the range 0..n_colors. The outer iterator gives mutable elements because
-    // the inner iterators will be mutated when iterating.
-    fn new(sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self;
+    fn new(sets: impl ColorSetStream, n_colors: usize) -> Self;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
@@ -51,6 +48,12 @@ pub trait ColorSetStorage {
 
     // Set union: a := a ∪ b
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
+}
+
+pub trait ColorSetStream {
+
+    // Returns None when done
+    fn next(&mut self) -> Option<&[usize]>;
 }
 
 // A color set view that does not own the data, but can return an
@@ -131,9 +134,9 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new(mut sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self {
-            while let Some(set) = sets.next_mut() {
-                while let Some(elem) = set.next() {
+        fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
+            while let Some(set) = sets.next() {
+                while let Some(elem) = set.iter() {
                     println!("{}", elem);
                 }
             }

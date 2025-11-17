@@ -3,9 +3,8 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
 use bitvec::bitvec;
-use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
 
-use crate::coloring_interface::{ColorSetOwned, ColorSetView};
+use crate::coloring_interface::{ColorSetOwned, ColorSetStream, ColorSetView};
 
 /*
  *
@@ -189,7 +188,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         OwnedSparseDense::Dense(bitvec![1; self.n_colors])
     }
     
-    fn new(mut sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self {
+    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Self {
         log::info!("Encoding color sets");
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
@@ -199,11 +198,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut buf = Vec::<usize>::new();
         let mut n_sets_total = 0_usize;
-        while let Some(set) = sets.next_mut() {
+        while let Some(set) = sets.next() {
             buf.clear();
-            while let Some(color) = set.next() {
-                buf.push(*color);
-            }
+            buf.extend_from_slice(set);
             if is_dense_formula(buf.len(), color_id_bit_width, n_colors) {
                 let mut bm = bitvec![0; n_colors];
                 for color in buf.iter() {
@@ -509,15 +506,30 @@ impl BitMaps {
 mod tests {
     use std::collections::HashSet;
 
-    use streaming_iterator::convert;
-
     use crate::coloring_interface::*;
     use super::*;
+
+    struct MyColorSetStream {
+        sets: Vec<Vec<usize>>,
+        pos: usize,
+    }
+
+    impl ColorSetStream for MyColorSetStream {
+        fn next(&mut self) -> Option<&[usize]> {
+            if self.pos == self.sets.len() {
+                None
+            } else {
+                let s = &self.sets[self.pos];
+                self.pos += 1;
+                Some(s)
+            }
+        }
+    }
 
     #[test]
     fn test_sparse_dense_storage() {
         let n_colors = 1000;
-        let sets = [
+        let sets = vec![
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Sparse
             (100..900).collect(), // Dense
             (0..n_colors).collect(), // Dense
@@ -536,7 +548,7 @@ mod tests {
         ];
 
         // convert(...) turns an interator into a streaming iterator
-        let iter_of_iter = convert(sets.iter().map(|s| convert(s.iter())));
+        let iter_of_iter = MyColorSetStream{sets: sets.clone(), pos: 0};
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
         // Serialize and load
