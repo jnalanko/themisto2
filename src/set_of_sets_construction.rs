@@ -38,7 +38,10 @@ fn construct(
     // Iterate sets again and store the marked sets
     let mut distinct_sets: Vec<Vec<usize>> = vec![vec![]; distinct_fingerprints.len()];
     for new in element_generator_again {
-        distinct_sets[new.set_id].push(new.element); 
+        if marked_sets[new.set_id] {
+            let distinct_id = marked_sets[..new.set_id].count_ones(); // TODO: rank query
+            distinct_sets[distinct_id].push(new.element); 
+        }
     }
 
     distinct_sets
@@ -57,4 +60,39 @@ fn mod_pow(mut base: u64, mut exp: u64, modulo: u64) -> u64 {
     }
 
     result
+}
+
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+
+    #[test]
+    fn set_of_sets_test() {
+        // Define some sets of sets
+        let sets = [
+            vec![0, 1, 2],
+            vec![2, 3],
+            vec![0, 1, 2], // duplicate of first set
+            vec![4],
+            vec![3, 2],    // duplicate of second set
+        ];
+
+        // Make an element generator
+        let element_generator = sets.iter().enumerate().flat_map(|(set_id, elements)| {
+            elements.iter().map(move |&element| SetElement { set_id, element })
+        });
+
+        let distinct_sets = construct(
+            element_generator.clone(),
+            element_generator,
+            sets.len(),
+            5,
+            1_000_000_007,
+              123_456_789
+        );
+
+        dbg!("Distinct sets: {:?}", distinct_sets);
+        assert!(false);
+    }
 }
