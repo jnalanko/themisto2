@@ -3,6 +3,7 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
 use bitvec::bitvec;
+use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
 
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 
@@ -188,7 +189,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         OwnedSparseDense::Dense(bitvec![1; self.n_colors])
     }
     
-    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> SparseDenseStorage {
+    fn new(mut sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self {
         log::info!("Encoding color sets");
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
@@ -198,9 +199,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut buf = Vec::<usize>::new();
         let mut n_sets_total = 0_usize;
-        for set in sets {
+        while let Some(set) = sets.next_mut() {
             buf.clear();
-            buf.extend(set);
+            while let Some(color) = set.next() {
+                buf.push(*color);
+            }
             if is_dense_formula(buf.len(), color_id_bit_width, n_colors) {
                 let mut bm = bitvec![0; n_colors];
                 for color in buf.iter() {

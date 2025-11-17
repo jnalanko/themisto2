@@ -3,6 +3,8 @@
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
+use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
+
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
 // view class. 
@@ -19,8 +21,9 @@ pub trait ColorSetStorage {
     fn get_set_view<'borrow>(&'borrow self, id: usize) -> Self::SetView<'borrow>;
 
     // Takes an iterator of iterators: Each inner iterator iterates the elements of one color set.
-    // The color ids are in the range 0..n_colors.
-    fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self;
+    // The color ids are in the range 0..n_colors. The outer iterator gives mutable elements because
+    // the inner iterators will be mutated when iterating.
+    fn new(sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
@@ -128,9 +131,9 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new(sets: impl Iterator<Item = impl Iterator<Item = usize>>, n_colors: usize) -> Self {
-            for set in sets {
-                for elem in set {
+        fn new(mut sets: impl StreamingIteratorMut<Item = impl StreamingIterator<Item = usize>>, n_colors: usize) -> Self {
+            while let Some(set) = sets.next_mut() {
+                while let Some(elem) = set.next() {
                     println!("{}", elem);
                 }
             }
