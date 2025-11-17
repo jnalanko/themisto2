@@ -22,7 +22,7 @@ fn construct(
     let mut A: Vec<u128> = vec![0; max_n_sets]; // Fingerprints
     for new in element_generator {
         let c = new.element as u128;
-        A[new.set_id] = (A[new.set_id] + mod_pow(b, c, p)) % p;
+        A[new.set_id] = add_mod(A[new.set_id], mod_pow(b, c, p), p);
     } 
 
     // Mark the lowest set id where each distinct fingerprint occurs 
