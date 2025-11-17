@@ -149,8 +149,6 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     fn n_sets(&self) -> usize {
         self.bitmap.len() / self.n_colors
     }
-
-    
 }
 
 /*

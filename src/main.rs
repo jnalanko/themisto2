@@ -8,7 +8,7 @@ use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::colex_colored_kmers::hash_and_encode_distinct_sets;
+use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::ColorSetStream};
 
 mod EM;
 mod bitmap_storage;
@@ -176,6 +176,25 @@ pub enum Subcommands {
     },
 }
 
+struct MyBitmapStream<'a> {
+    bs: &'a BitmapStorage,
+    pos: usize,
+    buf: Vec<usize>,
+}
+
+impl<'a> ColorSetStream for MyBitmapStream<'a> {
+    fn next(&mut self) -> Option<&[usize]> {
+        if self.pos == self.bs.n_sets() {
+            None
+        } else {
+            self.buf.clear(); 
+            self.buf.extend(self.bs.get_set_view(self.pos).iter());
+            self.pos += 1;
+            Some(&self.buf)
+        }
+    }
+}
+
 fn build_coloring<CSS: ColorSetStorage>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
@@ -186,8 +205,13 @@ fn build_coloring<CSS: ColorSetStorage>(
     let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
 
     // Compress to CSS format
-    let iter_of_iters = (0..sbwt.n_sets()).into_iter().map(|colex| colex_to_bitset.get_set_view(colex).iter());
-    let colex_to_css = CSS::new(iter_of_iters, n_colors);
+    let color_stream = MyBitmapStream{
+        bs: &colex_to_bitset,
+        pos: 0,
+        buf: vec![]
+    };
+
+    let colex_to_css = CSS::new(color_stream, n_colors);
 
     drop(colex_to_bitset); // Free memory
 
