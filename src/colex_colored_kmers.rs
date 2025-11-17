@@ -231,7 +231,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // requires that the values are valid for the duration of the whole
                 // iteration. If we borrow, that is not the case because we
                 // clear the set at the start of each iteration. A solution to this
-                // would be to use a straming iterator trait at CSS:new(). TODO.
+                // would be to use a streaming iterator trait at CSS:new(). TODO.
                 Some(set_buf.clone().into_iter())
             } else {
                 None
