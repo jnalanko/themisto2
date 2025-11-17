@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
+use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView, VecVecColorSetStream};
 use crate::index_import::{self, parse_color_set_line};
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
@@ -208,7 +208,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             set_ids_fn(rec.seq);
         }
 
-        let n_sets = metadata.num_color_sets;
         let n_colors = metadata.num_colors;
 
         log::info!("Reading distinct color sets");
@@ -224,9 +223,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let n_colors = 1;
         let int_bitwidth = 1;
 
-        // Iterator of iterators giving a single singleton set
-        let iter_of_iters = (0..1).map(|_| vec![0_usize].into_iter());
-        let sets = CSS::new(iter_of_iters, n_colors);
+        // The only color set is {0}
+        let sets = CSS::new(VecVecColorSetStream::new(vec![vec![0]]), n_colors);
 
         log::info!("Sampling nodes");
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| 0, n_threads);

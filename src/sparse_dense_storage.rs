@@ -509,23 +509,6 @@ mod tests {
     use crate::coloring_interface::*;
     use super::*;
 
-    struct MyColorSetStream {
-        sets: Vec<Vec<usize>>,
-        pos: usize,
-    }
-
-    impl ColorSetStream for MyColorSetStream {
-        fn next(&mut self) -> Option<&[usize]> {
-            if self.pos == self.sets.len() {
-                None
-            } else {
-                let s = &self.sets[self.pos];
-                self.pos += 1;
-                Some(s)
-            }
-        }
-    }
-
     #[test]
     fn test_sparse_dense_storage() {
         let n_colors = 1000;
@@ -548,7 +531,7 @@ mod tests {
         ];
 
         // convert(...) turns an interator into a streaming iterator
-        let iter_of_iter = MyColorSetStream{sets: sets.clone(), pos: 0};
+        let iter_of_iter = VecVecColorSetStream::new(sets.clone());
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
         // Serialize and load
