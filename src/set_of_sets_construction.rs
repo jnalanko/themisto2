@@ -1,4 +1,6 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed}};
+
+use rand_chacha::rand_core::{RngCore, SeedableRng};
 
 struct SetElement {
     set_id: usize,
@@ -11,18 +13,44 @@ fn construct(
     element_generator_again: impl Iterator<Item = SetElement>, 
     max_n_sets: usize, 
     max_n_elements: usize,
-    fingerprint_modulus: u128,
-    fingerprint_base: u128)
+    random_seed: usize,)
     -> Vec<Vec<usize>> {
 
-    let p = fingerprint_modulus; // TODO: assert that this is prime
-    let b = fingerprint_base;
+    // Biggest prime under 2^90:
+    let p: u128 = 1237940039285380274899124191;
 
-    // Build fingerprints
-    let mut A: Vec<u128> = vec![0; max_n_sets]; // Fingerprints
+    // Draw the base of the hash from 0..p. We can only draw 64 bits at a time,
+    // so we'll combine two 64-bit numbers and take mod p of that.
+    let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
+    let b = (rng.next_u64() as u128 + ((rng.next_u64() as u128) << 64)) % p;
+
+    // Build fingerprints. Initialize a conceptual array of max_n_set
+    // 128-bit integers, but since we can't update 128-bit integers
+    // atomically, instead we simulate the array with twice the amount
+    // of 64-bit integers.
+    let mut A = Vec::<AtomicU64>::new();
+    A.resize_with(max_n_sets*2, || AtomicU64::new(0));
+
+    // Least significant word carries. Up to 2^32 carries supported, which means
+    // sets of size up to 2^32.
+    let mut lsw_carries = Vec::<AtomicU32>::new();
+    lsw_carries.resize_with(max_n_sets, || AtomicU32::new(0));
+
     for new in element_generator {
         let c = new.element as u128;
-        A[new.set_id] = add_mod(A[new.set_id], mod_pow(b, c, p), p);
+        let to_add = mod_pow(b, c, p);
+        let to_add_lsw = to_add as u64; // Least significant word
+        let to_add_msw = (to_add >> 64) as u64; // Least significant word
+
+        let lsw_before = A[2*new.set_id].fetch_add(to_add_lsw, Relaxed);
+        let _msw_before = A[2*new.set_id + 1].fetch_add(to_add_msw, Relaxed);
+
+        // Carry happened if lsw_before + to_add_lsw >= 2^64
+        // Which is the same as lsw_before >= 2^64 - to_add_lsw.
+        // This is same as:
+        if lsw_before >= to_add_lsw.wrapping_neg() {
+            lsw_carries[new.set_id].fetch_add(1, Relaxed); // Record the carry
+        }
     } 
 
     // Mark the lowest set id where each distinct fingerprint occurs 
