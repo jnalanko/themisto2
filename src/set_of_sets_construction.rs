@@ -56,6 +56,16 @@ fn construct(
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashSet::<u128>::new();
     let mut marked_sets = bitvec::bitvec![0; max_n_sets];
+    for set_id in 0..max_n_sets {
+        let lsw = A[2*set_id].load(Relaxed) as u128;
+        let msw = A[2*set_id + 1].load(Relaxed) as u128;
+        let carries = lsw_carries[set_id].load(Relaxed) as u128;
+        let mut total: u128 = lsw + (msw << 64);
+        total %= p;
+        total += carries << 64;
+        total %= p;
+
+    }
     for (set_id, fingerprint) in A.into_iter().enumerate() {
         if !distinct_fingerprints.contains(&fingerprint) {
             distinct_fingerprints.insert(fingerprint);
