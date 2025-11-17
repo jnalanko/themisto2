@@ -48,12 +48,50 @@ pub trait ColorSetStorage {
 
     // Set union: a := a ∪ b
     fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>);
+
+    // Provided method: new from an iterator that gives iterators to color sets
+    fn new_from_iter_of_iter<
+        InnerIter: Iterator<Item = usize>, 
+        OuterIter: Iterator<Item = InnerIter>>
+    (it: OuterIter) {
+
+    }
+
 }
 
 pub trait ColorSetStream {
-
     // Returns None when done
     fn next(&mut self) -> Option<&[usize]>;
+}
+
+pub trait IterOfIters {
+    type Iter: Iterator<Item = usize>;
+    fn next(&mut self) -> Option<Self::Iter>;
+}
+
+impl <InnerIter: Iterator<Item = usize>, OuterIter: Iterator<Item = InnerIter>> IterOfIters for OuterIter {
+    type Iter = InnerIter;
+
+    fn next(&mut self) -> Option<Self::Iter> {
+        self.next()
+    }
+}
+
+struct ColorSetStreamFromIters<T : IterOfIters> {
+    iters: T,
+    cur_set: Vec<usize>, 
+}
+
+impl<T: IterOfIters> ColorSetStream for ColorSetStreamFromIters<T> {
+    fn next(&mut self) -> Option<&[usize]> {
+        if let Some(set_iter) = self.iters.next() {
+            self.cur_set.clear();
+            self.cur_set.extend(set_iter);
+            Some(&self.cur_set)
+        } else {
+            None
+        }
+    }
 }
 
 // A color set view that does not own the data, but can return an
