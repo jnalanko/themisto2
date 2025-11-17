@@ -177,8 +177,7 @@ mod tests{
             element_generator,
             sets.len(),
             5,
-            340282366920938463463374607431768211297,
-             12312312312312312312312312312312312312
+            123123
         );
 
         dbg!("Distinct sets: {:?}", distinct_sets);
