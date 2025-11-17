@@ -21,40 +21,25 @@ pub fn get_color_set_id_from_fasta_header(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
-// Returns the concatenation of distinct color sets
-pub fn read_color_sets(mut reader: impl BufRead, num_color_sets: usize, num_colors: usize) -> BitVec {
-
+// Parses the set and pushed it to `push_set_to`. Returns the color set id.
+pub fn parse_color_set_line(line: &String, push_set_to: &mut Vec<usize>) -> usize {
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 
-    let mut color_sets = bitvec![0; num_color_sets * num_colors]; // Concatenation of distinct color sets
+    let line_bytes = line.trim_end().as_bytes();
+    let mut tokens = line_bytes.split(|c| *c == b' ');
 
-    let mut line = String::new();
+    let first_token = tokens.next().unwrap();
+    assert_eq!(&first_token[0..13], b"color_set_id=");
+    let color_set_id: usize = ascii_to_int(&first_token[13..]);
 
-    let bar = indicatif::ProgressBar::new(num_color_sets as u64);
-    while reader.read_line(&mut line).unwrap() > 0 {
-        let line_bytes = line.trim_end().as_bytes();
-        let mut tokens = line_bytes.split(|c| *c == b' ');
+    let second_token = tokens.next().unwrap();
+    assert_eq!(&second_token[0..5], b"size=");
+    let _ = ascii_to_int(&second_token[5..]); // Length of the color set
 
-        let first_token = tokens.next().unwrap();
-        assert_eq!(&first_token[0..13], b"color_set_id=");
-        let color_set_id: usize = ascii_to_int(&first_token[13..]);
-        assert!(color_set_id < num_color_sets);
+    push_set_to.extend(tokens.map(ascii_to_int));
 
-        let second_token = tokens.next().unwrap();
-        assert_eq!(&second_token[0..5], b"size=");
-        let _ = ascii_to_int(&second_token[5..]); // Length of the color set
-
-        for color in tokens.map(ascii_to_int) {
-            color_sets.set(color_set_id*num_colors + color, true);
-        }
-
-        line.clear();
-        bar.inc(1);
-    }
-    bar.finish();
-
-    color_sets
+    color_set_id
 }
 
 pub fn sbwt_ascii_dump_to_sbwt_index(mut sbwt_ascii_dump: impl std::io::BufRead, precalc_prefix_length: usize) -> sbwt::SbwtIndex<sbwt::SubsetMatrix> {

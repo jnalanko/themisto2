@@ -1,6 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::bitvec;
+use std::io::BufRead;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
@@ -13,7 +14,7 @@ use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex}
 use std::hash::{Hash, Hasher};
 
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
-use crate::index_import;
+use crate::index_import::{self, parse_color_set_line};
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
@@ -172,7 +173,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         n_threads: usize,
         metadata_dump: impl std::io::BufRead, 
         unitig_dump: impl std::io::BufRead + Send + 'static, 
-        color_dump: impl std::io::BufRead) 
+        mut color_dump: impl std::io::BufRead) 
         -> Self {
 
         log::info!("Reading metadata");
@@ -181,8 +182,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Building colex to color set id mapping");
         let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
-        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
-        while let Some(rec) = reader.read_next_mut().unwrap() {
+        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()]; // TODO: IntVector?
+        while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
 
@@ -207,14 +208,36 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             set_ids_fn(rec.seq);
         }
 
-        log::info!("Reading distinct color sets");
-        // TODO: Read directly into ColorSetStorage format without storing to bitmap
-        let distinct_bitmap = index_import::read_color_sets(color_dump, metadata.num_color_sets, metadata.num_colors); 
         let n_sets = metadata.num_color_sets;
         let n_colors = metadata.num_colors;
-        let distinct_css = CSS::new((0..n_sets).map(|id| {
-            distinct_bitmap[id*n_colors..(id+1)*n_colors].iter_ones()
-        }), n_colors);
+
+        log::info!("Reading distinct color sets");
+        //let bar = indicatif::ProgressBar::new(num_color_sets as u64);
+        //bar.inc(1);
+        //bar.finish();
+        //let distinct_bitmap = index_import::read_color_sets(color_dump); 
+        let mut line = String::new();
+        let mut set_buf = Vec::<usize>::new();
+        let mut iteration_count = 0_usize;
+        let iter_of_iters = std::iter::from_fn(|| {
+            set_buf.clear();
+            line.clear();
+            if color_dump.read_line(&mut line).unwrap() > 0 {
+                let id = parse_color_set_line(&mut line, &mut set_buf);
+                assert_eq!(id, iteration_count);
+                iteration_count += 1;
+
+                // Unfortunately we must clone here because the iterator trait
+                // requires that the values are valid for the duration of the whole
+                // iteration. If we borrow, that is not the case because we
+                // clear the set at the start of each iteration. A solution to this
+                // would be to use a straming iterator trait at CSS:new(). TODO.
+                Some(set_buf.clone().into_iter())
+            } else {
+                None
+            }
+        });
+        let distinct_css = CSS::new(iter_of_iters, n_colors);
 
         Self::new(Arc::new(sbwt), lcs, colex_to_color_set_id, distinct_css, metadata.num_colors, sample_distance, n_threads)
 
