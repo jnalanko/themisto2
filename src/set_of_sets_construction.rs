@@ -11,15 +11,15 @@ fn construct(
     element_generator_again: impl Iterator<Item = SetElement>, 
     max_n_sets: usize, 
     max_n_elements: usize,
-    fingerprint_modulus: u64,
-    fingerprint_base: u64)
+    fingerprint_modulus: u128,
+    fingerprint_base: u128)
     -> Vec<Vec<usize>> {
 
     let p = fingerprint_modulus; // TODO: assert that this is prime
     let b = fingerprint_base;
 
     // Build fingerprints
-    let mut A: Vec<u64> = vec![0; max_n_sets]; // Fingerprints
+    let mut A: Vec<u128> = vec![0; max_n_sets]; // Fingerprints
     for new in element_generator {
         let c = new.element as u64;
         A[new.set_id] = (A[new.set_id] + mod_pow(b, c, p)) % p;
@@ -47,12 +47,13 @@ fn construct(
     distinct_sets
 }
 
-fn mod_pow(mut base: u64, mut exp: u64, modulo: u64) -> u64 {
-    let mut result = 1u64;
+fn mod_pow(mut base: u128, mut exp: u64, modulo: u128) -> u64 {
+    let mut result = 1_u128;
     base %= modulo;
 
     while exp > 0 {
         if exp & 1 == 1 {
+            result.carrying_mul(base, 0);
             result = result * base % modulo;
         }
         base = base * base % modulo;
@@ -62,6 +63,47 @@ fn mod_pow(mut base: u64, mut exp: u64, modulo: u64) -> u64 {
     result
 }
 
+/// Compute (a * b) % m over u128.
+/// Uses the ancient egyptian multiplication algorithm:
+/// https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication 
+/// IMPORTANT: assumes a < m and b < m.
+pub fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
+    debug_assert!(m > 0);
+    debug_assert!(a < m);
+    debug_assert!(b < m);
+
+    let mut res = 0u128;
+
+    while b > 0 {
+        if b & 1 == 1 {
+            // res = (res + a) modulo m
+            res = add_mod(res, a, m)
+        }
+
+        // a = 2a modulo b
+        a = add_mod(a, a, m); 
+
+        // b = floor(b/2)
+        b >>= 1;
+    }
+
+    res
+}
+
+fn add_mod(r: u128, a: u128, m: u128) -> u128 {
+    debug_assert!(m > 0);
+    debug_assert!(r < m);
+    debug_assert!(a < m);
+
+    let t = m - a;
+    if r >= t {
+        // r + a >= m, so result is r + a - m == r - (m - a)
+        r - t
+    } else {
+        // r + a < m, safe to add directly
+        r + a
+    }
+}
 
 #[cfg(test)]
 mod tests{
