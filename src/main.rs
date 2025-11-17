@@ -201,7 +201,7 @@ fn build_coloring<CSS: ColorSetStorage>(
     let n_colors = input_paths.len();
     log::info!("Building uncompressed color bitmap");
     // Todo: do not go through bitmap storage
-    // Todo: Also: there is a very large memory overhead with all the happens here.
+    // Todo: Also: there is a very large memory overhead with all that happens here.
     let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
 
     // Compress to CSS format
@@ -216,7 +216,7 @@ fn build_coloring<CSS: ColorSetStorage>(
     drop(colex_to_bitset); // Free memory
 
     let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
-    let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).into_iter().map(|colex| {
+    let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).map(|colex| {
         set_to_id[&colex_to_css.get_set_view(colex)]
     }).collect(); 
 
