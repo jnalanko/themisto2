@@ -509,6 +509,8 @@ impl BitMaps {
 mod tests {
     use std::collections::HashSet;
 
+    use streaming_iterator::convert;
+
     use crate::coloring_interface::*;
     use super::*;
 
@@ -533,7 +535,8 @@ mod tests {
             true,
         ];
 
-        let iter_of_iter = sets.iter().map(|s| s.iter());
+        // convert(...) turns an interator into a streaming iterator
+        let iter_of_iter = convert(sets.iter().map(|s| convert(s.iter())));
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
         // Serialize and load
