@@ -212,32 +212,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let n_colors = metadata.num_colors;
 
         log::info!("Reading distinct color sets");
-        //let bar = indicatif::ProgressBar::new(num_color_sets as u64);
-        //bar.inc(1);
-        //bar.finish();
-        //let distinct_bitmap = index_import::read_color_sets(color_dump); 
-        let mut line = String::new();
-        let mut set_buf = Vec::<usize>::new();
-        let mut iteration_count = 0_usize;
-        let iter_of_iters = streaming_iterator::from_fn(|| {
-            set_buf.clear();
-            line.clear();
-            if color_dump.read_line(&mut line).unwrap() > 0 {
-                let id = parse_color_set_line(&mut line, &mut set_buf);
-                assert_eq!(id, iteration_count);
-                iteration_count += 1;
-
-                // Unfortunately we must clone here because the iterator trait
-                // requires that the values are valid for the duration of the whole
-                // iteration. If we borrow, that is not the case because we
-                // clear the set at the start of each iteration. A solution to this
-                // would be to use a streaming iterator trait at CSS:new(). TODO.
-                Some(streaming_iterator::convert(set_buf.iter()))
-            } else {
-                None
-            }
-        });
-        let distinct_css = CSS::new(iter_of_iters, n_colors);
+        let color_set_stream = index_import::ColorSetDumpStream::new(color_dump);
+        let distinct_css = CSS::new(color_set_stream, n_colors);
 
         Self::new(Arc::new(sbwt), lcs, colex_to_color_set_id, distinct_css, metadata.num_colors, sample_distance, n_threads)
 

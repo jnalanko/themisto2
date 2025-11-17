@@ -5,7 +5,8 @@ use bitvec::vec::BitVec;
 use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
-use streaming_iterator::{StreamingIterator, StreamingIteratorMut};
+
+use crate::coloring_interface::ColorSetStream;
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
@@ -23,18 +24,53 @@ pub fn get_color_set_id_from_fasta_header(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
-/*
-pub struct ColorSetStream<B: BufRead> {
+pub struct ColorSetDumpStream<B: BufRead> {
     input: B,
-    set_buf: Vec<u8>,
+    line: String,
+    n_sets_read: usize,
+    set_buf: Vec<usize>,
 }
-*/
+
+impl<B: BufRead> ColorSetStream for ColorSetDumpStream<B> {
+    fn next(&mut self) -> Option<&[usize]> {
+        // Lines should look like this:
+        // color_set_id=9 size=7 3 4 9 12 14 15 16
+
+        self.set_buf.clear();
+        self.line.clear();
+        if self.input.read_line(&mut self.line).unwrap() > 0 {
+
+            let line_bytes = self.line.trim_end().as_bytes();
+            let mut tokens = line_bytes.split(|c| *c == b' ');
+
+            let first_token = tokens.next().unwrap();
+            assert_eq!(&first_token[0..13], b"color_set_id=");
+            let color_set_id: usize = ascii_to_int(&first_token[13..]);
+            assert!(color_set_id == self.n_sets_read, "Error reading color dump: color set ids are not in order");
+
+            let second_token = tokens.next().unwrap();
+            assert_eq!(&second_token[0..5], b"size=");
+            let _ = ascii_to_int(&second_token[5..]); // Length of the color set
+
+            self.set_buf.extend(tokens.map(ascii_to_int));
+            
+            self.n_sets_read += 1;
+
+            Some(&self.set_buf)
+        } else {
+            None
+        }
+    }
+}
+
+impl<B: BufRead> ColorSetDumpStream<B> {
+    pub fn new(input: B) -> Self {
+        Self { input, line: String::new(), n_sets_read: 0, set_buf: vec![]}
+    }
+}
 
 // Parses the set and pushed it to `push_set_to`. Returns the color set id.
 pub fn parse_color_set_line(line: &String, push_set_to: &mut Vec<usize>) -> usize {
-
-    let mut test = Vec::<usize>::new();
-    let mut test2: streaming_iterator::Convert<std::slice::Iter<'_, usize>> = streaming_iterator::convert(test.iter());
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 
