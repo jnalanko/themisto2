@@ -60,18 +60,21 @@ fn construct(
         let lsw = A[2*set_id].load(Relaxed) as u128;
         let msw = A[2*set_id + 1].load(Relaxed) as u128;
         let carries = lsw_carries[set_id].load(Relaxed) as u128;
-        let mut total: u128 = lsw + (msw << 64);
-        total %= p;
-        total += carries << 64;
-        total %= p;
 
-    }
-    for (set_id, fingerprint) in A.into_iter().enumerate() {
+        let mut fingerprint: u128 = lsw + (msw << 64);
+        fingerprint %= p;
+        fingerprint += carries << 64;
+        fingerprint %= p;
+
         if !distinct_fingerprints.contains(&fingerprint) {
             distinct_fingerprints.insert(fingerprint);
             marked_sets.set(set_id, true);
         }
     }
+
+    // Free memory
+    drop(A);
+    drop(lsw_carries);
 
     // Iterate sets again and store the marked sets
     let mut distinct_sets: Vec<Vec<usize>> = vec![vec![]; distinct_fingerprints.len()];
