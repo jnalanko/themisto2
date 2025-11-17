@@ -53,14 +53,13 @@ fn mod_pow(mut base: u128, mut exp: u128, modulo: u128) -> u128 {
 
     while exp > 0 {
         if exp & 1 == 1 {
-            result.carrying_mul(base, 0);
-            result = result * base % modulo;
+            result = mul_mod(result, base, modulo);
         }
-        base = base * base % modulo;
+        base = mul_mod(base, base, modulo);
         exp >>= 1;
     }
 
-    result as u128
+    result
 }
 
 /// Compute (a * b) % m over u128.
