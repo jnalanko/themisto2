@@ -2,19 +2,23 @@ use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::R
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
+use crate::coloring_interface::ColorSetStorage;
+
 struct SetElement {
     set_id: usize,
     element: usize,
 }
 
-/// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements
-fn construct(
+/// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
+/// The element generators must generate the elements in increasing order of element: first all set ids
+/// with element 0, then all set ids with element 1, and so on.
+fn construct<CSS: ColorSetStorage>(
     element_generator: impl Iterator<Item = SetElement>, 
     element_generator_again: impl Iterator<Item = SetElement>, 
     max_n_sets: usize, 
     max_n_elements: usize,
     random_seed: usize,)
-    -> Vec<Vec<usize>> {
+    -> CSS {
 
 
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
@@ -54,14 +58,21 @@ fn construct(
     drop(set_fingerprints);
     drop(element_fingerprints);
 
-    // Iterate sets again and store the marked sets
+    // Now we build the ColorSetStorage from the transposed constructor, that is,
+    // we need a ColorSetStream that is like an iterator of iterators, where each
+    // inner iterator gives is the set ids of all sets that have a given color.
+    // Here we make use of the assumption that the element generator generates the
+    // elements with increasing order of color id.
     let mut distinct_sets: Vec<Vec<usize>> = vec![vec![]; distinct_fingerprints.len()];
-    for new in element_generator_again {
-        if marked_sets[new.set_id] {
-            let distinct_id = marked_sets[..new.set_id].count_ones(); // TODO: rank query
-            distinct_sets[distinct_id].push(new.element); 
+    let element_generator = std::iter::from_fn(|| {
+        todo!();
+        while let Some(new) = element_generator_again.next() {
+            if marked_sets[new.set_id] {
+                let distinct_id = marked_sets[..new.set_id].count_ones(); // TODO: rank query
+                distinct_sets[distinct_id].push(new.element); 
+            }
         }
-    }
+    });
 
     distinct_sets
 }
