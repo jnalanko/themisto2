@@ -18,7 +18,7 @@ fn construct(
 
 
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
-    // we instead use a pair of u64-bit values which can be updated atomically.
+    // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
     let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
     let element_fingerprints: Vec<(u64,u64)> = (0..max_n_elements).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
 
@@ -93,6 +93,6 @@ mod tests{
         );
 
         dbg!("Distinct sets: {:?}", distinct_sets);
-        assert!(false);
+        assert!(false); // TODO
     }
 }
