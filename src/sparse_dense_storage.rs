@@ -272,6 +272,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
         let mut dense_sets = BitMaps::new_with_zero_init(n_colors, n_dense_sets);
 
+        // Fill in the set elements to the zero-initialized data
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
         let mut color_id = 0_usize;
         let mut sparse_id = 0_usize;
@@ -292,8 +293,16 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             color_id += 1;
         }
 
-        todo!()
+        log::info!("Building rank support for dense marks");
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
 
+        Box::new(Self {
+            dense_sets,
+            sparse_sets,
+            n_colors,
+            is_dense_marks,
+        })
     }
 
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
