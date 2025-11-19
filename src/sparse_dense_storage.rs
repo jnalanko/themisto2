@@ -244,7 +244,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut n_dense_sets = 0;
         let mut n_sparse_sets = 0;
-        for (id, &size) in set_sizes.iter().enumerate() {
+        for &size in set_sizes.iter() {
             if is_dense_formula(size, color_id_bit_width, n_colors) {
                 is_dense_marks.push_bit(true);
                 n_dense_sets += 1;
@@ -253,6 +253,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 n_sparse_sets += 1;
             }
         }
+        // Todo: shrink to fit dense marks
 
         let mut sparse_iter_pos = 0;
         let sparse_size_iter = std::iter::from_fn(|| {
