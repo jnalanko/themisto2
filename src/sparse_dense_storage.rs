@@ -1,4 +1,5 @@
 use simple_sds_sbwt::int_vector::IntVector;
+use simple_sds_sbwt::raw_vector::AccessRaw;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
@@ -235,6 +236,66 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         })
     }
 
+    fn new_from_transpose(mut set_ids_per_color: impl ColorSetStream, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+        log::info!("Encoding color sets");
+
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
+
+        let mut n_dense_sets = 0;
+        let mut n_sparse_sets = 0;
+        for (id, &size) in set_sizes.iter().enumerate() {
+            if is_dense_formula(size, color_id_bit_width, n_colors) {
+                is_dense_marks.push_bit(true);
+                n_dense_sets += 1;
+            } else {
+                is_dense_marks.push_bit(false);
+                n_sparse_sets += 1;
+            }
+        }
+
+        let mut sparse_iter_pos = 0;
+        let sparse_size_iter = std::iter::from_fn(|| {
+            while sparse_iter_pos < is_dense_marks.len() && is_dense_marks.bit(sparse_iter_pos) {
+                sparse_iter_pos += 1;
+            }
+            if sparse_iter_pos < is_dense_marks.len() {
+                let size = set_sizes[sparse_iter_pos];
+                sparse_iter_pos += 1;
+                Some(size)
+            } else {
+                None
+            }
+        });
+
+        // Zero-initialized data 
+        let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
+        let mut dense_sets = BitMaps::new_with_zero_init(n_colors, n_dense_sets);
+
+        let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
+        let mut color_id = 0_usize;
+        let mut sparse_id = 0_usize;
+        let mut dense_id = 0_usize;
+        while let Some(set_ids) = set_ids_per_color.next() {
+            for &set_id in set_ids {
+                if is_dense_marks.bit(set_id) {
+                    // TODO: make faster without calling something like get_mut
+                    // and instead calling a function that directly sets the bit
+                    dense_sets.get_mut(dense_id).set(color_id, true);
+                    dense_id += 1;
+                } else {
+                    sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
+                    n_elements_added_to_each_sparse[sparse_id] += 1;
+                    sparse_id += 1;
+                }
+            }
+            color_id += 1;
+        }
+
+        todo!()
+
+    }
+
     fn serialize<W: std::io::Write>(&self, out: &mut W) {
         bincode::serialize_into(out.by_ref(), &self.n_colors).unwrap();
         self.is_dense_marks.serialize(out).unwrap();
@@ -365,6 +426,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     fn n_sets(&self) -> usize {
         self.is_dense_marks.len()
     }
+    
 }
 
 /*
@@ -429,11 +491,30 @@ impl SortedIntVecs {
         SortedIntVecs{concat: IntVector::new(bit_width).unwrap(), ends: vec![0]}
     }
 
+    fn new_with_sizes(set_sizes: impl Iterator<Item = usize>, n_sets: usize, bit_width: usize) -> Self {
+        let mut ends: Vec<usize> = vec![0; n_sets + 1];
+        let mut total_set_size = 0_usize;
+        for (i, s) in set_sizes.enumerate() {
+            ends[i+1] = ends[i] + s;
+            total_set_size += s;
+        }
+
+        let concat = IntVector::with_len(total_set_size, bit_width, 0).unwrap();
+
+        Self { concat, ends }
+    }
+
     fn push(&mut self, set: impl IntoIterator<Item = usize>) { // Pushes a new set of integers
         for x in set {
             self.concat.push(x as u64);
         }
         self.ends.push(self.concat.len());
+    }
+
+    fn assign_element(&mut self, set_id: usize, offset_in_set: usize, element: usize) { // Pushes a new set of integers
+        let size = self.ends[set_id+1] - self.ends[set_id];
+        assert!(offset_in_set < size);
+        self.concat.set(self.ends[set_id] + offset_in_set, element as u64);
     }
 
     fn shrink_to_fit(&mut self) {
@@ -469,6 +550,10 @@ impl BitMaps {
         BitMaps{bitmap_data: bitvec::vec::BitVec::new(), individual_length}
     }
 
+    fn new_with_zero_init(individual_length: usize, n_sets: usize) -> Self {
+        BitMaps{bitmap_data: bitvec![0; n_sets*individual_length], individual_length}
+    }
+
     fn push(&mut self, bv: &bitvec::slice::BitSlice) {
         assert_eq!(bv.len(), self.individual_length);
         self.bitmap_data.extend_from_bitslice(bv);
@@ -480,6 +565,10 @@ impl BitMaps {
 
     fn get(&self, bitmap_idx: usize) -> &BitSlice {
         &self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
+    }
+
+    fn get_mut(&mut self, bitmap_idx: usize) -> &mut BitSlice {
+        &mut self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
     }
 
     #[allow(dead_code)]
