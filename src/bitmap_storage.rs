@@ -102,6 +102,23 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
 
         Box::new(Self{bitmap, n_colors})
     }
+    
+    fn new_from_transpose(mut set_ids_per_color: impl ColorSetStream, n_colors: usize, _set_sizes: &Vec<u64>) -> Box<Self> {
+        // The set sizes are not needed.
+
+        let mut bitmap = bitvec![];
+        let empty_set = bitvec![0; n_colors];
+        let mut color_id = 0_usize;
+        while let Some(set_ids) = set_ids_per_color.next() {
+            bitmap.extend_from_bitslice(&empty_set);
+            for set_id in set_ids {
+                bitmap.set(set_id*n_colors + color_id, true);
+            }
+            color_id += 1;
+        }
+
+        Box::new(Self{bitmap, n_colors})
+    }
 
     fn get_empty_set(&self) -> Self::OwnedSet {
         BitSetOwned{bv: bitvec![]}

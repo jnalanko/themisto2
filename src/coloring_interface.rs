@@ -23,7 +23,12 @@ pub trait ColorSetStorage {
     // A fully generic way to construct the storage from a stream of color sets.
     // Returning box so that I can provide the method new_from_iter_of_iters
     // because there the size of the return value must be known at compile time.
-    fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>;
+    fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
+
+    // Takes a color set stream which first iterates all set ids that have color 0,
+    // then all set ids that have color 1, and so on. For this, the sizes of all the sets
+    // need to be known in advance an provided with `set_sizes`.
+    fn new_from_transpose(set_ids_per_color: impl ColorSetStream, n_colors: usize, set_sizes: &Vec<u64>) -> Box<Self>;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
@@ -214,6 +219,8 @@ mod tests {
             }
             todo!();
         }
+
+        
         
         #[allow(unused_variables)] // It's a dummy anyway
         fn serialize<W: std::io::Write>(&self, out: &mut W) {
@@ -242,6 +249,11 @@ mod tests {
         
         #[allow(unused_variables)] // It's a dummy anyway
         fn union(&self, a: &mut Self::OwnedSet, b: &Self::SetView<'_>) {
+            todo!()
+        }
+        
+        #[allow(unused_variables)] // It's a dummy anyway
+        fn new_from_transpose(sets: impl ColorSetStream, n_colors: usize, set_sizes: &Vec<u64>) -> Box<Self> {
             todo!()
         }
 
