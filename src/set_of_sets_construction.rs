@@ -26,12 +26,14 @@ fn construct(
     // two u64s.
     let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
     set_fingerprints.resize_with(max_n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
+    let set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
 
     for new in element_generator {
         let (fp1, fp2) = element_fingerprints[new.element];
 
         set_fingerprints[new.set_id].0.fetch_xor(fp1, Relaxed);
         set_fingerprints[new.set_id].1.fetch_xor(fp2, Relaxed);
+        set_sizes[new.set_id].fetch_add(1, Relaxed);
     } 
 
     // Mark the lowest set id where each distinct fingerprint occurs 
