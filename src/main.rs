@@ -73,7 +73,7 @@ pub enum Subcommands {
         #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
         input: PathBuf,
 
-        #[arg(help = "Precomputed SBWT file of k-mers", short, long)]
+        #[arg(help = "Precomputed SBWT file of k-mers (optional)", short, long)]
         sbwt_path: Option<PathBuf>,
 
         #[arg(help = "Output filename", short, long, required = true)]
