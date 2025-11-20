@@ -219,18 +219,7 @@ mod tests {
         fn get_full_set(&self) -> Self::OwnedSet {
             todo!()
         }
-        
-        #[allow(unused_variables)] // It's a dummy anyway
-        fn new<'a, CSIS: ColorSetIterStream<'a> + 'a>(sets: CSIS, n_colors: usize) -> Box<Self> {
-            while let Some(set) = sets.next() {
-                for elem in set {
-                    println!("{}", elem);
-                }
-            }
-            todo!();
-        }
 
-        
         
         #[allow(unused_variables)] // It's a dummy anyway
         fn serialize<W: std::io::Write>(&self, out: &mut W) {
@@ -265,6 +254,15 @@ mod tests {
         #[allow(unused_variables)] // It's a dummy anyway
         fn new_from_transpose(sets: impl ColorSetStream, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
             todo!()
+        }
+        
+        fn new(mut sets: impl USizeIteratorGenerator, _n_colors: usize) -> Box<Self> {
+            while let Some(mut set) = sets.next() {
+                while let Some(elem) = set.next() {
+                    println!("{}", elem);
+                }
+            }
+            todo!();
         }
 
     }
