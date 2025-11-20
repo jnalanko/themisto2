@@ -269,6 +269,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             }
         });
 
+        log::info!("Building rank support for dense marks");
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
+
+        log::info!("Encoding sets");
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data 
@@ -278,28 +283,22 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Fill in the set elements to the zero-initialized data
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
         let mut color_id = 0_usize;
-        let mut sparse_id = 0_usize;
-        let mut dense_id = 0_usize;
         while let Some(set_ids) = set_ids_per_color.next() {
             eprintln!("Set ids of color {} are {:?}", color_id, set_ids);
             for &set_id in set_ids {
-                if is_dense_marks.bit(set_id) {
+                if is_dense_marks.get(set_id) {
                     // TODO: make faster without calling something like get_mut
                     // and instead calling a function that directly sets the bit
+                    let dense_id = is_dense_marks.rank(set_id);
                     dense_sets.get_mut(dense_id).set(color_id, true);
-                    dense_id += 1;
                 } else {
+                    let sparse_id = is_dense_marks.rank_zero(set_id);
                     sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
                     n_elements_added_to_each_sparse[sparse_id] += 1;
-                    sparse_id += 1;
                 }
             }
             color_id += 1;
         }
-
-        log::info!("Building rank support for dense marks");
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-        is_dense_marks.enable_rank();
 
         Box::new(Self {
             dense_sets,
