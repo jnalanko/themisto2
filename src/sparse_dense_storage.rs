@@ -6,6 +6,7 @@ use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::coloring_interface::{ColorSetOwned, ColorSetStream, ColorSetView};
+use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 
 /*
  *
@@ -189,7 +190,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         OwnedSparseDense::Dense(bitvec![1; self.n_colors])
     }
     
-    fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Box<Self> {
+    fn new(mut sets: impl USizeIteratorGenerator, n_colors: usize) -> Box<Self> {
         log::info!("Encoding color sets");
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
@@ -199,9 +200,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut buf = Vec::<usize>::new();
         let mut n_sets_total = 0_usize;
-        while let Some(set) = sets.next() {
+        while let Some(mut set) = sets.next() {
             buf.clear();
-            buf.extend_from_slice(set);
+            while let Some(x) = set.next() {
+                buf.push(x);
+            }
             if is_dense_formula(buf.len(), color_id_bit_width, n_colors) {
                 let mut bm = bitvec![0; n_colors];
                 for color in buf.iter() {
@@ -225,7 +228,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         // Add rank support to dense marks
         log::info!("Building rank support for dense marks");
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+          let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
         is_dense_marks.enable_rank();
 
         Box::new(SparseDenseStorage {
