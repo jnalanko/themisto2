@@ -96,7 +96,6 @@ pub fn construct<CSS: ColorSetStorage>(
     for new in element_generator {
         let (fp1, fp2) = element_fingerprints[new.color];
 
-        println!("Generated {:?}", new);
         set_fingerprints[new.set_id].0.fetch_xor(fp1, SeqCst);
         set_fingerprints[new.set_id].1.fetch_xor(fp2, SeqCst);
         set_sizes[new.set_id].fetch_add(1, SeqCst);
