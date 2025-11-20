@@ -287,9 +287,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         log::info!("Encoding sets");
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
         let mut color_id = 0_usize;
-        while let Some(set_ids) = set_ids_per_color.next() {
-            eprintln!("Set ids of color {} are {:?}", color_id, set_ids);
-            for &set_id in set_ids {
+        while let Some(mut set_ids) = set_ids_per_color.next() {
+            while let Some(set_id) = set_ids.next() {
                 if is_dense_marks.get(set_id) {
                     // TODO: make faster without calling something like get_mut
                     // and instead calling a function that directly sets the bit
