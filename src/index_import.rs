@@ -90,7 +90,7 @@ impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
     }
 }
 
-impl<B: BufRead> ColorSetDumpStream<B> {
+impl<B: BufRead> ColorSetDumpIterGenerator<B> {
     pub fn new(input: B) -> Self {
         Self { input, line: String::new(), n_sets_read: 0, set_buf: vec![]}
     }
