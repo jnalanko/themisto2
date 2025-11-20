@@ -205,11 +205,10 @@ struct ColorElementGenerator<'a> {
     colex_range: Range<usize>,
     match_len: usize,
     seq_pos: usize,
-    k: usize,
 }
 
 impl<'a> ColorElementGenerator<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream, k: usize) -> Self {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
             streaming_index,
@@ -217,7 +216,6 @@ impl<'a> ColorElementGenerator<'a> {
             colex_range: 0..sbwt.n_sets(),
             match_len: 0,
             seq_pos: 0,
-            k,
         }
     }
 }
@@ -228,6 +226,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.input.done() { return None }
+        let k = self.streaming_index.k();
 
         while self.seq_pos == self.input.get_seq_buf().len() {
             // Move to the next sequence
@@ -241,20 +240,19 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
             }
         }
 
-
         // Look for the next full k-mer match
-        while self.match_len < self.k {
+        while self.match_len < k {
             let c = self.input.get_seq_buf()[self.seq_pos];
             let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
             self.match_len = len;
             self.colex_range = range;
         }
 
-        if self.match_len == self.k {
+        if self.match_len == k {
             let color = self.input.cur_file_idx();
             return Some(SetElement{set_id: self.colex_range.start, color});
         } else {
-            self.next()
+            self.next() // Reads the next sequence
         }
     }
 }
@@ -263,37 +261,21 @@ fn build_coloring<CSS: ColorSetStorage>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
     let n_colors = input_paths.len();
-    log::info!("Building uncompressed color bitmap");
-    // Todo: do not go through bitmap storage
-    // Todo: Also: there is a very large memory overhead with all that happens here.
-    let colex_to_bitset = bitmap_storage::build_from_files(input_paths, &sbwt, &lcs, n_threads);
+    log::info!("Building distinct color set structure");
 
-    // Compress to CSS format
-    let color_stream = MyBitmapStream{
-        bs: colex_to_bitset,
-        pos: 0,
-        buf: vec![]
-    };
+    let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
 
     let (css, colex_to_id) = set_of_sets_construction::construct::<CSS>(
-        color_stream,
-        color_stream,
+        element_gen_1,
+        element_gen_2,
         sbwt.n_sets(),
         n_colors,
-        1232563,
+        1232563, // Random seed. Todo: be more random
     );
-    let colex_to_css = CSS::new(color_stream, n_colors);
-
-    let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
-    let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).map(|colex| {
-        set_to_id[&colex_to_css.get_set_view(colex)]
-    }).collect(); 
-
-    drop(set_to_id); // Free memory
-    drop(colex_to_css); // Free memory
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, distinct_css, n_colors, sample_distance, n_threads)
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, css, n_colors, sample_distance, n_threads)
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.

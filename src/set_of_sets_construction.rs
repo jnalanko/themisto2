@@ -69,7 +69,7 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 /// with element 0, then all set ids with element 1, and so on. There must not be duplicate elements
 /// in the same set.
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
-fn construct<CSS: ColorSetStorage>(
+pub fn construct<CSS: ColorSetStorage>(
     element_generator: impl Iterator<Item = SetElement>, 
     element_generator_again: impl Iterator<Item = SetElement>, 
     n_sets: usize, 
