@@ -17,6 +17,12 @@ pub struct VecVecUsizeIteratorGenerator {
     pub(crate) pos: usize,
 }
 
+impl VecVecUsizeIteratorGenerator {
+    pub fn new(vecs: Vec<Vec<usize>>) -> Self {
+        Self {sets: vecs, pos: 0}
+    }
+}
+
 pub struct VecIterator<'a> {
     inner: std::slice::Iter<'a, usize>,
 }

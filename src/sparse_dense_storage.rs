@@ -611,7 +611,7 @@ impl BitMaps {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::coloring_interface::*;
+    use crate::{coloring_interface::*, iterators::VecVecUsizeIteratorGenerator};
     use super::*;
 
     #[test]
@@ -636,7 +636,7 @@ mod tests {
         ];
 
         // convert(...) turns an interator into a streaming iterator
-        let iter_of_iter = VecVecColorSetStream::new(sets.clone());
+        let iter_of_iter = VecVecUsizeIteratorGenerator::new(sets.clone());
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
         // Serialize and load
