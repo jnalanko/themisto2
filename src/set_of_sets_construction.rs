@@ -68,13 +68,14 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 /// The element generators must generate the elements in increasing order of element: first all set ids
 /// with element 0, then all set ids with element 1, and so on. There must not be duplicate elements
 /// in the same set.
+/// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
 fn construct<CSS: ColorSetStorage>(
     element_generator: impl Iterator<Item = SetElement>, 
     element_generator_again: impl Iterator<Item = SetElement>, 
     n_sets: usize, 
     n_colors: usize,
     random_seed: usize)
-    -> CSS {
+    -> (CSS, Vec<usize>) {
 
     // TODO: all the atomic operation here are with SeqCst ordering because I'm not sure
     // if the stores here are guaranteed to happen before loads. There is probably a better
@@ -163,7 +164,7 @@ fn construct<CSS: ColorSetStorage>(
         n_colors
     };
 
-    *CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes)
+    (*CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes), old_id_to_new_id)
 
 }
 
