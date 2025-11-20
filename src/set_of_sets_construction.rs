@@ -7,7 +7,7 @@ use crate::coloring_interface::{ColorSetStorage, ColorSetStream};
 #[derive(Debug)]
 struct SetElement {
     set_id: usize,
-    element: usize,
+    color: usize,
 }
 
 struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
@@ -24,11 +24,11 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
 
         // If there is a leftover element from the previous round, consider that.
         if let Some(x) = &self.leftover_element {
-            if x.element < self.current_color {
+            if x.color < self.current_color {
                 // No set ids in this color
                 self.current_color += 1;
                 return Some(&self.buf);
-            } else if x.element == self.current_color {
+            } else if x.color == self.current_color {
                 self.buf.push(x.set_id);
                 self.leftover_element = None;
             } else {
@@ -39,7 +39,7 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
         // Read new elements from the generator
         while let Some(x) = self.element_generator.next() {
             eprintln!("Generator gives {:?}", x);
-            if x.element == self.current_color {
+            if x.color == self.current_color {
                 self.buf.push(x.set_id);
             } else {
                 self.leftover_element = Some(x);
@@ -77,7 +77,7 @@ fn construct<CSS: ColorSetStorage>(
     set_sizes.resize_with(max_n_sets, || AtomicU64::new(0));
 
     for new in element_generator {
-        let (fp1, fp2) = element_fingerprints[new.element];
+        let (fp1, fp2) = element_fingerprints[new.color];
 
         set_fingerprints[new.set_id].0.fetch_xor(fp1, Relaxed);
         set_fingerprints[new.set_id].1.fetch_xor(fp2, Relaxed);
@@ -148,7 +148,7 @@ mod tests{
 
         // Make an element generator
         let element_generator = transposed_sets.iter().enumerate().flat_map(|(color_id, set_ids)| {
-            set_ids.iter().map(move |&set_id| SetElement { set_id, element: color_id})
+            set_ids.iter().map(move |&set_id| SetElement { set_id, color: color_id})
         });
 
         let distinct_sets = construct::<SparseDenseStorage>(

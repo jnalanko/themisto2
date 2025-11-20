@@ -269,6 +269,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             }
         });
 
+        dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
+
         // Zero-initialized data 
         let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
         let mut dense_sets = BitMaps::new_with_zero_init(n_colors, n_dense_sets);
