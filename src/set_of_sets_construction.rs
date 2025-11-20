@@ -4,7 +4,7 @@ use rand_chacha::rand_core::{RngCore, SeedableRng};
 
 use crate::coloring_interface::{ColorSetStorage, ColorSetStream};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct SetElement {
     set_id: usize,
     color: usize,
@@ -138,7 +138,7 @@ mod tests{
             vec![3, 2],    // duplicate of second set
         ];
 
-        let transposed_sets = [
+        let transposed_sets: Vec<Vec<usize>> = vec![
             vec![0, 2], // Color 0
             vec![0, 2], // Color 1
             vec![0, 1, 2, 4], // Color 2
@@ -147,13 +147,16 @@ mod tests{
         ];
 
         // Make an element generator
-        let element_generator = transposed_sets.iter().enumerate().flat_map(|(color_id, set_ids)| {
-            set_ids.iter().map(move |&set_id| SetElement { set_id, color: color_id})
+        let mut elements = vec![];
+        transposed_sets.iter().enumerate().for_each(|(color, set_ids)| {
+            for set_id in set_ids {
+                elements.push(SetElement{set_id: *set_id, color});
+            }
         });
-
+        
         let distinct_sets = construct::<SparseDenseStorage>(
-            element_generator.clone(),
-            element_generator,
+            elements.iter().copied(),
+            elements.iter().copied(),
             sets.len(),
             5,
             123123
