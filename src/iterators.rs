@@ -1,5 +1,5 @@
 // This file has some iterator-like traits that are used in this crate.
-// We need to define our own iterator types because the lifetime constraints
+// We need to define our own iterator traits because the lifetime constraints
 // in the standard iterator trait do not allow iterators creating iterators
 // that stream over data from the parent iterator. At least I could not make it work.
 
