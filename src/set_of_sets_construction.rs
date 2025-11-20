@@ -204,7 +204,7 @@ mod tests{
 
         dbg!(&elements);
         
-        let distinct_sets = construct::<SparseDenseStorage>(
+        let (distinct_sets, _) = construct::<SparseDenseStorage>(
             elements.iter().copied(),
             elements.iter().copied(),
             sets.len(),
