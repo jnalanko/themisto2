@@ -12,44 +12,43 @@ pub trait USizeIteratorGenerator {
     fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>>;
 }
 
+pub struct VecVecUsizeIteratorGenerator {
+    pub(crate) sets: Vec<Vec<usize>>,
+    pub(crate) pos: usize,
+}
+
+pub struct VecIterator<'a> {
+    inner: std::slice::Iter<'a, usize>,
+}
+
+impl<'a> USizeIterator<'a> for VecIterator<'a> {
+    fn next(&mut self) -> Option<usize> {
+        self.inner.next().copied()
+    }
+}
+
+impl USizeIteratorGenerator for VecVecUsizeIteratorGenerator {
+    type Iter<'a> = VecIterator<'a>;
+    
+    fn next<'a>(&'a mut self) -> Option<Self::Iter<'a>> {
+        if self.pos == self.sets.len() {
+            None
+        } else {
+            let iter = VecIterator{inner: self.sets[self.pos].iter()};
+            self.pos += 1;
+            Some(iter)
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
-
-    struct VecVecStorage {
-        sets: Vec<Vec<usize>>,
-        pos: usize,
-    }
-
-    struct MyIterator<'a> {
-        inner: std::slice::Iter<'a, usize>,
-    }
-
-    impl<'a> USizeIterator<'a> for MyIterator<'a> {
-        fn next(&mut self) -> Option<usize> {
-            self.inner.next().copied()
-        }
-    }
-
-    impl USizeIteratorGenerator for VecVecStorage {
-        type Iter<'a> = MyIterator<'a>;
-        
-        fn next<'a>(&'a mut self) -> Option<Self::Iter<'a>> {
-            if self.pos == self.sets.len() {
-                None
-            } else {
-                let iter = MyIterator{inner: self.sets[self.pos].iter()};
-                self.pos += 1;
-                Some(iter)
-            }
-        }
-    }
 
     use super::*;
 
     #[test]
     fn test_iterator_traits() {
-        let mut storage = VecVecStorage{sets: vec![vec![1,2,3], vec![2,3,4], vec![3,4,5]], pos: 0};
+        let mut storage = VecVecUsizeIteratorGenerator{sets: vec![vec![1,2,3], vec![2,3,4], vec![3,4,5]], pos: 0};
         while let Some(mut iter) = storage.next() {
             while let Some(x) = iter.next() {
                 println!("{}", x); 

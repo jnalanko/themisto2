@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView, VecVecColorSetStream};
+use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
 use crate::index_import::{self, parse_color_set_line};
+use crate::iterators::VecVecUsizeIteratorGenerator;
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
@@ -211,7 +212,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let n_colors = metadata.num_colors;
 
         log::info!("Reading distinct color sets");
-        let color_set_stream = index_import::ColorSetDumpStream::new(color_dump);
+        let color_set_stream = index_import::ColorSetDumpIterGenerator::new(color_dump);
         let distinct_css = CSS::new(color_set_stream, n_colors);
         let distinct_css = *distinct_css; // Unbox
 
@@ -225,7 +226,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let int_bitwidth = 1;
 
         // The only color set is {0}
-        let sets = CSS::new(VecVecColorSetStream::new(vec![vec![0]]), n_colors);
+        let vv = VecVecUsizeIteratorGenerator{sets: vec![vec![0]], pos: 0};
+        let sets = CSS::new(vv, n_colors);
 
         log::info!("Sampling nodes");
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| 0, n_threads);

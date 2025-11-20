@@ -130,30 +130,6 @@ impl ColorSetOwned for Vec<usize> {
 
 }
 
-// Convenient struct to quickly make small color ste strings
-pub struct VecVecColorSetStream{
-    sets: Vec<Vec<usize>>,
-    pos: usize,
-}
-
-impl ColorSetStream for VecVecColorSetStream {
-    fn next(&mut self) -> Option<&[usize]> {
-        if self.pos == self.sets.len() {
-            None
-        } else {
-            let s = &self.sets[self.pos];
-            self.pos += 1;
-            Some(s)
-        }
-    }
-}
-
-impl VecVecColorSetStream {
-    pub fn new(v: Vec<Vec<usize>>) -> Self {
-        Self { sets: v, pos: 0 }
-    }
-}
-
 // Convenient struct to get a color set stream from an iterator
 // of iterators.
 struct ColorSetStreamFromIters<T : IterOfIters> {
