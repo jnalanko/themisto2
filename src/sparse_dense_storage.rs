@@ -279,6 +279,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_id = 0_usize;
         let mut dense_id = 0_usize;
         while let Some(set_ids) = set_ids_per_color.next() {
+            eprintln!("{:?}", set_ids);
             for &set_id in set_ids {
                 if is_dense_marks.bit(set_id) {
                     // TODO: make faster without calling something like get_mut
