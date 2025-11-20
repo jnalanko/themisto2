@@ -58,7 +58,7 @@ fn construct<CSS: ColorSetStorage>(
     element_generator_again: impl Iterator<Item = SetElement>, 
     max_n_sets: usize, 
     max_n_elements: usize,
-    random_seed: usize,)
+    random_seed: usize)
     -> CSS {
 
 
@@ -80,6 +80,9 @@ fn construct<CSS: ColorSetStorage>(
         set_fingerprints[new.set_id].1.fetch_xor(fp2, Relaxed);
         set_sizes[new.set_id].fetch_add(1, Relaxed);
     } 
+
+    // From atomic ints to regular ints
+    let set_sizes: Vec<usize> =  set_sizes.into_iter().map(|x| x.into_inner() as usize).collect();
 
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashSet::<(u64,u64)>::new();
@@ -104,18 +107,15 @@ fn construct<CSS: ColorSetStorage>(
     // inner iterator gives is the set ids of all sets that have a given color.
     // Here we make use of the assumption that the element generator generates the
     // elements with increasing order of color id.
-    let mut distinct_sets: Vec<Vec<usize>> = vec![vec![]; distinct_fingerprints.len()];
-    let element_generator = std::iter::from_fn(|| {
-        todo!();
-        while let Some(new) = element_generator_again.next() {
-            if marked_sets[new.set_id] {
-                let distinct_id = marked_sets[..new.set_id].count_ones(); // TODO: rank query
-                distinct_sets[distinct_id].push(new.element); 
-            }
-        }
-    });
+    let my_stream = MyTransposedColorSetStream {
+        element_generator: element_generator_again.filter(|new| { marked_sets[new.set_id] }),
+        buf: vec![],
+        leftover_element: None,
+        current_color: 0,
+    };
 
-    distinct_sets
+    *CSS::new_from_transpose(my_stream, max_n_elements, &set_sizes)
+
 }
 
 #[cfg(test)]
