@@ -154,14 +154,15 @@ mod tests{
             vec![2, 3],
             vec![0, 1, 2], // duplicate of first set
             vec![4],
+            vec![], // Make sure to test the empty set because it is a special case
             vec![3, 2],    // duplicate of second set
         ];
 
         let transposed_sets: Vec<Vec<usize>> = vec![
             vec![0, 2], // Color 0
             vec![0, 2], // Color 1
-            vec![0, 1, 2, 4], // Color 2
-            vec![1, 4], // Color 3
+            vec![0, 1, 2, 5], // Color 2
+            vec![1, 5], // Color 3
             vec![3], // Color 4
         ];
 
@@ -183,10 +184,18 @@ mod tests{
             123123
         );
 
+        let mut correct_answers = vec![vec![0,1,2], vec![2,3], vec![4], vec![]];
+        let mut our_answers: Vec<Vec<usize>> = 
+            (0..distinct_sets.n_sets())
+            .map(|i| distinct_sets.get_set_view(i).iter().collect::<Vec::<usize>>())
+            .collect();
+
+        correct_answers.sort();
+        our_answers.sort();
         for i in 0..distinct_sets.n_sets() {
-            let set: Vec<usize> = distinct_sets.get_set_view(i).iter().collect();
-            eprintln!("{:?}", set);
+            eprintln!("{:?} {:?}", our_answers[i], correct_answers[i]);
         }
-        assert!(false); // TODO
+        assert_eq!(correct_answers, our_answers);
+
     }
 }
