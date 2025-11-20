@@ -15,12 +15,17 @@ struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
     buf: Vec<usize>,
     leftover_element: Option<SetElement>,
     current_color: usize,
+    n_colors: usize,
 }
 
 
 impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStream<T> {
     fn next(&mut self) -> Option<&[usize]> { // TODO: &[usize] is bad here, should be Iter<Item = usize>
         self.buf.clear();
+
+        if self.current_color == self.n_colors {
+            return None;
+        }
 
         // If there is a leftover element from the previous round, consider that.
         if let Some(x) = &self.leftover_element {
@@ -128,6 +133,7 @@ fn construct<CSS: ColorSetStorage>(
         buf: vec![],
         leftover_element: None,
         current_color: 0,
+        n_colors
     };
 
     *CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes)
