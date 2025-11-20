@@ -5,6 +5,8 @@
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
+use crate::iterators::{USizeIterator, USizeIteratorGenerator};
+
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
 // view class. 
@@ -23,8 +25,7 @@ pub trait ColorSetStorage {
     // A fully generic way to construct the storage from a stream of color sets.
     // Returning box so that I can provide the method new_from_iter_of_iters
     // because there the size of the return value must be known at compile time.
-    //fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
-    fn new<'a, CSIS: ColorSetIterStream<'a> + 'a>(sets: CSIS, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
+    fn new(sets: impl USizeIteratorGenerator, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
 
     // Takes a color set stream which first iterates all set ids that have color 0,
     // then all set ids that have color 1, and so on. For this, the sizes of all the sets
