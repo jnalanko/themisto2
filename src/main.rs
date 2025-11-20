@@ -267,7 +267,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
     }
 }
 
-fn build_coloring<CSS: ColorSetStorage>(
+fn build_coloring<CSS: ColorSetStorage + Send>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
     let n_colors = input_paths.len();
@@ -281,6 +281,7 @@ fn build_coloring<CSS: ColorSetStorage>(
         element_gen_2,
         sbwt.n_sets(),
         n_colors,
+        n_threads,
         1232563, // Random seed. Todo: be more random
     );
 

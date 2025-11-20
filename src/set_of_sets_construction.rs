@@ -3,6 +3,9 @@ use std::{collections::{HashMap, HashSet}, sync::atomic::{AtomicU32, AtomicU64, 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
+use rayon::iter::ParallelBridge;
+use rayon::prelude::*;
+
 use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone)]
@@ -68,102 +71,107 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 /// with element 0, then all set ids with element 1, and so on. There must not be duplicate elements
 /// in the same set.
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
-pub fn construct<CSS: ColorSetStorage>(
-    element_generator: impl Iterator<Item = SetElement>, 
-    element_generator_again: impl Iterator<Item = SetElement>, 
+pub fn construct<CSS: ColorSetStorage + Send>(
+    element_generator: impl Iterator<Item = SetElement> + Send, 
+    element_generator_again: impl Iterator<Item = SetElement> + Send, 
     n_sets: usize, 
     n_colors: usize,
+    n_threads: usize,
     random_seed: usize)
     -> (CSS, Vec<usize>) {
 
-    // TODO: all the atomic operation here are with SeqCst ordering because I'm not sure
+    // TODO: all the atomic operations here are with SeqCst ordering because I'm not sure
     // if the stores here are guaranteed to happen before loads. There is probably a better
     // way to do this with Acquire/Release ordering, or with fences.
 
-    // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
-    // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
-    let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
-    let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
+    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+    thread_pool.install(|| {
 
-    // 128-bit fingerprints for sets of elements. Again we split each u128 into
-    // two u64s.
-    let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
-    set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
-    let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
-    set_sizes.resize_with(n_sets, || AtomicU64::new(0));
+        // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
+        // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
+        let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
+        let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
 
-    for new in element_generator {
-        let (fp1, fp2) = element_fingerprints[new.color];
+        // 128-bit fingerprints for sets of elements. Again we split each u128 into
+        // two u64s.
+        let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
+        set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
+        let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
+        set_sizes.resize_with(n_sets, || AtomicU64::new(0));
 
-        set_fingerprints[new.set_id].0.fetch_xor(fp1, SeqCst);
-        set_fingerprints[new.set_id].1.fetch_xor(fp2, SeqCst);
-        set_sizes[new.set_id].fetch_add(1, SeqCst);
-    } 
+        element_generator.par_bridge().for_each(|new| {
+            let (fp1, fp2) = element_fingerprints[new.color];
 
-    // Make set fingeprints not atomic
-    let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
-        |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
-    ).collect();
+            set_fingerprints[new.set_id].0.fetch_xor(fp1, SeqCst);
+            set_fingerprints[new.set_id].1.fetch_xor(fp2, SeqCst);
+            set_sizes[new.set_id].fetch_add(1, SeqCst);
+        });
 
-    // Make sizes not atomic
-    let set_sizes: Vec<usize> = set_sizes.into_iter().map(
-        |sz| sz.load(SeqCst) as usize
-    ).collect();
+        // Make set fingeprints not atomic
+        let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
+            |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
+        ).collect();
 
-    // Mark the lowest set id where each distinct fingerprint occurs 
-    let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
-    let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
-    let mut marked_set_sizes = Vec::<usize>::new();
-    let mut n_distinct_set_found = 0_usize;
-    for set_id in 0..n_sets {
-        let fp1 = set_fingerprints[set_id].0;
-        let fp2 = set_fingerprints[set_id].1;
-        let fp = (fp1, fp2);
+        // Make sizes not atomic
+        let set_sizes: Vec<usize> = set_sizes.into_iter().map(
+            |sz| sz.load(SeqCst) as usize
+        ).collect();
 
-        if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
-            e.insert(n_distinct_set_found);
-            n_distinct_set_found += 1;
-            marked_sets.set_bit(set_id, true);
-            marked_set_sizes.push(set_sizes[set_id] as usize);
+        // Mark the lowest set id where each distinct fingerprint occurs 
+        let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
+        let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
+        let mut marked_set_sizes = Vec::<usize>::new();
+        let mut n_distinct_set_found = 0_usize;
+        for set_id in 0..n_sets {
+            let fp1 = set_fingerprints[set_id].0;
+            let fp2 = set_fingerprints[set_id].1;
+            let fp = (fp1, fp2);
+
+            if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
+                e.insert(n_distinct_set_found);
+                n_distinct_set_found += 1;
+                marked_sets.set_bit(set_id, true);
+                marked_set_sizes.push(set_sizes[set_id] as usize);
+            }
         }
-    }
 
-    // Free memory
-    drop(set_sizes);
-    drop(element_fingerprints);
+        // Free memory
+        drop(set_sizes);
+        drop(element_fingerprints);
 
-    // Build original set id -> new set id vector
-    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
-        |fingerprint| distinct_fingerprints[fingerprint])
-        .collect();
+        // Build original set id -> new set id vector
+        let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
+            |fingerprint| distinct_fingerprints[fingerprint])
+            .collect();
 
-    // Free memory
-    drop(set_fingerprints);
+        // Free memory
+        drop(set_fingerprints);
 
-    // Build ran on marked sets
-    let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
-    marked_sets.enable_rank();
+        // Build ran on marked sets
+        let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
+        marked_sets.enable_rank();
 
-    // Now we build the ColorSetStorage from the transposed constructor, that is,
-    // we need a ColorSetStream that is like an iterator of iterators, where each
-    // inner iterator gives is the set ids of all sets that have a given color.
-    // Here we make use of the assumption that the element generator generates the
-    // elements with increasing order of color id.
-    let my_stream = MyTransposedColorSetStream {
-        element_generator: element_generator_again.filter(|new| { 
-            // Only include sets whose is id sampled
-            marked_sets.get(new.set_id)
-        }).map(|new| {
-            let rank_in_sampled_sets = marked_sets.rank(new.set_id);
-            SetElement { set_id: rank_in_sampled_sets, color: new.color }
-        }),
-        buf: vec![],
-        leftover_element: None,
-        current_color: 0,
-        n_colors
-    };
+        // Now we build the ColorSetStorage from the transposed constructor, that is,
+        // we need a ColorSetStream that is like an iterator of iterators, where each
+        // inner iterator gives is the set ids of all sets that have a given color.
+        // Here we make use of the assumption that the element generator generates the
+        // elements with increasing order of color id.
+        let my_stream = MyTransposedColorSetStream {
+            element_generator: element_generator_again.filter(|new| { 
+                // Only include sets whose is id sampled
+                marked_sets.get(new.set_id)
+            }).map(|new| {
+                let rank_in_sampled_sets = marked_sets.rank(new.set_id);
+                SetElement { set_id: rank_in_sampled_sets, color: new.color }
+            }),
+            buf: vec![],
+            leftover_element: None,
+            current_color: 0,
+            n_colors
+        };
 
-    (*CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes), old_id_to_new_id)
+        (*CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes), old_id_to_new_id)
+    })
 
 }
 
@@ -208,6 +216,7 @@ mod tests{
             elements.iter().copied(),
             sets.len(),
             5,
+            3,
             123123
         );
 
