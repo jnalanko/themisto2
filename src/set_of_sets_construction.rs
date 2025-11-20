@@ -48,7 +48,9 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
             }
         }
 
-        return Some(&self.buf);
+        eprintln!("Generator returns {:?}", self.buf);
+
+        Some(&self.buf)
     }
 }
 
@@ -111,7 +113,14 @@ fn construct<CSS: ColorSetStorage>(
     // Here we make use of the assumption that the element generator generates the
     // elements with increasing order of color id.
     let my_stream = MyTransposedColorSetStream {
-        element_generator: element_generator_again.filter(|new| { marked_sets[new.set_id] }),
+        element_generator: element_generator_again.filter(|new| { 
+            marked_sets[new.set_id] 
+        }).map(|new| {
+            // Replace the set id with rank within the sampled sets
+            // TODO! RANK QUERY! THIS IS O(n^2) TIME TOTAL AS WRITTEN.
+            let rank_in_sampled_sets = marked_sets[..new.set_id].count_ones();
+            SetElement { set_id: rank_in_sampled_sets, color: new.color }
+        }),
         buf: vec![],
         leftover_element: None,
         current_color: 0,
@@ -153,6 +162,8 @@ mod tests{
                 elements.push(SetElement{set_id: *set_id, color});
             }
         });
+
+        dbg!(&elements);
         
         let distinct_sets = construct::<SparseDenseStorage>(
             elements.iter().copied(),
