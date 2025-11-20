@@ -6,7 +6,7 @@ use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
-use crate::coloring_interface::ColorSetStream;
+use crate::coloring_interface::{ColorSetIterStream, ColorSetStream};
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
@@ -31,8 +31,11 @@ pub struct ColorSetDumpStream<B: BufRead> {
     set_buf: Vec<usize>,
 }
 
-impl<B: BufRead> ColorSetStream for ColorSetDumpStream<B> {
-    fn next(&mut self) -> Option<&[usize]> {
+impl<'a, B: BufRead> ColorSetIterStream<'a> for ColorSetDumpStream<B> {
+
+    type Iter = std::iter::Copied<std::slice::Iter<'a, usize>>;
+    
+    fn next(&'a mut self) -> Option<Self::Iter> {
         // Lines should look like this:
         // color_set_id=9 size=7 3 4 9 12 14 15 16
 
@@ -56,7 +59,7 @@ impl<B: BufRead> ColorSetStream for ColorSetDumpStream<B> {
             
             self.n_sets_read += 1;
 
-            Some(&self.set_buf)
+            Some(self.set_buf.iter().copied())
         } else {
             None
         }

@@ -23,7 +23,8 @@ pub trait ColorSetStorage {
     // A fully generic way to construct the storage from a stream of color sets.
     // Returning box so that I can provide the method new_from_iter_of_iters
     // because there the size of the return value must be known at compile time.
-    fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
+    //fn new(sets: impl ColorSetStream, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
+    fn new<'a, CSIS: ColorSetIterStream<'a> + 'a>(sets: CSIS, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
 
     // Takes a color set stream which first iterates all set ids that have color 0,
     // then all set ids that have color 1, and so on. For this, the sizes of all the sets
@@ -66,12 +67,20 @@ pub trait ColorSetStorage {
         let stream = ColorSetStreamFromIters{iters: it, cur_set: vec![]};
         Self::new(stream, n_colors)
     }
-
 }
 
 pub trait ColorSetStream {
     // Returns None when done
     fn next(&mut self) -> Option<&[usize]>;
+}
+
+pub trait ColorSetIterStream<'a> {
+    //type Iter<'a>: Iterator<Item = usize> where Self: 'a;
+    type Iter: Iterator<Item = usize> + 'a;
+
+    // Returns None when done
+    // The lifetime bound 'a of the iterator is linked to the self-borrow
+    fn next(&mut self) -> Option<Self::Iter>;
 }
 
 // A color set view that does not own the data, but can return an
@@ -211,7 +220,7 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new(mut sets: impl ColorSetStream, n_colors: usize) -> Box<Self> {
+        fn new<'a, CSIS: ColorSetIterStream<'a> + 'a>(sets: CSIS, n_colors: usize) -> Box<Self> {
             while let Some(set) = sets.next() {
                 for elem in set {
                     println!("{}", elem);
