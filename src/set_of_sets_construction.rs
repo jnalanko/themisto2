@@ -46,8 +46,8 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
         }
 
         // Read new elements from the generator
+        // Todo: can we not store all in a buffer and return and iterator instead?
         while let Some(x) = self.element_generator.next() {
-            eprintln!("Generator gives {:?}", x);
             if x.color == self.current_color {
                 self.buf.push(x.set_id);
             } else {
@@ -56,7 +56,6 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
             }
         }
 
-        eprintln!("Generator returns {:?}", self.buf);
         self.current_color += 1;
 
         Some(VecIterator::new(&self.buf))
