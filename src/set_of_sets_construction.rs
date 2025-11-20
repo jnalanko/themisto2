@@ -84,7 +84,8 @@ pub fn construct<CSS: ColorSetStorage + Send>(
     // if the stores here are guaranteed to happen before loads. There is probably a better
     // way to do this with Acquire/Release ordering, or with fences.
 
-    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+    // Using just one thread because multithreading makes this slower the moment. TODO TODO.
+    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
     thread_pool.install(|| {
 
         // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
