@@ -134,8 +134,8 @@ fn construct<CSS: ColorSetStorage>(
     drop(element_fingerprints);
 
     // Build original set id -> new set id vector
-    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().enumerate().map(
-        |(_old_id, fingerprint)| distinct_fingerprints[fingerprint])
+    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
+        |fingerprint| distinct_fingerprints[fingerprint])
         .collect();
 
     // Free memory
