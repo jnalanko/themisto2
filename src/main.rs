@@ -210,14 +210,12 @@ fn build_coloring<CSS: ColorSetStorage>(
 
     // Compress to CSS format
     let color_stream = MyBitmapStream{
-        bs: &colex_to_bitset,
+        bs: colex_to_bitset,
         pos: 0,
         buf: vec![]
     };
 
     let colex_to_css = CSS::new(color_stream, n_colors);
-
-    drop(colex_to_bitset); // Free memory
 
     let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);
     let colex_to_id: Vec<usize> = (0..sbwt.n_sets()).map(|colex| {
