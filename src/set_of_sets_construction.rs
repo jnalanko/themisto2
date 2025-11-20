@@ -130,7 +130,7 @@ fn construct<CSS: ColorSetStorage>(
         current_color: 0,
     };
 
-    *CSS::new_from_transpose(my_stream, n_colors, &set_sizes)
+    *CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes)
 
 }
 
