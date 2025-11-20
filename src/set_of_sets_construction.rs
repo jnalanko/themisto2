@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release, SeqCst}}};
+use std::{collections::{HashMap, HashSet}, sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release, SeqCst}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
@@ -101,16 +101,18 @@ fn construct<CSS: ColorSetStorage>(
     } 
 
     // Mark the lowest set id where each distinct fingerprint occurs 
-    let mut distinct_fingerprints = HashSet::<(u64,u64)>::new();
+    let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
     let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
     let mut marked_set_sizes = Vec::<usize>::new();
+    let mut n_distinct_set_found = 0_usize;
     for set_id in 0..n_sets {
         let fp1 = set_fingerprints[set_id].0.load(SeqCst);
         let fp2 = set_fingerprints[set_id].1.load(SeqCst);
         let fp = (fp1, fp2);
 
-        if !distinct_fingerprints.contains(&fp) {
-            distinct_fingerprints.insert(fp);
+        if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
+            e.insert(n_distinct_set_found);
+            n_distinct_set_found += 1;
             marked_sets.set_bit(set_id, true);
             marked_set_sizes.push(set_sizes[set_id].load(SeqCst) as usize);
         }
