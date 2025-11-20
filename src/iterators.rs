@@ -21,6 +21,12 @@ pub struct VecIterator<'a> {
     inner: std::slice::Iter<'a, usize>,
 }
 
+impl<'a> VecIterator<'a> {
+    pub fn new(vec: &'a Vec<usize>) -> Self {
+        Self { inner: vec.as_slice().iter() }
+    }
+}
+
 impl<'a> USizeIterator<'a> for VecIterator<'a> {
     fn next(&mut self) -> Option<usize> {
         self.inner.next().copied()

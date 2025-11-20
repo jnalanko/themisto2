@@ -8,7 +8,7 @@ use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::ColorSetStream};
+use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::ColorSetStream, iterators::VecIterator};
 
 mod EM;
 mod bitmap_storage;
@@ -178,21 +178,23 @@ pub enum Subcommands {
     },
 }
 
-struct MyBitmapStream<'a> {
-    bs: &'a BitmapStorage,
+struct MyBitmapStream {
+    bs: BitmapStorage,
     pos: usize,
     buf: Vec<usize>,
 }
 
-impl<'a> ColorSetStream for MyBitmapStream<'a> {
-    fn next(&mut self) -> Option<&[usize]> {
+impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
+    type Iter<'a> = VecIterator<'a> where Self: 'a;
+    
+    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
         if self.pos == self.bs.n_sets() {
             None
         } else {
             self.buf.clear(); 
             self.buf.extend(self.bs.get_set_view(self.pos).iter());
             self.pos += 1;
-            Some(&self.buf)
+            Some(VecIterator::new(&self.buf))
         }
     }
 }
