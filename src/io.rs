@@ -15,6 +15,18 @@ impl ChainedInputStream {
         let first_file = filenames.first().map(|f| DynamicFastXReader::from_file(f).unwrap());
         Self {paths: filenames, cur_file: first_file, seq_buf: vec![], cur_file_idx: 0}
     }
+
+    pub fn cur_file_idx(&self) -> usize {
+        self.cur_file_idx
+    }
+
+    pub fn get_seq_buf(&self) -> &[u8] {
+        &self.seq_buf
+    }
+
+    pub fn done(&self) -> bool {
+        self.cur_file_idx == self.paths.len()
+    }
 }
 
 impl SeqStream for ChainedInputStream {

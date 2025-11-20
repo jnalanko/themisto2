@@ -1,11 +1,11 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand, builder::styling::Color};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
 use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, set_of_sets_construction::SetElement};
@@ -202,20 +202,60 @@ impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
 struct ColorElementGenerator<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     input: ChainedInputStream,
+    colex_range: Range<usize>,
+    match_len: usize,
+    seq_pos: usize,
+    k: usize,
 }
 
 impl<'a> ColorElementGenerator<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream, k: usize) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
-        Self { streaming_index, input}
+        Self {
+            streaming_index,
+            input,
+            colex_range: 0..sbwt.n_sets(),
+            match_len: 0,
+            seq_pos: 0,
+            k,
+        }
     }
 }
 
-impl Iterator for ColorElementGenerator {
+
+impl<'a> Iterator for ColorElementGenerator<'a> {
     type Item = SetElement;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
+        if self.input.done() { return None }
+
+        while self.seq_pos == self.input.get_seq_buf().len() {
+            // Move to the next sequence
+            match self.input.stream_next() {
+                Some(_) => {
+                    self.seq_pos = 0;
+                    self.match_len = 0;
+                    self.colex_range = 0..self.streaming_index.sbwt_len();
+                }
+                None => {return None;} // Finished
+            }
+        }
+
+
+        // Look for the next full k-mer match
+        while self.match_len < self.k {
+            let c = self.input.get_seq_buf()[self.seq_pos];
+            let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
+            self.match_len = len;
+            self.colex_range = range;
+        }
+
+        if self.match_len == self.k {
+            let color = self.input.cur_file_idx();
+            return Some(SetElement{set_id: self.colex_range.start, color});
+        } else {
+            self.next()
+        }
     }
 }
 
