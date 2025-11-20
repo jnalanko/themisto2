@@ -1,61 +1,60 @@
-trait MyIteratorTrait<'a> {
+// This is different from Iterator<Item = usize> because this has a lifetime
+// parameter attached to it. This will be needed in the USizeIteratorGenerator trait
+trait USizeIterator<'a> {
     fn next(&mut self) -> Option<usize>;
 }
 
-struct MyIterator<'a> {
-    inner: std::slice::Iter<'a, usize>,
+trait USizeIteratorGenerator {
+    type Iter<'a>: USizeIterator<'a> where Self: 'a;
 
-    owned: Vec<usize>,
-    owned_pos: usize,    
-}
-
-impl<'a> MyIteratorTrait<'a> for MyIterator<'a> {
-    fn next(&mut self) -> Option<usize> {
-        self.inner.next().copied()
-
-        /*
-        if self.owned_pos == self.owned.len() { None }
-        else {
-            let x = self.owned[self.owned_pos];
-            self.owned_pos += 1;
-            Some(x)
-        }
-        */
-    }
-}
-
-trait MyIteratorGeneratorTrait {
-    type Iter<'a>: MyIteratorTrait<'a> where Self: 'a;
-
+    // Here we link the lifetime in the iterator to the
+    // lifetime of the self-borrow.
     fn next<'a>(&'a mut self) -> Option<Self::Iter<'a>>;
 }
 
-struct VecVecStorage {
-    sets: Vec<Vec<usize>>,
-    pos: usize,
-}
 
-impl MyIteratorGeneratorTrait for VecVecStorage {
-    type Iter<'a> = MyIterator<'a>;
-    
-    fn next<'a>(&'a mut self) -> Option<Self::Iter<'a>> {
-        if self.pos == self.sets.len() {
-            None
-        } else {
-            let iter = MyIterator{inner: self.sets[self.pos].iter(), owned: self.sets[self.pos].clone(), owned_pos: 0};
-            self.pos += 1;
-            Some(iter)
-        }
-    }
-}
+#[cfg(test)]
+mod tests {
 
-fn main() {
-    let mut storage = VecVecStorage{sets: vec![vec![1,2,3], vec![2,3,4], vec![3,4,5]], pos: 0};
-    while let Some(mut iter) = storage.next() {
-        while let Some(x) = iter.next() {
-            println!("{}", x); 
-        }
-        println!("=="); 
+    struct VecVecStorage {
+        sets: Vec<Vec<usize>>,
+        pos: usize,
     }
 
+    struct MyIterator<'a> {
+        inner: std::slice::Iter<'a, usize>,
+    }
+
+    impl<'a> USizeIterator<'a> for MyIterator<'a> {
+        fn next(&mut self) -> Option<usize> {
+            self.inner.next().copied()
+        }
+    }
+
+    impl USizeIteratorGenerator for VecVecStorage {
+        type Iter<'a> = MyIterator<'a>;
+        
+        fn next<'a>(&'a mut self) -> Option<Self::Iter<'a>> {
+            if self.pos == self.sets.len() {
+                None
+            } else {
+                let iter = MyIterator{inner: self.sets[self.pos].iter()};
+                self.pos += 1;
+                Some(iter)
+            }
+        }
+    }
+
+    use super::*;
+
+    #[test]
+    fn test_iterator_traits() {
+        let mut storage = VecVecStorage{sets: vec![vec![1,2,3], vec![2,3,4], vec![3,4,5]], pos: 0};
+        while let Some(mut iter) = storage.next() {
+            while let Some(x) = iter.next() {
+                println!("{}", x); 
+            }
+            println!("=="); 
+        }
+    }
 }

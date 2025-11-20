@@ -20,6 +20,7 @@ mod sparse_dense_storage;
 mod io;
 mod build_from_ggcat;
 mod set_of_sets_construction;
+mod iterators;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
