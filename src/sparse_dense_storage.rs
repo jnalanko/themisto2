@@ -269,18 +269,19 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             }
         });
 
-        log::info!("Building rank support for dense marks");
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-        is_dense_marks.enable_rank();
 
-        log::info!("Encoding sets");
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data 
         let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
         let mut dense_sets = BitMaps::new_with_zero_init(n_colors, n_dense_sets);
 
+        log::info!("Building rank support for dense marks");
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
+
         // Fill in the set elements to the zero-initialized data
+        log::info!("Encoding sets");
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
         let mut color_id = 0_usize;
         while let Some(set_ids) = set_ids_per_color.next() {
