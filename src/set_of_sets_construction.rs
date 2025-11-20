@@ -22,7 +22,7 @@ struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
 impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStream<T> {
     fn next(&mut self) -> Option<&[usize]> { // TODO: &[usize] is bad here, should be Iter<Item = usize>
         self.buf.clear();
-
+        dbg!(&self.current_color, &self.n_colors);
         if self.current_color == self.n_colors {
             return None;
         }
@@ -48,12 +48,12 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
                 self.buf.push(x.set_id);
             } else {
                 self.leftover_element = Some(x);
-                self.current_color += 1;
                 break;
             }
         }
 
         eprintln!("Generator returns {:?}", self.buf);
+        self.current_color += 1;
 
         Some(&self.buf)
     }
