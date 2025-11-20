@@ -204,7 +204,7 @@ mod tests{
 
         dbg!(&elements);
         
-        let (distinct_sets, _) = construct::<SparseDenseStorage>(
+        let (distinct_sets, old_id_to_new_id) = construct::<SparseDenseStorage>(
             elements.iter().copied(),
             elements.iter().copied(),
             sets.len(),
@@ -224,6 +224,7 @@ mod tests{
             eprintln!("{:?} {:?}", our_answers[i], correct_answers[i]);
         }
         assert_eq!(correct_answers, our_answers);
+        assert_eq!(old_id_to_new_id, vec![0,1,0,2,3,1]);
 
     }
 }
