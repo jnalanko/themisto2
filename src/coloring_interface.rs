@@ -30,7 +30,7 @@ pub trait ColorSetStorage {
     // Takes a color set stream which first iterates all set ids that have color 0,
     // then all set ids that have color 1, and so on. For this, the sizes of all the sets
     // need to be known in advance an provided with `set_sizes`.
-    fn new_from_transpose(set_ids_per_color: impl ColorSetStream, n_colors: usize, set_sizes: &[usize]) -> Box<Self>;
+    fn new_from_transpose(set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, set_sizes: &[usize]) -> Box<Self>;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
@@ -68,20 +68,6 @@ pub trait ColorSetStorage {
         let stream = ColorSetStreamFromIters{iters: it, cur_set: vec![]};
         Self::new(stream, n_colors)
     }
-}
-
-pub trait ColorSetStream {
-    // Returns None when done
-    fn next(&mut self) -> Option<&[usize]>;
-}
-
-pub trait ColorSetIterStream<'a> {
-    //type Iter<'a>: Iterator<Item = usize> where Self: 'a;
-    type Iter: Iterator<Item = usize> + 'a;
-
-    // Returns None when done
-    // The lifetime bound 'a of the iterator is linked to the self-borrow
-    fn next(&mut self) -> Option<Self::Iter>;
 }
 
 // A color set view that does not own the data, but can return an
@@ -231,7 +217,7 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new_from_transpose(sets: impl ColorSetStream, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+        fn new_from_transpose(sets: impl USizeIteratorGenerator, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
             todo!()
         }
         

@@ -5,7 +5,7 @@ use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vec
 use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
-use crate::coloring_interface::{ColorSetOwned, ColorSetStream, ColorSetView};
+use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 
 /*
@@ -239,7 +239,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         })
     }
 
-    fn new_from_transpose(mut set_ids_per_color: impl ColorSetStream, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+    fn new_from_transpose(mut set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
         log::info!("Encoding color sets");
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;

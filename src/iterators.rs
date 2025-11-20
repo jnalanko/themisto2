@@ -1,3 +1,8 @@
+// This file has some iterator-like traits that are used in this crate.
+// We need to define our own iterator types because the lifetime constraints
+// in the standard iterator trait do not allow iterators creating iterators
+// that stream over data from the parent iterator. At least I could not make it work.
+
 // This is different from Iterator<Item = usize> because this has a lifetime
 // parameter attached to it. This will be needed in the USizeIteratorGenerator trait
 pub trait USizeIterator<'a> {

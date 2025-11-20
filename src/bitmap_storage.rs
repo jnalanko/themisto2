@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{coloring_interface::{self, ColorSetIterStream, ColorSetStream}, iterators::{USizeIterator, USizeIteratorGenerator}};
+use crate::{coloring_interface, iterators::{USizeIterator, USizeIteratorGenerator}};
 
 /*
  *
@@ -103,7 +103,7 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         Box::new(Self{bitmap, n_colors})
     }
     
-    fn new_from_transpose(mut set_ids_per_color: impl ColorSetStream, n_colors: usize, _set_sizes: &[usize]) -> Box<Self> {
+    fn new_from_transpose(mut set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, _set_sizes: &[usize]) -> Box<Self> {
         // The set sizes are not needed.
 
         let mut bitmap = bitvec![];

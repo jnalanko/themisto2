@@ -6,7 +6,7 @@ use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
-use crate::{coloring_interface::{ColorSetIterStream, ColorSetStream}, iterators::{USizeIterator, USizeIteratorGenerator}};
+use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)

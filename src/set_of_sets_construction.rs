@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::{
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
-use crate::coloring_interface::{ColorSetStorage, ColorSetStream};
+use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone)]
 struct SetElement {
@@ -19,8 +19,11 @@ struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
 }
 
 
-impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStream<T> {
-    fn next(&mut self) -> Option<&[usize]> { // TODO: &[usize] is bad here, should be Iter<Item = usize>
+impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator for MyTransposedColorSetStream<T> {
+
+    type Iter<'a> = VecIterator<'a> where Self: 'a;
+
+    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
         self.buf.clear();
         dbg!(&self.current_color, &self.n_colors);
         if self.current_color == self.n_colors {
@@ -32,7 +35,7 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
             if x.color < self.current_color {
                 // No set ids in this color
                 self.current_color += 1;
-                return Some(&self.buf);
+                return Some(VecIterator::new(&self.buf));
             } else if x.color == self.current_color {
                 self.buf.push(x.set_id);
                 self.leftover_element = None;
@@ -55,8 +58,9 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
         eprintln!("Generator returns {:?}", self.buf);
         self.current_color += 1;
 
-        Some(&self.buf)
+        Some(VecIterator::new(&self.buf))
     }
+    
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
