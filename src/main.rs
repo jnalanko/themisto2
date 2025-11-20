@@ -246,6 +246,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
             let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
             self.match_len = len;
             self.colex_range = range;
+            self.seq_pos += 1;
         }
 
         if self.match_len == k {
