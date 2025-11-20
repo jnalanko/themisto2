@@ -6,7 +6,7 @@ use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
-use crate::coloring_interface::{ColorSetIterStream, ColorSetStream};
+use crate::{coloring_interface::{ColorSetIterStream, ColorSetStream}, iterators::{USizeIterator, USizeIteratorGenerator}};
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
     std::str::from_utf8(ascii)
@@ -24,16 +24,29 @@ pub fn get_color_set_id_from_fasta_header(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
-pub struct ColorSetDumpStream<B: BufRead> {
+pub struct ColorSetDumpIterGenerator<B: BufRead> {
     input: B,
     line: String,
     n_sets_read: usize,
     set_buf: Vec<usize>,
 }
 
-impl<'a, B: BufRead> ColorSetIterStream<'a> for ColorSetDumpStream<B> {
+pub struct ColorSetDumpSetStream<'a, F: FnMut(&u8) -> bool> {
+    tokens: std::slice::Split<'a, u8, F>,
+}
 
-    type Iter = std::iter::Copied<std::slice::Iter<'a, usize>>;
+impl<'a, F: FnMut(&u8) -> bool> USizeIterator<'a> for ColorSetDumpSetStream<'a, F> {
+
+    fn next(&mut self) -> Option<usize> {
+        let x = self.tokens.next();
+        let y = x.map(ascii_to_int);
+        y
+    }
+}
+
+impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
+
+    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
     
     fn next(&'a mut self) -> Option<Self::Iter> {
         // Lines should look like this:
