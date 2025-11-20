@@ -141,8 +141,8 @@ mod tests{
         let transposed_sets = [
             vec![0, 2], // Color 0
             vec![0, 2], // Color 1
-            vec![0, 1, 2, 5], // Color 2
-            vec![1, 5], // Color 3
+            vec![0, 1, 2, 4], // Color 2
+            vec![1, 4], // Color 3
             vec![3], // Color 4
         ];
 
