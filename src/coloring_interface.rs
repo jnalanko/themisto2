@@ -5,7 +5,7 @@
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
-use crate::iterators::{USizeIterator, USizeIteratorGenerator};
+use crate::iterators::{USizeIterator, USizeIteratorGenerator, VecIterator};
 
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
@@ -137,16 +137,19 @@ struct ColorSetStreamFromIters<T : IterOfIters> {
     cur_set: Vec<usize>, 
 }
 
-impl<T: IterOfIters> ColorSetStream for ColorSetStreamFromIters<T> {
-    fn next(&mut self) -> Option<&[usize]> {
+impl<T: IterOfIters> USizeIteratorGenerator for ColorSetStreamFromIters<T> {
+    type Iter<'a> = VecIterator<'a> where Self: 'a;
+
+    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
         if let Some(set_iter) = self.iters.next() {
             self.cur_set.clear();
             self.cur_set.extend(set_iter);
-            Some(&self.cur_set)
+            Some(VecIterator::new(&self.cur_set))
         } else {
             None
         }
     }
+    
 }
 
 
