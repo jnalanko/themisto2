@@ -109,9 +109,9 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         let mut bitmap = bitvec![];
         let empty_set = bitvec![0; n_colors];
         let mut color_id = 0_usize;
-        while let Some(set_ids) = set_ids_per_color.next() {
+        while let Some(mut set_ids) = set_ids_per_color.next() {
             bitmap.extend_from_bitslice(&empty_set); // TODO: allocate everything up front
-            for set_id in set_ids {
+            while let Some(set_id) = set_ids.next() {
                 bitmap.set(set_id*n_colors + color_id, true);
             }
             color_id += 1;

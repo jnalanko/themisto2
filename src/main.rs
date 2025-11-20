@@ -8,7 +8,7 @@ use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::ColorSetStream, iterators::VecIterator};
+use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, iterators::VecIterator};
 
 mod EM;
 mod bitmap_storage;
