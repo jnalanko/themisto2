@@ -2,13 +2,13 @@
 
 use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, builder::styling::Color};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SubsetMatrix};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, iterators::VecIterator};
+use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, set_of_sets_construction::SetElement};
 
 mod EM;
 mod bitmap_storage;
@@ -199,6 +199,26 @@ impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
     }
 }
 
+struct ColorElementGenerator<'a> {
+    streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
+    input: ChainedInputStream,
+}
+
+impl<'a> ColorElementGenerator<'a> {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
+        let streaming_index = StreamingIndex::new(sbwt, lcs); 
+        Self { streaming_index, input}
+    }
+}
+
+impl Iterator for ColorElementGenerator {
+    type Item = SetElement;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unimplemented!()
+    }
+}
+
 fn build_coloring<CSS: ColorSetStorage>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
 
@@ -215,6 +235,13 @@ fn build_coloring<CSS: ColorSetStorage>(
         buf: vec![]
     };
 
+    let (css, colex_to_id) = set_of_sets_construction::construct::<CSS>(
+        color_stream,
+        color_stream,
+        sbwt.n_sets(),
+        n_colors,
+        1232563,
+    );
     let colex_to_css = CSS::new(color_stream, n_colors);
 
     let (distinct_css, set_to_id) = hash_and_encode_distinct_sets::<CSS>(&colex_to_css, n_colors);

@@ -6,9 +6,9 @@ use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone)]
-struct SetElement {
-    set_id: usize,
-    color: usize,
+pub struct SetElement {
+    pub set_id: usize,
+    pub color: usize,
 }
 
 struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
