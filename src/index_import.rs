@@ -31,24 +31,35 @@ pub struct ColorSetDumpIterGenerator<B: BufRead> {
     set_buf: Vec<usize>,
 }
 
-pub struct ColorSetDumpSetStream<'a, F: FnMut(&u8) -> bool> {
-    tokens: std::slice::Split<'a, u8, F>,
+pub struct ColorSetDumpSetStream<'a> {
+    // Todo: stream over? It gets really complicated with the types involed in std::slice::Split
+    set: &'a [usize], 
+    pos: usize,
 }
 
-impl<'a, F: FnMut(&u8) -> bool> USizeIterator<'a> for ColorSetDumpSetStream<'a, F> {
-
+impl<'a> USizeIterator<'a> for ColorSetDumpSetStream<'a> {
     fn next(&mut self) -> Option<usize> {
-        let x = self.tokens.next();
-        let y = x.map(ascii_to_int);
-        y
+        if self.pos == self.set.len() {
+            None
+        } else {
+            let x = self.set[self.pos];
+            self.pos += 1;
+            Some(x)
+        }
     }
+}
+
+fn is_space(c: &u8) -> bool {
+    *c == b' '
 }
 
 impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
 
-    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
+    // The type of this iterator gets quite complex because it involves
+    // a slice split that is generic over the split predicate.
+    type Iter<'a> = ColorSetDumpSetStream<'a> where B: 'a;
     
-    fn next(&'a mut self) -> Option<Self::Iter> {
+    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
         // Lines should look like this:
         // color_set_id=9 size=7 3 4 9 12 14 15 16
 
@@ -57,7 +68,7 @@ impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
         if self.input.read_line(&mut self.line).unwrap() > 0 {
 
             let line_bytes = self.line.trim_end().as_bytes();
-            let mut tokens = line_bytes.split(|c| *c == b' ');
+            let mut tokens = line_bytes.split(is_space);
 
             let first_token = tokens.next().unwrap();
             assert_eq!(&first_token[0..13], b"color_set_id=");
@@ -72,7 +83,7 @@ impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
             
             self.n_sets_read += 1;
 
-            Some(self.set_buf.iter().copied())
+            Some(Self::Iter{set: &self.set_buf, pos: 0})
         } else {
             None
         }
