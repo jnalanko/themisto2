@@ -58,8 +58,8 @@ impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStr
 fn construct<CSS: ColorSetStorage>(
     element_generator: impl Iterator<Item = SetElement>, 
     element_generator_again: impl Iterator<Item = SetElement>, 
-    max_n_sets: usize, 
-    max_n_elements: usize,
+    n_sets: usize, 
+    n_colors: usize,
     random_seed: usize)
     -> CSS {
 
@@ -67,14 +67,14 @@ fn construct<CSS: ColorSetStorage>(
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
     // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
     let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
-    let element_fingerprints: Vec<(u64,u64)> = (0..max_n_elements).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
+    let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
 
     // 128-bit fingerprints for sets of elements. Again we split each u128 into
     // two u64s.
     let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
-    set_fingerprints.resize_with(max_n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
+    set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
     let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
-    set_sizes.resize_with(max_n_sets, || AtomicU64::new(0));
+    set_sizes.resize_with(n_sets, || AtomicU64::new(0));
 
     for new in element_generator {
         let (fp1, fp2) = element_fingerprints[new.color];
@@ -89,8 +89,8 @@ fn construct<CSS: ColorSetStorage>(
 
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashSet::<(u64,u64)>::new();
-    let mut marked_sets = bitvec::bitvec![0; max_n_sets];
-    for set_id in 0..max_n_sets {
+    let mut marked_sets = bitvec::bitvec![0; n_sets];
+    for set_id in 0..n_sets {
         let fp1 = set_fingerprints[set_id].0.load(Relaxed);
         let fp2 = set_fingerprints[set_id].1.load(Relaxed);
         let fp = (fp1, fp2);
@@ -117,7 +117,7 @@ fn construct<CSS: ColorSetStorage>(
         current_color: 0,
     };
 
-    *CSS::new_from_transpose(my_stream, max_n_elements, &set_sizes)
+    *CSS::new_from_transpose(my_stream, n_colors, &set_sizes)
 
 }
 
