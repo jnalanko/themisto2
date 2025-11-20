@@ -100,28 +100,45 @@ fn construct<CSS: ColorSetStorage>(
         set_sizes[new.set_id].fetch_add(1, SeqCst);
     } 
 
+    // Make set fingeprints not atomic
+    let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
+        |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
+    ).collect();
+
+    // Make sizes not atomic
+    let set_sizes: Vec<usize> = set_sizes.into_iter().map(
+        |sz| sz.load(SeqCst) as usize
+    ).collect();
+
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
     let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
     let mut marked_set_sizes = Vec::<usize>::new();
     let mut n_distinct_set_found = 0_usize;
     for set_id in 0..n_sets {
-        let fp1 = set_fingerprints[set_id].0.load(SeqCst);
-        let fp2 = set_fingerprints[set_id].1.load(SeqCst);
+        let fp1 = set_fingerprints[set_id].0;
+        let fp2 = set_fingerprints[set_id].1;
         let fp = (fp1, fp2);
 
         if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
             e.insert(n_distinct_set_found);
             n_distinct_set_found += 1;
             marked_sets.set_bit(set_id, true);
-            marked_set_sizes.push(set_sizes[set_id].load(SeqCst) as usize);
+            marked_set_sizes.push(set_sizes[set_id] as usize);
         }
     }
 
     // Free memory
-    drop(set_fingerprints);
-    drop(element_fingerprints);
     drop(set_sizes);
+    drop(element_fingerprints);
+
+    // Build original set id -> new set id vector
+    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().enumerate().map(
+        |(_old_id, fingerprint)| distinct_fingerprints[fingerprint])
+        .collect();
+
+    // Free memory
+    drop(set_fingerprints);
 
     // Build ran on marked sets
     let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
