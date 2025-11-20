@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release, SeqCst}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
+use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
 use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
@@ -101,7 +102,7 @@ fn construct<CSS: ColorSetStorage>(
 
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashSet::<(u64,u64)>::new();
-    let mut marked_sets = bitvec::bitvec![0; n_sets];
+    let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
     let mut marked_set_sizes = Vec::<usize>::new();
     for set_id in 0..n_sets {
         let fp1 = set_fingerprints[set_id].0.load(SeqCst);
@@ -110,7 +111,7 @@ fn construct<CSS: ColorSetStorage>(
 
         if !distinct_fingerprints.contains(&fp) {
             distinct_fingerprints.insert(fp);
-            marked_sets.set(set_id, true);
+            marked_sets.set_bit(set_id, true);
             marked_set_sizes.push(set_sizes[set_id].load(SeqCst) as usize);
         }
     }
@@ -120,6 +121,10 @@ fn construct<CSS: ColorSetStorage>(
     drop(element_fingerprints);
     drop(set_sizes);
 
+    // Build ran on marked sets
+    let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
+    marked_sets.enable_rank();
+
     // Now we build the ColorSetStorage from the transposed constructor, that is,
     // we need a ColorSetStream that is like an iterator of iterators, where each
     // inner iterator gives is the set ids of all sets that have a given color.
@@ -128,11 +133,11 @@ fn construct<CSS: ColorSetStorage>(
     let my_stream = MyTransposedColorSetStream {
         element_generator: element_generator_again.filter(|new| { 
             // Only include sets whose is id sampled
-            marked_sets[new.set_id] 
+            marked_sets.get(new.set_id)
         }).map(|new| {
             // Replace the set id with rank within the sampled sets
             // TODO! RANK QUERY! THIS IS O(n^2) TIME TOTAL AS WRITTEN.
-            let rank_in_sampled_sets = marked_sets[..new.set_id].count_ones();
+            let rank_in_sampled_sets = marked_sets.rank(new.set_id);
             SetElement { set_id: rank_in_sampled_sets, color: new.color }
         }),
         buf: vec![],
