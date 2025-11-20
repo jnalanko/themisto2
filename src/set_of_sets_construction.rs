@@ -120,6 +120,8 @@ fn construct<CSS: ColorSetStorage>(
 
 #[cfg(test)]
 mod tests{
+    use crate::{coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
+
     use super::*;
 
     #[test]
@@ -138,7 +140,7 @@ mod tests{
             elements.iter().map(move |&element| SetElement { set_id, element })
         });
 
-        let distinct_sets = construct(
+        let distinct_sets = construct::<SparseDenseStorage>(
             element_generator.clone(),
             element_generator,
             sets.len(),
@@ -146,7 +148,10 @@ mod tests{
             123123
         );
 
-        dbg!("Distinct sets: {:?}", distinct_sets);
+        for i in 0..distinct_sets.n_sets() {
+            let set: Vec<usize> = distinct_sets.get_set_view(i).iter().collect();
+            eprintln!("{:?}", set);
+        }
         assert!(false); // TODO
     }
 }
