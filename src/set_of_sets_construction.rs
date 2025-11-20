@@ -2,11 +2,52 @@ use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::R
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
-use crate::coloring_interface::ColorSetStorage;
+use crate::coloring_interface::{ColorSetStorage, ColorSetStream};
 
 struct SetElement {
     set_id: usize,
     element: usize,
+}
+
+struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
+    element_generator: T,
+    buf: Vec<usize>,
+    leftover_element: Option<SetElement>,
+    current_color: usize,
+}
+
+
+impl<T : Iterator<Item = SetElement>> ColorSetStream for MyTransposedColorSetStream<T> {
+    fn next(&mut self) -> Option<&[usize]> { // TODO: &[usize] is bad here, should be Iter<Item = usize>
+        self.buf.clear();
+
+        // If there is a leftover element from the previous round, consider that.
+        if let Some(x) = &self.leftover_element {
+            if x.element < self.current_color {
+                // No set ids in this color
+                self.current_color += 1;
+                return Some(&self.buf);
+            } else if x.element == self.current_color {
+                self.buf.push(x.set_id);
+                self.leftover_element = None;
+            } else {
+                panic!("Programming error: color set element iterator is not in the right order");
+            }
+        }
+
+        // Read new elements from the generator
+        while let Some(x) = self.element_generator.next() {
+            if x.element == self.current_color {
+                self.buf.push(x.set_id);
+            } else {
+                self.leftover_element = Some(x);
+                self.current_color += 1;
+                break;
+            }
+        }
+
+        return Some(&self.buf);
+    }
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
