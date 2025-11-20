@@ -241,7 +241,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
         }
 
         // Look for the next full k-mer match
-        while self.match_len < k {
+        while self.match_len < k && self.seq_pos < self.input.get_seq_buf().len() {
             let c = self.input.get_seq_buf()[self.seq_pos];
             let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
             self.match_len = len;
@@ -249,9 +249,9 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
             self.seq_pos += 1;
         }
 
-        if self.match_len == k {
+        if self.match_len == k || self.seq_pos == self.input.get_seq_buf().len() {
             let color = self.input.cur_file_idx();
-            return Some(SetElement{set_id: self.colex_range.start, color});
+            Some(SetElement{set_id: self.colex_range.start, color})
         } else {
             self.next() // Reads the next sequence
         }
