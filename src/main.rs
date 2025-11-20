@@ -73,6 +73,9 @@ pub enum Subcommands {
         #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
         input: PathBuf,
 
+        #[arg(help = "Precomputed SBWT file of k-mers", short, long)]
+        sbwt_path: Option<PathBuf>,
+
         #[arg(help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
@@ -499,32 +502,45 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance} => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path} => {
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
-            let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-                .add_rev_comp(true)
-                .k(k)
-                .build_lcs(true)
-                .n_threads(n_threads)
-                .precalc_length(8)
-                .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
-            .run(input_stream);
-            log::info!("Building SBWT select support");
-            sbwt.build_select();
-            let sbwt = Arc::new(sbwt);
-            let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
+            let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
+                log::info!("Loading SBWT from {}", sbwt_path.display());
+                let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
+                let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+
+                log::info!("Building select support for SBWT");
+                sbwt.build_select();
+                log::info!("Building LCS array");
+                let lcs = LcsArray::from_sbwt(&sbwt, n_threads); // TODO: load LCS
+                (sbwt, lcs)
+            } else {
+                let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+                    .add_rev_comp(true)
+                    .k(k)
+                    .build_lcs(true)
+                    .n_threads(n_threads)
+                    .precalc_length(8)
+                    .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
+                .run(input_stream);
+                log::info!("Building SBWT select support");
+                sbwt.build_select();
+                let sbwt = sbwt;
+                let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
+                (sbwt, lcs)
+            };
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance);
+                    let index = build_coloring::<BitmapStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance);
                     log::info!("Serializing bitmap index to {}", output.display());
                     write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance);
+                    let index = build_coloring::<SparseDenseStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance);
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
