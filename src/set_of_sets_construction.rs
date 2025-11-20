@@ -114,6 +114,7 @@ fn construct<CSS: ColorSetStorage>(
     // elements with increasing order of color id.
     let my_stream = MyTransposedColorSetStream {
         element_generator: element_generator_again.filter(|new| { 
+            // Only include sets whose is id sampled
             marked_sets[new.set_id] 
         }).map(|new| {
             // Replace the set id with rank within the sampled sets
