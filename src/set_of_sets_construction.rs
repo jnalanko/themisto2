@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed}};
+use std::{collections::HashSet, sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release, SeqCst}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 
@@ -65,6 +65,9 @@ fn construct<CSS: ColorSetStorage>(
     random_seed: usize)
     -> CSS {
 
+    // TODO: all the atomic operation here are with SeqCst ordering because I'm not sure
+    // if the stores here are guaranteed to happen before loads. There is probably a better
+    // way to do this with Acquire/Release ordering, or with fences.
 
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
     // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
@@ -81,31 +84,31 @@ fn construct<CSS: ColorSetStorage>(
     for new in element_generator {
         let (fp1, fp2) = element_fingerprints[new.color];
 
-        set_fingerprints[new.set_id].0.fetch_xor(fp1, Relaxed);
-        set_fingerprints[new.set_id].1.fetch_xor(fp2, Relaxed);
-        set_sizes[new.set_id].fetch_add(1, Relaxed);
+        set_fingerprints[new.set_id].0.fetch_xor(fp1, SeqCst);
+        set_fingerprints[new.set_id].1.fetch_xor(fp2, SeqCst);
+        set_sizes[new.set_id].fetch_add(1, SeqCst);
     } 
-
-    // From atomic ints to regular ints
-    let set_sizes: Vec<usize> =  set_sizes.into_iter().map(|x| x.into_inner() as usize).collect();
 
     // Mark the lowest set id where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashSet::<(u64,u64)>::new();
     let mut marked_sets = bitvec::bitvec![0; n_sets];
+    let mut marked_set_sizes = Vec::<usize>::new();
     for set_id in 0..n_sets {
-        let fp1 = set_fingerprints[set_id].0.load(Relaxed);
-        let fp2 = set_fingerprints[set_id].1.load(Relaxed);
+        let fp1 = set_fingerprints[set_id].0.load(SeqCst);
+        let fp2 = set_fingerprints[set_id].1.load(SeqCst);
         let fp = (fp1, fp2);
 
         if !distinct_fingerprints.contains(&fp) {
             distinct_fingerprints.insert(fp);
             marked_sets.set(set_id, true);
+            marked_set_sizes.push(set_sizes[set_id].load(SeqCst) as usize);
         }
     }
 
     // Free memory
     drop(set_fingerprints);
     drop(element_fingerprints);
+    drop(set_sizes);
 
     // Now we build the ColorSetStorage from the transposed constructor, that is,
     // we need a ColorSetStream that is like an iterator of iterators, where each
