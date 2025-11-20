@@ -71,7 +71,8 @@ fn construct<CSS: ColorSetStorage>(
     // two u64s.
     let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
     set_fingerprints.resize_with(max_n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
-    let set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
+    let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
+    set_sizes.resize_with(max_n_sets, || AtomicU64::new(0));
 
     for new in element_generator {
         let (fp1, fp2) = element_fingerprints[new.element];
