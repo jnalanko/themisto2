@@ -135,8 +135,6 @@ fn construct<CSS: ColorSetStorage>(
             // Only include sets whose is id sampled
             marked_sets.get(new.set_id)
         }).map(|new| {
-            // Replace the set id with rank within the sampled sets
-            // TODO! RANK QUERY! THIS IS O(n^2) TIME TOTAL AS WRITTEN.
             let rank_in_sampled_sets = marked_sets.rank(new.set_id);
             SetElement { set_id: rank_in_sampled_sets, color: new.color }
         }),
