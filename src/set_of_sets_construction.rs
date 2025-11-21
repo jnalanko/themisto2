@@ -66,7 +66,7 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
     
 }
 
-trait ParallelElementGenerator {
+pub trait ParallelElementGenerator {
     fn run(&mut self, callback: impl FnMut(SetElement), n_threads: usize);
 }
 
@@ -75,7 +75,7 @@ trait ParallelElementGenerator {
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
 pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
     mut gen: impl ParallelElementGenerator,
-    mut gen_again: impl ParallelElementGenerator,
+    element_generator_again: impl Iterator<Item = SetElement>, // Single threaded
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
     -> (CSS, Vec<usize>) {
 
@@ -124,7 +124,7 @@ pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
             e.insert(n_distinct_set_found);
             n_distinct_set_found += 1;
             marked_sets.set_bit(set_id, true);
-            marked_set_sizes.push(set_sizes[set_id] as usize);
+            marked_set_sizes.push(set_sizes[set_id]);
         }
     }
 
@@ -145,15 +145,14 @@ pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
     marked_sets.enable_rank();
 
     // Filter the second element iterator and assign new color set ids for the distinct sets
-    let new_callback = |e: SetElement| {
-        if marked_sets.get(e.set_id) {
-            let rank_in_sampled_sets = marked_sets.rank(e.set_id);
-            //SetElement { set_id: rank_in_sampled_sets, color: e.color }
-        }
-    };
+    let new_element_generator = element_generator_again
+        .filter(|new| marked_sets.get(new.set_id))
+        .map(|new| {
+            let rank_in_sampled_sets = marked_sets.rank(new.set_id);
+            SetElement { set_id: rank_in_sampled_sets, color: new.color }
+        });
 
     (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
-
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
