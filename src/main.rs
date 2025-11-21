@@ -22,6 +22,7 @@ mod build_from_ggcat;
 mod set_of_sets_construction;
 mod iterators;
 mod parallel_ms_iteration;
+mod atomic_bitmap;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]

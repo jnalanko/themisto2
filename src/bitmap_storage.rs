@@ -4,7 +4,7 @@ use crossbeam::channel::{Receiver, RecvError, Sender};
 use sbwt::{self, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use bitvec::prelude::*;
 
-use crate::{coloring_interface, iterators::{USizeIterator, USizeIteratorGenerator}};
+use crate::{atomic_bitmap::AtomicBitmap, coloring_interface, iterators::{USizeIterator, USizeIteratorGenerator}, set_of_sets_construction::ParallelElementGenerator};
 
 /*
  *
@@ -103,17 +103,17 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         Box::new(Self{bitmap, n_colors})
     }
     
-    fn new_from_element_generator(element_gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
-        // The set sizes are not needed.
-
-        let mut bitmap = bitvec![0; set_sizes.len() * n_colors];
-        for element in element_gen {
+    fn new_parallel(mut element_gen: impl ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
+        let bitmap = AtomicBitmap::new(set_sizes.len() * n_colors);
+        let callback = |element: crate::set_of_sets_construction::SetElement| {
             let set_id = element.set_id;
             let color_id = element.color;
             bitmap.set(set_id*n_colors + color_id, true);
-        }
+        };
 
-        Box::new(Self{bitmap, n_colors})
+        element_gen.run(callback, n_threads);
+
+        Box::new(Self{bitmap: bitmap.into_bitvec(), n_colors})
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {

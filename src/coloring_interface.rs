@@ -27,10 +27,8 @@ pub trait ColorSetStorage {
     // because there the size of the return value must be known at compile time.
     fn new(sets: impl USizeIteratorGenerator, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
 
-    // Takes a color set stream which first iterates all set ids that have color 0,
-    // then all set ids that have color 1, and so on. For this, the sizes of all the sets
-    // need to be known in advance an provided with `set_sizes`.
-    fn new_from_element_generator(element_gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self>;
+    // Construct in parallel from a generator of set_of_sets_construction::SetElement
+    fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self>;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;
