@@ -115,6 +115,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
     let mut marked_set_sizes = Vec::<usize>::new();
     let mut n_distinct_set_found = 0_usize;
+    let mut total_set_size = 0_usize;
     for set_id in 0..n_sets {
         let fp1 = set_fingerprints[set_id].0;
         let fp2 = set_fingerprints[set_id].1;
@@ -125,8 +126,13 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
             n_distinct_set_found += 1;
             marked_sets.set_bit(set_id, true);
             marked_set_sizes.push(set_sizes[set_id]);
+            total_set_size += set_sizes[set_id];
         }
     }
+
+    log::info!("{} distinct color sets found", n_distinct_set_found);
+    log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_set_found as f64));
+
 
     // Free memory
     drop(set_sizes);
