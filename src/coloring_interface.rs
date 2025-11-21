@@ -215,7 +215,7 @@ mod tests {
         }
         
         #[allow(unused_variables)] // It's a dummy anyway
-        fn new_from_element_generator(gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+        fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
             todo!()
         }
         

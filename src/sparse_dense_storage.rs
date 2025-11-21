@@ -239,7 +239,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         })
     }
 
-    fn new_from_element_generator(mut element_gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+    fn new_parallel(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
         log::info!("Encoding color sets");
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
@@ -286,7 +286,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Fill in the set elements to the zero-initialized data
         log::info!("Encoding sets");
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
-        for element in element_gen {
+        let callback = |element: crate::set_of_sets_construction::SetElement| {
             let set_id = element.set_id;
             let color_id = element.color;
             if is_dense_marks.get(set_id) {
@@ -299,7 +299,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
                 n_elements_added_to_each_sparse[sparse_id] += 1;
             }
-        }
+        };
+
+        element_gen.run(callback, n_threads);
 
         log::info!("Sorting sparse sets");
         let mut sort_buf = Vec::<usize>::new();
