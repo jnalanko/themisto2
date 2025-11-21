@@ -316,8 +316,8 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
 fn build_coloring_with_generators
     <CSS: ColorSetStorage + Send, 
     P1: ParallelElementGenerator, 
-    P2: Iterator<Item = crate::set_of_sets_construction::SetElement>>
-    (element_gen_1: P1, element_gen_2: P2, n_sets: usize, n_colors: usize, n_threads: usize, sample_distance: usize)
+    P2: ParallelElementGenerator>
+    (element_gen_1: P1, element_gen_2: P2, n_sets: usize, n_colors: usize, n_threads: usize)
     -> (CSS,  Vec<usize>) {
 
     log::info!("Building distinct color sets");
@@ -341,12 +341,12 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
 
     let (css, colex_to_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
+        let element_gen_2 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads)
     } else {
         let element_gen_1 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads)
     };
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
