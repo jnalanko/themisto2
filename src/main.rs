@@ -206,7 +206,7 @@ impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
     }
 }
 
-struct ColorElementGenerator<'a> {
+struct DeduplicatingColorElementGenerator<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     input: ChainedInputStream,
     cur_color: usize,
@@ -214,7 +214,7 @@ struct ColorElementGenerator<'a> {
     output_buf: (usize, Vec<usize>), // (Color, set ids)
 }
 
-impl<'a> ColorElementGenerator<'a> {
+impl<'a> DeduplicatingColorElementGenerator<'a> {
     pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
@@ -308,7 +308,7 @@ impl Iterator for MegaSimpleColorElementGenerator {
 }
 
 
-impl<'a> Iterator for ColorElementGenerator<'a> {
+impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
     type Item = SetElement;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -339,7 +339,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
     }
 }
 
-impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for ColorElementGenerator<'a> {
+impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
         // TODO: make this multithreaded
         while let Some(elem) = self.next() {
@@ -376,11 +376,11 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
 
     let (css, colex_to_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
     } else {
-        let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let element_gen_1 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
     };
 
