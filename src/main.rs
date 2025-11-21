@@ -250,6 +250,7 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
                     // Push to output buffer and start returning
                     let mut hashset = HashSet::<usize>::new();
                     std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
+                    log::info!("Color {} set ids ready for processing", self.cur_color);
                     let ids: Vec<usize> = hashset.into_iter().collect();
                     self.output_buf = (self.cur_color, ids);
                     self.cur_color += 1;
