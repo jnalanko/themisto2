@@ -6,6 +6,7 @@ use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
+use crate::atomic_int_vec::AtomicIntVec;
 use crate::bitmap_storage;
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
@@ -277,9 +278,17 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
-        // Zero-initialized data 
-        let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
+        // Zero-initialized data with atomic updates 
+        //let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
+        let mut sparse_sets = AtomicIntVec::new(n_sparse_sets, color_id_bit_width);
         let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
+
+        let mut sparse_set_insertion_points = vec![0_usize; n_sparse_sets];
+        let mut total_sparse_set_size = 0_usize;
+        for (i, s) in set_sizes.iter().enumerate() {
+            sparse_set_insertion_points[i] = total_sparse_set_size;
+            total_sparse_set_size += s;
+        }
 
         log::info!("Building rank support for dense marks");
         let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
@@ -298,8 +307,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 dense_sets.set(dense_id * n_colors + color_id, true);
             } else {
                 let sparse_id = is_dense_marks.rank_zero(set_id);
-                sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
-                n_elements_added_to_each_sparse[sparse_id] += 1;
+                sparse_sets.set(sparse_set_insertion_points[sparse_id], color_id);
+                sparse_set_insertion_points[sparse_id] += 1;
             }
         };
 
