@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::PathBuf};
 
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge as _, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 
 use crate::set_of_sets_construction::SetElement;
@@ -27,7 +27,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
         let k = self.streaming_index.k();
         let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
         thread_pool.install(|| {
-            self.input_files.par_iter().enumerate().for_each(|(color, file_path)| {
+            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
                 log::info!("Processing color {}", color);
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
                 while let Some(rec) = reader.read_next_mut().unwrap() {
