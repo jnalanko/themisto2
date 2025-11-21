@@ -1,5 +1,5 @@
 use simple_sds_sbwt::int_vector::IntVector;
-use simple_sds_sbwt::raw_vector::AccessRaw;
+use simple_sds_sbwt::raw_vector::{AccessRaw, RawVector};
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
@@ -243,6 +243,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
 
     fn new_parallel(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
+
+        // TODO This function has a ton of repetition. Should clean this up
+
         log::info!("Encoding color sets");
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
@@ -261,33 +264,21 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         }
         // Todo: shrink to fit dense marks
 
-        let mut sparse_iter_pos = 0;
-        let sparse_size_iter = std::iter::from_fn(|| {
-            while sparse_iter_pos < is_dense_marks.len() && is_dense_marks.bit(sparse_iter_pos) {
-                sparse_iter_pos += 1;
-            }
-            if sparse_iter_pos < is_dense_marks.len() {
-                let size = set_sizes[sparse_iter_pos];
-                sparse_iter_pos += 1;
-                Some(size)
-            } else {
-                None
-            }
-        });
-
-
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data with atomic updates 
-        //let mut sparse_sets = SortedIntVecs::new_with_sizes(sparse_size_iter, n_sparse_sets, color_id_bit_width);
         let mut sparse_sets = AtomicIntVec::new(n_sparse_sets, color_id_bit_width);
         let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
 
         let mut sparse_set_insertion_points = vec![0_usize; n_sparse_sets];
         let mut total_sparse_set_size = 0_usize;
+        let mut ugly_sparse_id_again = 0_usize;
         for (i, s) in set_sizes.iter().enumerate() {
-            sparse_set_insertion_points[i] = total_sparse_set_size;
-            total_sparse_set_size += s;
+            if !is_dense_marks.bit(i) {
+                sparse_set_insertion_points[ugly_sparse_id_again] = total_sparse_set_size;
+                total_sparse_set_size += s;
+                ugly_sparse_id_again += 1;
+            }
         }
 
         log::info!("Building rank support for dense marks");
@@ -301,8 +292,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             let set_id = element.set_id;
             let color_id = element.color;
             if is_dense_marks.get(set_id) {
-                // TODO: make faster without calling something like get_mut
-                // and instead calling a function that directly sets the bit
                 let dense_id = is_dense_marks.rank(set_id);
                 dense_sets.set(dense_id * n_colors + color_id, true);
             } else {
@@ -311,21 +300,40 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 sparse_set_insertion_points[sparse_id] += 1;
             }
         };
-
         element_gen.run(callback, n_threads);
+
+        // Transfer atomic data to SortedIntVecs
+        // TODO: we should be able to do this without making a copy.
+        log::info!("Re-encoding sparse sets");
+        let mut re_encoded_sparse_sets = SortedIntVecs::new(color_id_bit_width);
+        let mut total_elements_pushed = 0_usize;
+        for set_id in 0..set_sizes.len() {
+            if !is_dense_marks.get(set_id) {
+                let mut offset = 0_usize;
+                re_encoded_sparse_sets.push(std::iter::from_fn(|| {
+                    if offset < set_sizes[set_id] {
+                        Some(sparse_sets.get(total_elements_pushed + offset))
+                    } else {
+                        None
+                    }
+                }));
+                total_elements_pushed += offset;
+            } 
+        }
+        drop(sparse_sets); // Free memory
 
         log::info!("Sorting sparse sets");
         let mut sort_buf = Vec::<usize>::new();
-        for sparse_id in 0..sparse_sets.n_sets() {
+        for sparse_id in 0..re_encoded_sparse_sets.n_sets() {
             sort_buf.clear();
 
-            let piece = sparse_sets.get(sparse_id);
+            let piece = re_encoded_sparse_sets.get(sparse_id);
             for i in piece.start..piece.end {
                 sort_buf.push(piece.vec.get(i) as usize);
             }
             sort_buf.sort();
             for offset in 0..sort_buf.len() {
-                sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
+                re_encoded_sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
             }
         }
         log::info!("Sparse sets sorted");
@@ -335,7 +343,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 bitmap_data: dense_sets.into_bitvec(), 
                 individual_length: n_colors
             },
-            sparse_sets,
+            sparse_sets: re_encoded_sparse_sets,
             n_colors,
             is_dense_marks,
         })
