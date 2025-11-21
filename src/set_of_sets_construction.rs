@@ -68,6 +68,11 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 
 pub trait ParallelElementGenerator {
     fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize);
+
+    // Takes a bit vector with rank support that indicates which sets should be passed
+    // to the callback of run. The set ids will be remapped so that the first set that
+    // passes the filter gets id 0, the second that passes the filter gets id 1, and so on.
+    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector);
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
@@ -75,7 +80,7 @@ pub trait ParallelElementGenerator {
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
 pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
     mut gen: impl ParallelElementGenerator,
-    element_generator_again: impl Iterator<Item = SetElement>, // Single threaded
+    mut gen_again: impl ParallelElementGenerator,
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
     -> (CSS, Vec<usize>) {
 
@@ -152,14 +157,15 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     marked_sets.enable_rank();
 
     // Filter the second element iterator and assign new color set ids for the distinct sets
-    let new_element_generator = element_generator_again
+    gen_again.set_filter(marked_sets);
+    /*let new_element_generator = gen_again
         .filter(|new| marked_sets.get(new.set_id))
         .map(|new| {
             let rank_in_sampled_sets = marked_sets.rank(new.set_id);
             SetElement { set_id: rank_in_sampled_sets, color: new.color }
         });
-
-    (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
+    */
+    (*CSS::new_parallel(gen_again, n_colors, &marked_set_sizes, n_threads), old_id_to_new_id)
 }
 
 #[cfg(test)]
