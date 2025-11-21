@@ -103,18 +103,14 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
         Box::new(Self{bitmap, n_colors})
     }
     
-    fn new_from_transpose(mut set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, _set_sizes: &[usize]) -> Box<Self> {
+    fn new_from_element_generator(element_gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
         // The set sizes are not needed.
 
-        let mut bitmap = bitvec![];
-        let empty_set = bitvec![0; n_colors];
-        let mut color_id = 0_usize;
-        while let Some(mut set_ids) = set_ids_per_color.next() {
-            bitmap.extend_from_bitslice(&empty_set); // TODO: allocate everything up front
-            while let Some(set_id) = set_ids.next() {
-                bitmap.set(set_id*n_colors + color_id, true);
-            }
-            color_id += 1;
+        let mut bitmap = bitvec![0; set_sizes.len() * n_colors];
+        for element in element_gen {
+            let set_id = element.set_id;
+            let color_id = element.color;
+            bitmap.set(set_id*n_colors + color_id, true);
         }
 
         Box::new(Self{bitmap, n_colors})
