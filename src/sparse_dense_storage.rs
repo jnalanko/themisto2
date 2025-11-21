@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::Acquire;
+use std::sync::atomic::Ordering::{Acquire, Release};
 
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::raw_vector::{AccessRaw, RawVector};
@@ -278,7 +278,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut ugly_sparse_id_again = 0_usize;
         for (i, s) in set_sizes.iter().enumerate() {
             if !is_dense_marks.bit(i) {
-                sparse_set_insertion_points[ugly_sparse_id_again].store(total_sparse_set_size as u64, Acquire);
+                sparse_set_insertion_points[ugly_sparse_id_again].store(total_sparse_set_size as u64, Release);
                 total_sparse_set_size += s;
                 ugly_sparse_id_again += 1;
             }
