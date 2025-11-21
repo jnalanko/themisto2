@@ -221,6 +221,22 @@ impl<'a> ColorElementGenerator<'a> {
             output_buf: (0, vec![]),
         }
     }
+
+    fn push_elements(&mut self, seq: &[u8]) {
+        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
+        for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+            assert!(colex.len() == 1);
+            self.cur_color_set_ids.insert(colex.start);
+        }
+    }
+
+    fn hash_set_to_output_buf(&mut self) {
+        let mut hashset = HashSet::<usize>::new();
+        std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
+        let ids: Vec<usize> = hashset.into_iter().collect();
+        self.output_buf = (self.cur_color, ids);
+        self.cur_color += 1;
+    }
 }
 
 struct MegaSimpleColorElementGenerator {
@@ -267,11 +283,13 @@ impl Iterator for MegaSimpleColorElementGenerator {
             Some(elem)
         }
     }
+
 }
 
 
 impl<'a> Iterator for ColorElementGenerator<'a> {
     type Item = SetElement;
+
 
     fn next(&mut self) -> Option<Self::Item> {
         let k = self.streaming_index.k();
@@ -285,35 +303,24 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
         loop {
             if self.input.stream_next().is_some() {
                 let color = self.input.cur_file_idx();
-                let seq = self.input.get_seq_buf();
+                let seq = self.input.get_seq_buf_mut();
                 if color == self.cur_color {
-                    let ms_iter = self.streaming_index.matching_statistics_iter(seq);
-                    for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-                        assert!(colex.len() == 1);
-                        self.cur_color_set_ids.insert(colex.start);
-                    }
+                    push_elements(&seq);
+                    reverse_complement_in_place(&mut seq);
+                    push_elements(&seq);
                 } else {
                     // Push to output buffer and start returning
-                    let mut hashset = HashSet::<usize>::new();
-                    std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
-                    let ids: Vec<usize> = hashset.into_iter().collect();
-                    self.output_buf = (self.cur_color, ids);
-                    self.cur_color += 1;
+                    self.hash_set_to_output_buf();
 
-                    let ms_iter = self.streaming_index.matching_statistics_iter(seq);
-                    for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-                        assert!(colex.len() == 1);
-                        self.cur_color_set_ids.insert(colex.start);
-                    }
+                    push_elements(&seq);
+                    reverse_complement_in_place(&mut seq);
+                    push_elements(&seq);
 
                     return self.next();
                 }
             } else {
                 // End of input. Push the set ids of the last color to the output buffer
-                let mut hashset = HashSet::<usize>::new();
-                std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
-                let ids: Vec<usize> = hashset.into_iter().collect();
-                self.output_buf = (self.cur_color, ids);
+                self.hash_set_to_output_buf();
                 return self.next();
             }
         }
