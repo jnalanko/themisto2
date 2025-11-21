@@ -67,9 +67,7 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
-/// The element generators must generate the elements in increasing order of element: first all set ids
-/// with element 0, then all set ids with element 1, and so on. There must not be duplicate elements
-/// in the same set.
+/// There must not be duplicate elements in the same set!!
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
 pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
     element_generator: impl Iterator<Item = SetElement> + Send, 
