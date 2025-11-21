@@ -291,6 +291,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Fill in the set elements to the zero-initialized data
         log::info!("Encoding sets");
         let callback = |element: crate::set_of_sets_construction::SetElement| {
+            // THERE IS A PARALLELISM BUG HERE: TWO THREADS MIGHT APPEND TO THE SAME
+            // SET AT THE SAME TIME. This is why i'm calling with with just one thread below.
             let set_id = element.set_id;
             let color_id = element.color;
             if is_dense_marks.get(set_id) {
@@ -302,7 +304,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 sparse_set_insertion_points[sparse_id].fetch_add(1, Acquire);
             }
         };
-        element_gen.run(callback, n_threads);
+        element_gen.run(callback, 1); // Use more threads when the parallism bug in the callback is fixed
 
         // Transfer atomic data to SortedIntVecs
         // TODO: we should be able to do this without making a copy.
