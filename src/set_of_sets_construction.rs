@@ -73,7 +73,7 @@ pub trait ParallelElementGenerator {
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
 /// There must not be duplicate elements in the same set!
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
-pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
+pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
     mut gen: impl ParallelElementGenerator,
     element_generator_again: impl Iterator<Item = SetElement>, // Single threaded
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
@@ -155,116 +155,26 @@ pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
     (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
 }
 
-/// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
-/// There must not be duplicate elements in the same set!!
-/// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
-pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
-    element_generator: impl Iterator<Item = SetElement> + Send, 
-    element_generator_again: impl Iterator<Item = SetElement> + Send, 
-    n_sets: usize, 
-    n_colors: usize,
-    n_threads: usize,
-    random_seed: usize)
-    -> (CSS, Vec<usize>) {
-
-    // TODO: all the atomic operations here are with SeqCst ordering because I'm not sure
-    // if the stores here are guaranteed to happen before loads. There is probably a better
-    // way to do this with Acquire/Release ordering, or with fences.
-
-    // Using just one thread because multithreading makes this slower the moment. TODO TODO.
-    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-    thread_pool.install(|| {
-
-        // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
-        // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
-        let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
-        let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
-
-        // 128-bit fingerprints for sets of elements. Again we split each u128 into
-        // two u64s.
-        let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
-        set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
-        let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
-        set_sizes.resize_with(n_sets, || AtomicU64::new(0));
-
-        element_generator.for_each(|new| { 
-            //dbg!(&new);
-            // TODO: this doesn't really parallize this way. Instead of this, I need iterators
-            // for pieces of the input, where each initializes its own matching statistics algorithm.
-            let (fp1, fp2) = element_fingerprints[new.color];
-
-            set_fingerprints[new.set_id].0.fetch_xor(fp1, SeqCst);
-            set_fingerprints[new.set_id].1.fetch_xor(fp2, SeqCst);
-            set_sizes[new.set_id].fetch_add(1, SeqCst);
-        });
-
-        // Make set fingeprints not atomic
-        let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
-            |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
-        ).collect();
-
-        // Make sizes not atomic
-        let set_sizes: Vec<usize> = set_sizes.into_iter().map(
-            |sz| sz.load(SeqCst) as usize
-        ).collect();
-
-        // Mark the lowest set id where each distinct fingerprint occurs 
-        let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
-        let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
-        let mut marked_set_sizes = Vec::<usize>::new();
-        let mut n_distinct_set_found = 0_usize;
-        for set_id in 0..n_sets {
-            let fp1 = set_fingerprints[set_id].0;
-            let fp2 = set_fingerprints[set_id].1;
-            let fp = (fp1, fp2);
-
-            if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
-                e.insert(n_distinct_set_found);
-                n_distinct_set_found += 1;
-                marked_sets.set_bit(set_id, true);
-                marked_set_sizes.push(set_sizes[set_id] as usize);
-            }
-        }
-
-        // Free memory
-        drop(set_sizes);
-        drop(element_fingerprints);
-
-        // Build original set id -> new set id vector
-        let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
-            |fingerprint| distinct_fingerprints[fingerprint])
-            .collect();
-
-        // Free memory
-        drop(set_fingerprints);
-
-        // Build ran on marked sets
-        let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
-        marked_sets.enable_rank();
-
-        // Filter the second element iterator and assign new color set ids for the distinct sets
-        let new_element_generator = element_generator_again
-            .filter(|new| marked_sets.get(new.set_id))
-            .map(|new| {
-                let rank_in_sampled_sets = marked_sets.rank(new.set_id);
-                SetElement { set_id: rank_in_sampled_sets, color: new.color }
-            });
-
-        (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
-    })
-
-}
-
 #[cfg(test)]
 mod tests{
     use crate::{coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
 
     use super::*;
 
+    impl ParallelElementGenerator for Vec<Vec<usize>> {
+        fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, _n_threads: usize) {
+            for (set_id, set) in self.iter().enumerate() {
+                for &color in set.iter() {
+                    callback(SetElement { set_id, color});
+                }
+            }
+        }
+    }
+
     #[test]
     fn set_of_sets_test() {
         // Define some sets of sets
-        let sets = [
+        let sets = vec![
             vec![0, 1, 2],
             vec![2, 3],
             vec![0, 1, 2], // duplicate of first set
@@ -292,7 +202,7 @@ mod tests{
         dbg!(&elements);
         
         let (distinct_sets, old_id_to_new_id) = construct_from_generators_that_do_not_give_duplicates::<SparseDenseStorage>(
-            elements.iter().copied(),
+            sets.clone(),
             elements.iter().copied(),
             sets.len(),
             5,
