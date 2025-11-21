@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::Acquire;
+
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::raw_vector::{AccessRaw, RawVector};
 use simple_sds_sbwt::serialize::Serialize;
@@ -270,12 +273,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_sets = AtomicIntVec::new(n_sparse_sets, color_id_bit_width);
         let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
 
-        let mut sparse_set_insertion_points = vec![0_usize; n_sparse_sets];
+        let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
         let mut total_sparse_set_size = 0_usize;
         let mut ugly_sparse_id_again = 0_usize;
         for (i, s) in set_sizes.iter().enumerate() {
             if !is_dense_marks.bit(i) {
-                sparse_set_insertion_points[ugly_sparse_id_again] = total_sparse_set_size;
+                sparse_set_insertion_points[ugly_sparse_id_again].store(total_sparse_set_size as u64, Acquire);
                 total_sparse_set_size += s;
                 ugly_sparse_id_again += 1;
             }
@@ -287,7 +290,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         // Fill in the set elements to the zero-initialized data
         log::info!("Encoding sets");
-        let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
         let callback = |element: crate::set_of_sets_construction::SetElement| {
             let set_id = element.set_id;
             let color_id = element.color;
@@ -296,8 +298,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 dense_sets.set(dense_id * n_colors + color_id, true);
             } else {
                 let sparse_id = is_dense_marks.rank_zero(set_id);
-                sparse_sets.set(sparse_set_insertion_points[sparse_id], color_id);
-                sparse_set_insertion_points[sparse_id] += 1;
+                sparse_sets.set(sparse_set_insertion_points[sparse_id].load(Acquire) as usize, color_id);
+                sparse_set_insertion_points[sparse_id].fetch_add(1, Acquire);
             }
         };
         element_gen.run(callback, n_threads);
@@ -312,7 +314,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let mut offset = 0_usize;
                 re_encoded_sparse_sets.push(std::iter::from_fn(|| {
                     if offset < set_sizes[set_id] {
-                        Some(sparse_sets.get(total_elements_pushed + offset))
+                        let x = sparse_sets.get(total_elements_pushed + offset);
+                        offset += 1;
+                        Some(x)
                     } else {
                         None
                     }
