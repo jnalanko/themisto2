@@ -24,6 +24,10 @@ impl ChainedInputStream {
         &self.seq_buf
     }
 
+    pub fn get_seq_buf_mut(&mut self) -> &mut [u8] {
+        &mut self.seq_buf
+    }
+
     pub fn done(&self) -> bool {
         self.cur_file_idx == self.paths.len()
     }

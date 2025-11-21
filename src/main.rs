@@ -5,7 +5,7 @@ use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand, builder::styling::Color};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use sparse_dense_storage::SparseDenseStorage;
 
 use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, set_of_sets_construction::SetElement};
@@ -235,7 +235,14 @@ impl MegaSimpleColorElementGenerator {
         let mut elements: Vec<SetElement> = vec![];
         while let Some(_) = input.stream_next() {
             let color = input.cur_file_idx();
-            let seq = input.get_seq_buf();
+            let seq = input.get_seq_buf_mut();
+            let ms_iter = streaming_index.matching_statistics_iter(seq);
+            for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+                assert!(colex.len() == 1);
+                elements.push(SetElement { set_id: colex.start, color });
+            }
+
+            reverse_complement_in_place(seq);
             let ms_iter = streaming_index.matching_statistics_iter(seq);
             for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
                 assert!(colex.len() == 1);
