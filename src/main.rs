@@ -233,7 +233,6 @@ impl<'a> ColorElementGenerator<'a> {
             self.cur_color_set_ids.insert(colex.start);
         }
 
-
         reverse_complement_in_place(seq);
 
         let ms_iter = self.streaming_index.matching_statistics_iter(seq);
@@ -309,7 +308,6 @@ impl Iterator for MegaSimpleColorElementGenerator {
 impl<'a> Iterator for ColorElementGenerator<'a> {
     type Item = SetElement;
 
-
     fn next(&mut self) -> Option<Self::Item> {
 
         if let Some(id) = self.output_buf.1.pop() {
@@ -338,17 +336,23 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
     }
 }
 
-fn build_coloring<CSS: ColorSetStorage + Send>(
-    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize) -> CompactColexKmers<CSS> {
+impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for ColorElementGenerator<'a> {
+    fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        // TODO: make this multithreaded
+        while let Some(elem) = self.next() {
+            callback(elem);
+        }
+    }
+}
 
-    let n_colors = input_paths.len();
-    log::info!("Building distinct color set structure");
+fn build_coloring_with_generators
+    <CSS: ColorSetStorage + Send, 
+    P1: ParallelElementGenerator, 
+    P2: Iterator<Item = crate::set_of_sets_construction::SetElement>>
+    (element_gen_1: P1, element_gen_2: P2, sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, n_colors: usize, n_threads: usize, sample_distance: usize)
+    -> CompactColexKmers<CSS> {
 
-    let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-    let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-    //let element_gen_1 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-    //let element_gen_2 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-
+    log::info!("Building distinct color sets");
     let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
         element_gen_2,
@@ -360,6 +364,25 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
     CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, css, n_colors, sample_distance, n_threads)
+
+}
+
+fn build_coloring<CSS: ColorSetStorage + Send>(
+    sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool) -> CompactColexKmers<CSS> {
+
+    let n_colors = input_paths.len();
+    log::info!("Building distinct color set structure");
+
+    if from_unitigs {
+        let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt, lcs, n_colors, n_threads, sample_distance)
+    } else {
+        let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt, lcs, n_colors, n_threads, sample_distance)
+    }
+
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
