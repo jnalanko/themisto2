@@ -301,8 +301,21 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             }
         }
 
+        log::info!("Sorting sparse sets");
+        let mut sort_buf = Vec::<usize>::new();
+        for sparse_id in 0..sparse_sets.n_sets() {
+            sort_buf.clear();
 
-        // TODO: SORT SPARSE SETS
+            let piece = sparse_sets.get(sparse_id);
+            for i in piece.start..piece.end {
+                sort_buf.push(piece.vec.get(i) as usize);
+            }
+            sort_buf.sort();
+            for offset in 0..sort_buf.len() {
+                sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
+            }
+        }
+        log::info!("Sparse sets sorted");
 
         Box::new(Self {
             dense_sets,
@@ -537,8 +550,8 @@ impl SortedIntVecs {
         self.concat.resize(self.concat.len(), 0);
     }
 
-    fn get(&self, vec_idx: usize) -> IntVecSlice<'_> {
-        IntVecSlice{vec: &self.concat, start: self.ends[vec_idx], end: self.ends[vec_idx+1]}
+    fn get(&self, set_id: usize) -> IntVecSlice<'_> {
+        IntVecSlice{vec: &self.concat, start: self.ends[set_id], end: self.ends[set_id+1]}
     }
 
     fn n_sets(&self) -> usize {
