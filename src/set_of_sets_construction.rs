@@ -93,21 +93,22 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
 
     let callback = |e: SetElement| {
         let (fp1, fp2) = element_fingerprints[e.color];
-        set_fingerprints[e.set_id].0.fetch_xor(fp1, SeqCst);
-        set_fingerprints[e.set_id].1.fetch_xor(fp2, SeqCst);
-        set_sizes[e.set_id].fetch_add(1, SeqCst);
+        set_fingerprints[e.set_id].0.fetch_xor(fp1, Release);
+        set_fingerprints[e.set_id].1.fetch_xor(fp2, Release);
+        set_sizes[e.set_id].fetch_add(1, Release);
     };
 
     gen.run(callback, n_threads);
 
     // Make set fingeprints not atomic
     let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
-        |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
+        |pair| (pair.0.load(Acquire), pair.1.load(Acquire))
+        // The Acquire here means that the Release-writes above must be visible before these loads (I think).
     ).collect();
 
     // Make sizes not atomic
     let set_sizes: Vec<usize> = set_sizes.into_iter().map(
-        |sz| sz.load(SeqCst) as usize
+        |sz| sz.load(Acquire) as usize
     ).collect();
 
     // Mark the lowest set id where each distinct fingerprint occurs 
