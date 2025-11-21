@@ -228,12 +228,12 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
     type Item = SetElement;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.input.done() { return None }
         let k = self.streaming_index.k();
 
         if let Some(id) = self.output_buf.1.pop() {
             return Some(SetElement { set_id: id, color: self.output_buf.0 });
         }
+        if self.input.done() { return None }
 
         // Read and process all sequences of the current color
         loop {
@@ -250,7 +250,6 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
                     // Push to output buffer and start returning
                     let mut hashset = HashSet::<usize>::new();
                     std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
-                    log::info!("Color {} set ids ready for processing", self.cur_color);
                     let ids: Vec<usize> = hashset.into_iter().collect();
                     self.output_buf = (self.cur_color, ids);
                     self.cur_color += 1;
@@ -264,7 +263,12 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
                     return self.next();
                 }
             } else {
-                return None;
+                // End of input. Push the set ids of the last color to the output buffer
+                let mut hashset = HashSet::<usize>::new();
+                std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
+                let ids: Vec<usize> = hashset.into_iter().collect();
+                self.output_buf = (self.cur_color, ids);
+                return self.next();
             }
         }
     }
