@@ -279,7 +279,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
     let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
 
-    let (css, colex_to_id) = set_of_sets_construction::construct::<CSS>(
+    let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
         element_gen_2,
         sbwt.n_sets(),
