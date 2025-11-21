@@ -80,6 +80,9 @@ pub enum Subcommands {
         #[arg(help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
+        #[arg(help = "Optional: Build from unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", short, long)]
+        from_unitigs: bool,
+
         #[arg(help = "Directory for temporary files", long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
@@ -596,7 +599,11 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path} => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, from_unitigs} => {
+            if k % 2 == 0 && from_unitigs {
+                panic!("--from_unitigs requires odd k");
+            }
+
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
@@ -629,12 +636,12 @@ fn main() {
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance);
+                    let index = build_coloring::<BitmapStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance, from_unitigs);
                     log::info!("Serializing bitmap index to {}", output.display());
                     write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance);
+                    let index = build_coloring::<SparseDenseStorage>(Arc::new(sbwt), lcs, &input_paths, n_threads, sample_distance, from_unitigs);
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
