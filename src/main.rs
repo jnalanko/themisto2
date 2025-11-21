@@ -242,6 +242,8 @@ impl MegaSimpleColorElementGenerator {
                 elements.push(SetElement { set_id: colex.start, color });
             }
         }
+        elements.sort();
+        elements.dedup();
         Self { elements, pos: 0}
     }
 }

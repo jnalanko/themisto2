@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
     pub set_id: usize,
     pub color: usize,
