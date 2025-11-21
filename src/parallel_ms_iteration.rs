@@ -5,9 +5,21 @@ use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement
 
 use crate::set_of_sets_construction::SetElement;
 
-struct MsElementGenerator<'a> {
+pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
+}
+
+impl<'a> MsElementGenerator<'a> {
+    pub fn new(
+        input_files: Vec<PathBuf>,
+        streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
+    ) -> Self {
+        Self {
+            input_files,
+            streaming_index,
+        }
+    }
 }
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {

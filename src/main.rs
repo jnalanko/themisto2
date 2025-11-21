@@ -8,7 +8,7 @@ use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, set_of_sets_construction::SetElement};
+use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 mod EM;
 mod bitmap_storage;
@@ -344,7 +344,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
-    let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
     let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
     //let element_gen_1 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
     //let element_gen_2 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
