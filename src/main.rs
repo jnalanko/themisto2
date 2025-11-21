@@ -261,8 +261,13 @@ impl MegaSimpleColorElementGenerator {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         let k = sbwt.k();
         let mut elements: Vec<SetElement> = vec![];
+        let mut prev_color = usize::MAX;
         while let Some(_) = input.stream_next() {
             let color = input.cur_file_idx();
+            if color != prev_color {
+                log::info!("Processing color {}", color);
+            }
+            prev_color = color;
             let seq = input.get_seq_buf_mut();
             let ms_iter = streaming_index.matching_statistics_iter(seq);
             for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
