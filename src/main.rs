@@ -222,7 +222,19 @@ impl<'a> ColorElementGenerator<'a> {
         }
     }
 
-    fn push_elements(&mut self, seq: &[u8]) {
+    fn process_current_seq_in_input(&mut self) {
+        let seq = self.input.get_seq_buf_mut();
+        let k = self.streaming_index.k();
+
+        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
+        for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+            assert!(colex.len() == 1);
+            self.cur_color_set_ids.insert(colex.start);
+        }
+
+
+        reverse_complement_in_place(seq);
+
         let ms_iter = self.streaming_index.matching_statistics_iter(seq);
         for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
             assert!(colex.len() == 1);
@@ -292,7 +304,6 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
 
 
     fn next(&mut self) -> Option<Self::Item> {
-        let k = self.streaming_index.k();
 
         if let Some(id) = self.output_buf.1.pop() {
             return Some(SetElement { set_id: id, color: self.output_buf.0 });
@@ -303,19 +314,12 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
         loop {
             if self.input.stream_next().is_some() {
                 let color = self.input.cur_file_idx();
-                let seq = self.input.get_seq_buf_mut();
                 if color == self.cur_color {
-                    push_elements(&seq);
-                    reverse_complement_in_place(&mut seq);
-                    push_elements(&seq);
+                    self.process_current_seq_in_input();
                 } else {
                     // Push to output buffer and start returning
                     self.hash_set_to_output_buf();
-
-                    push_elements(&seq);
-                    reverse_complement_in_place(&mut seq);
-                    push_elements(&seq);
-
+                    self.process_current_seq_in_input();
                     return self.next();
                 }
             } else {
