@@ -349,22 +349,20 @@ fn build_coloring_with_generators
     <CSS: ColorSetStorage + Send, 
     P1: ParallelElementGenerator, 
     P2: Iterator<Item = crate::set_of_sets_construction::SetElement>>
-    (element_gen_1: P1, element_gen_2: P2, sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, n_colors: usize, n_threads: usize, sample_distance: usize)
-    -> CompactColexKmers<CSS> {
+    (element_gen_1: P1, element_gen_2: P2, n_sets: usize, n_colors: usize, n_threads: usize, sample_distance: usize)
+    -> (CSS,  Vec<usize>) {
 
     log::info!("Building distinct color sets");
     let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
         element_gen_2,
-        sbwt.n_sets(),
+        n_sets,
         n_colors,
         n_threads,
         1232563, // Random seed. Todo: be more random
     );
 
-    log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, css, n_colors, sample_distance, n_threads)
-
+    (css, colex_to_id)
 }
 
 fn build_coloring<CSS: ColorSetStorage + Send>(
@@ -373,15 +371,18 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
-    if from_unitigs {
+    let (css, colex_to_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
         let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt, lcs, n_colors, n_threads, sample_distance)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
     } else {
         let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt, lcs, n_colors, n_threads, sample_distance)
-    }
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads, sample_distance)
+    };
+
+    log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, css, n_colors, sample_distance, n_threads)
 
 }
 
