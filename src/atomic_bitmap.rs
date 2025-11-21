@@ -2,18 +2,18 @@ use bitvec::vec::BitVec;
 
 pub struct AtomicBitmap {
     pub data: Vec<std::sync::atomic::AtomicU64>,
-    pub size: usize, // Number of bits stored. The last word may be only partially used.
+    pub len: usize, // Number of bits stored. The last word may be only partially used.
 } 
 
 impl AtomicBitmap {
-    pub fn new(size: usize) -> Self {
-        let n_words = size.div_ceil(64);
+    pub fn new(len: usize) -> Self {
+        let n_words = len.div_ceil(64);
         let data = (0..n_words).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
-        Self {data, size}
+        Self {data, len}
     }
 
     pub fn set(&self, index: usize, value: bool) {
-        assert!(index < self.size);
+        assert!(index < self.len);
         let word_idx = index / 64;
         let bit_idx = index % 64;
         let mask = 1_u64 << bit_idx;
@@ -25,7 +25,7 @@ impl AtomicBitmap {
     }
 
     pub fn get(&self, index: usize) -> bool {
-        assert!(index < self.size);
+        assert!(index < self.len);
         let word_idx = index / 64;
         let bit_idx = index % 64;
         let mask = 1_u64 << bit_idx;
@@ -42,7 +42,7 @@ impl AtomicBitmap {
             |x| x.load(std::sync::atomic::Ordering::Acquire) as usize
         ).collect();
         let mut bv = BitVec::from_vec(non_atomic);
-        bv.truncate(self.size); // Truncate the leftover bits in the last word
+        bv.truncate(self.len); // Truncate the leftover bits in the last word
         bv
     }
 }
