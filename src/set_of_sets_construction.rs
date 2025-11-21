@@ -79,7 +79,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
     -> (CSS, Vec<usize>) {
 
-    // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
+    // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be
     // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
     let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
     let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
