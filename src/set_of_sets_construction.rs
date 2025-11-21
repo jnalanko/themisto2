@@ -66,6 +66,96 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
     
 }
 
+trait ParallelElementGenerator {
+    fn run(&mut self, callback: impl FnMut(SetElement), n_threads: usize);
+}
+
+/// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
+/// There must not be duplicate elements in the same set!
+/// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
+pub fn new_parallel_function_todo_give_name<CSS: ColorSetStorage + Send>(
+    mut gen: impl ParallelElementGenerator,
+    mut gen_again: impl ParallelElementGenerator,
+    n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
+    -> (CSS, Vec<usize>) {
+
+    // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be,
+    // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
+    let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
+    let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
+
+    // 128-bit fingerprints for sets of elements. Again we split each u128 into
+    // two u64s.
+    let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
+    set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
+    let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
+    set_sizes.resize_with(n_sets, || AtomicU64::new(0));
+
+    let callback = |e: SetElement| {
+        let (fp1, fp2) = element_fingerprints[e.color];
+        set_fingerprints[e.set_id].0.fetch_xor(fp1, SeqCst);
+        set_fingerprints[e.set_id].1.fetch_xor(fp2, SeqCst);
+        set_sizes[e.set_id].fetch_add(1, SeqCst);
+    };
+
+    gen.run(callback, n_threads);
+
+    // Make set fingeprints not atomic
+    let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
+        |pair| (pair.0.load(SeqCst), pair.1.load(SeqCst))
+    ).collect();
+
+    // Make sizes not atomic
+    let set_sizes: Vec<usize> = set_sizes.into_iter().map(
+        |sz| sz.load(SeqCst) as usize
+    ).collect();
+
+    // Mark the lowest set id where each distinct fingerprint occurs 
+    let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
+    let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
+    let mut marked_set_sizes = Vec::<usize>::new();
+    let mut n_distinct_set_found = 0_usize;
+    for set_id in 0..n_sets {
+        let fp1 = set_fingerprints[set_id].0;
+        let fp2 = set_fingerprints[set_id].1;
+        let fp = (fp1, fp2);
+
+        if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
+            e.insert(n_distinct_set_found);
+            n_distinct_set_found += 1;
+            marked_sets.set_bit(set_id, true);
+            marked_set_sizes.push(set_sizes[set_id] as usize);
+        }
+    }
+
+    // Free memory
+    drop(set_sizes);
+    drop(element_fingerprints);
+
+    // Build original set id -> new set id vector
+    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
+        |fingerprint| distinct_fingerprints[fingerprint])
+        .collect();
+
+    // Free memory
+    drop(set_fingerprints);
+
+    // Build ran on marked sets
+    let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
+    marked_sets.enable_rank();
+
+    // Filter the second element iterator and assign new color set ids for the distinct sets
+    let new_callback = |e: SetElement| {
+        if marked_sets.get(e.set_id) {
+            let rank_in_sampled_sets = marked_sets.rank(e.set_id);
+            //SetElement { set_id: rank_in_sampled_sets, color: e.color }
+        }
+    };
+
+    (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
+
+}
+
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
 /// There must not be duplicate elements in the same set!!
 /// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
