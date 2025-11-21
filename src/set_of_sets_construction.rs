@@ -100,7 +100,8 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
         let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
         set_sizes.resize_with(n_sets, || AtomicU64::new(0));
 
-        element_generator.par_bridge().for_each(|new| { 
+        element_generator.for_each(|new| { 
+            dbg!(&new);
             // TODO: this doesn't really parallize this way. Instead of this, I need iterators
             // for pieces of the input, where each initializes its own matching statistics algorithm.
             let (fp1, fp2) = element_fingerprints[new.color];

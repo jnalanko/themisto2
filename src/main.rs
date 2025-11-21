@@ -253,6 +253,13 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
                     let ids: Vec<usize> = hashset.into_iter().collect();
                     self.output_buf = (self.cur_color, ids);
                     self.cur_color += 1;
+
+                    let ms_iter = self.streaming_index.matching_statistics_iter(seq);
+                    for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+                        assert!(colex.len() == 1);
+                        self.cur_color_set_ids.insert(colex.start);
+                    }
+
                     return self.next();
                 }
             } else {
