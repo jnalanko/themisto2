@@ -1,6 +1,6 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, sync::Arc};
+use std::{collections::HashSet, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand, builder::styling::Color};
 use colex_colored_kmers::CompactColexKmers;
@@ -205,9 +205,9 @@ impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
 struct ColorElementGenerator<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     input: ChainedInputStream,
-    colex_range: Range<usize>,
-    match_len: usize,
-    seq_pos: usize,
+    cur_color: usize,
+    cur_color_set_ids: HashSet<usize>,
+    output_buf: (usize, Vec<usize>), // (Color, set ids)
 }
 
 impl<'a> ColorElementGenerator<'a> {
@@ -216,9 +216,9 @@ impl<'a> ColorElementGenerator<'a> {
         Self {
             streaming_index,
             input,
-            colex_range: 0..sbwt.n_sets(),
-            match_len: 0,
-            seq_pos: 0,
+            cur_color: 0,
+            cur_color_set_ids: HashSet::new(),
+            output_buf: (0, vec![]),
         }
     }
 }
@@ -231,41 +231,33 @@ impl<'a> Iterator for ColorElementGenerator<'a> {
         if self.input.done() { return None }
         let k = self.streaming_index.k();
 
-        while self.seq_pos == self.input.get_seq_buf().len() {
-            // Move to the next sequence
-            match self.input.stream_next() {
-                Some(_) => {
-                    self.seq_pos = 0;
-                    self.match_len = 0;
-                    self.colex_range = 0..self.streaming_index.sbwt_len();
+        if let Some(id) = self.output_buf.1.pop() {
+            return Some(SetElement { set_id: id, color: self.output_buf.0 });
+        }
+
+        // Read and process all sequences of the current color
+        loop {
+            if self.input.stream_next().is_some() {
+                let color = self.input.cur_file_idx();
+                let seq = self.input.get_seq_buf();
+                if color == self.cur_color {
+                    let ms_iter = self.streaming_index.matching_statistics_iter(seq);
+                    for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+                        assert!(colex.len() == 1);
+                        self.cur_color_set_ids.insert(colex.start);
+                    }
+                } else {
+                    // Push to output buffer and start returning
+                    let mut hashset = HashSet::<usize>::new();
+                    std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
+                    let ids: Vec<usize> = hashset.into_iter().collect();
+                    self.output_buf = (self.cur_color, ids);
+                    self.cur_color += 1;
+                    return self.next();
                 }
-                None => {return None;} // Finished
+            } else {
+                return None;
             }
-        }
-        
-        //println!("{} {} {}", self.match_len, self.seq_pos, self.input.get_seq_buf().len());
-
-        // Run 1 matching statistic iteration
-        let c = self.input.get_seq_buf()[self.seq_pos];
-        let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
-        self.match_len = len;
-        self.colex_range = range;
-        self.seq_pos += 1;
-
-        // Look for the next full k-mer match
-        while self.match_len < k && self.seq_pos < self.input.get_seq_buf().len() {
-            let c = self.input.get_seq_buf()[self.seq_pos];
-            let (len, range) = self.streaming_index.matching_statistics_update_step(c, self.colex_range.clone(), self.match_len);
-            self.match_len = len;
-            self.colex_range = range;
-            self.seq_pos += 1;
-        }
-
-        if self.match_len == k {
-            let color = self.input.cur_file_idx();
-            Some(SetElement{set_id: self.colex_range.start, color})
-        } else { // End of sequence reached without match of length k
-            self.next() // Proceed to the next sequence
         }
     }
 }
