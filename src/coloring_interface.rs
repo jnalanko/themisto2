@@ -30,7 +30,7 @@ pub trait ColorSetStorage {
     // Takes a color set stream which first iterates all set ids that have color 0,
     // then all set ids that have color 1, and so on. For this, the sizes of all the sets
     // need to be known in advance an provided with `set_sizes`.
-    fn new_from_transpose(set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, set_sizes: &[usize]) -> Box<Self>;
+    fn new_from_element_generator(set_ids_per_color: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self>;
 
     fn n_sets(&self) -> usize;
     fn get_empty_set(&self) -> Self::OwnedSet;

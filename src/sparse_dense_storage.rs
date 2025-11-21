@@ -239,7 +239,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         })
     }
 
-    fn new_from_transpose(mut set_ids_per_color: impl USizeIteratorGenerator, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
+    fn new_from_element_generator(mut element_gen: impl Iterator<Item = crate::set_of_sets_construction::SetElement>, n_colors: usize, set_sizes: &[usize]) -> Box<Self> {
         log::info!("Encoding color sets");
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
@@ -286,22 +286,23 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Fill in the set elements to the zero-initialized data
         log::info!("Encoding sets");
         let mut n_elements_added_to_each_sparse = vec![0_usize; n_sparse_sets];
-        let mut color_id = 0_usize;
-        while let Some(mut set_ids) = set_ids_per_color.next() {
-            while let Some(set_id) = set_ids.next() {
-                if is_dense_marks.get(set_id) {
-                    // TODO: make faster without calling something like get_mut
-                    // and instead calling a function that directly sets the bit
-                    let dense_id = is_dense_marks.rank(set_id);
-                    dense_sets.get_mut(dense_id).set(color_id, true);
-                } else {
-                    let sparse_id = is_dense_marks.rank_zero(set_id);
-                    sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
-                    n_elements_added_to_each_sparse[sparse_id] += 1;
-                }
+        for element in element_gen {
+            let set_id = element.set_id;
+            let color_id = element.color;
+            if is_dense_marks.get(set_id) {
+                // TODO: make faster without calling something like get_mut
+                // and instead calling a function that directly sets the bit
+                let dense_id = is_dense_marks.rank(set_id);
+                dense_sets.get_mut(dense_id).set(color_id, true);
+            } else {
+                let sparse_id = is_dense_marks.rank_zero(set_id);
+                sparse_sets.assign_element(sparse_id, n_elements_added_to_each_sparse[sparse_id], color_id);
+                n_elements_added_to_each_sparse[sparse_id] += 1;
             }
-            color_id += 1;
         }
+
+
+        // TODO: SORT SPARSE SETS
 
         Box::new(Self {
             dense_sets,

@@ -155,26 +155,15 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
         let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
         marked_sets.enable_rank();
 
-        // Now we build the ColorSetStorage from the transposed constructor, that is,
-        // we need a ColorSetStream that is like an iterator of iterators, where each
-        // inner iterator gives is the set ids of all sets that have a given color.
-        // Here we make use of the assumption that the element generator generates the
-        // elements with increasing order of color id.
-        let my_stream = MyTransposedColorSetStream {
-            element_generator: element_generator_again.filter(|new| { 
-                // Only include sets whose is id sampled
-                marked_sets.get(new.set_id)
-            }).map(|new| {
+        // Filter the second element iterator and assign new color set ids for the distinct sets
+        let new_element_generator = element_generator_again
+            .filter(|new| marked_sets.get(new.set_id))
+            .map(|new| {
                 let rank_in_sampled_sets = marked_sets.rank(new.set_id);
                 SetElement { set_id: rank_in_sampled_sets, color: new.color }
-            }),
-            buf: vec![],
-            leftover_element: None,
-            current_color: 0,
-            n_colors
-        };
+            });
 
-        (*CSS::new_from_transpose(my_stream, n_colors, &marked_set_sizes), old_id_to_new_id)
+        (*CSS::new_from_element_generator(new_element_generator, n_colors, &marked_set_sizes), old_id_to_new_id)
     })
 
 }
