@@ -368,6 +368,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let sparse_sets = SortedIntVecs::load(input);
         let dense_sets = BitMaps::load(input);
 
+        dbg!(sparse_sets.n_sets(), dense_sets.n_sets());
         assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
         assert_eq!(n_colors, dense_sets.individual_length);
         assert!(sparse_sets.concat.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);

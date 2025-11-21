@@ -41,6 +41,8 @@ impl AtomicBitmap {
         let non_atomic: Vec<usize> = self.data.into_iter().map(
             |x| x.load(std::sync::atomic::Ordering::Acquire) as usize
         ).collect();
-        BitVec::from_vec(non_atomic)
+        let mut bv = BitVec::from_vec(non_atomic);
+        bv.truncate(self.size); // Truncate the leftover bits in the last word
+        bv
     }
 }
