@@ -223,6 +223,43 @@ impl<'a> ColorElementGenerator<'a> {
     }
 }
 
+struct MegaSimpleColorElementGenerator {
+    elements: Vec<SetElement>,
+    pos: usize,
+}
+
+impl MegaSimpleColorElementGenerator {
+    pub fn new(sbwt: &sbwt::SbwtIndex<SubsetMatrix>, lcs: &LcsArray, mut input: ChainedInputStream) -> Self {
+        let streaming_index = StreamingIndex::new(sbwt, lcs); 
+        let k = sbwt.k();
+        let mut elements: Vec<SetElement> = vec![];
+        while let Some(_) = input.stream_next() {
+            let color = input.cur_file_idx();
+            let seq = input.get_seq_buf();
+            let ms_iter = streaming_index.matching_statistics_iter(seq);
+            for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
+                assert!(colex.len() == 1);
+                elements.push(SetElement { set_id: colex.start, color });
+            }
+        }
+        Self { elements, pos: 0}
+    }
+}
+
+impl Iterator for MegaSimpleColorElementGenerator {
+    type Item = SetElement;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos == self.elements.len() {
+            None
+        } else {
+            let elem = self.elements[self.pos];
+            self.pos += 1;
+            Some(elem)
+        }
+    }
+}
+
 
 impl<'a> Iterator for ColorElementGenerator<'a> {
     type Item = SetElement;
@@ -280,8 +317,10 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
-    let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-    let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    //let element_gen_1 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    //let element_gen_2 = ColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    let element_gen_1 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+    let element_gen_2 = MegaSimpleColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
 
     let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
