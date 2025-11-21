@@ -67,7 +67,7 @@ impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator f
 }
 
 pub trait ParallelElementGenerator {
-    fn run(&mut self, callback: impl FnMut(SetElement), n_threads: usize);
+    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize);
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
