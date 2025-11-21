@@ -174,13 +174,37 @@ mod tests{
 
     use super::*;
 
-    impl ParallelElementGenerator for Vec<Vec<usize>> {
+    struct VecVecGenerator {
+        vv: Vec<Vec<usize>>,
+        filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
+    }
+
+    impl VecVecGenerator {
+        pub fn new(vv: Vec<Vec<usize>>) -> VecVecGenerator {
+            VecVecGenerator{vv, filter: None}
+        }
+    }
+
+    impl ParallelElementGenerator for VecVecGenerator {
         fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, _n_threads: usize) {
-            for (set_id, set) in self.iter().enumerate() {
+            for (set_id, set) in self.vv.iter().enumerate() {
+                let mut new_id = set_id;
+                if let Some(filter) = &self.filter {
+                    if !filter.get(set_id) {
+                        continue; // This is filtered away
+                    } else {
+                        // Assign new id
+                        new_id = filter.rank(set_id);
+                    }
+                }
                 for &color in set.iter() {
-                    callback(SetElement { set_id, color});
+                    callback(SetElement { set_id: new_id, color});
                 }
             }
+        }
+
+        fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+            self.filter = Some(filter);
         }
     }
 
@@ -215,8 +239,8 @@ mod tests{
         dbg!(&elements);
         
         let (distinct_sets, old_id_to_new_id) = construct_from_generators_that_do_not_give_duplicates::<SparseDenseStorage>(
-            sets.clone(),
-            elements.iter().copied(),
+            VecVecGenerator::new(sets.clone()),
+            VecVecGenerator::new(sets.clone()),
             sets.len(),
             5,
             3,
