@@ -255,59 +255,6 @@ impl<'a> DeduplicatingColorElementGenerator<'a> {
     }
 }
 
-struct MegaSimpleColorElementGenerator {
-    elements: Vec<SetElement>,
-    pos: usize,
-}
-
-impl MegaSimpleColorElementGenerator {
-    pub fn new(sbwt: &sbwt::SbwtIndex<SubsetMatrix>, lcs: &LcsArray, mut input: ChainedInputStream) -> Self {
-        let streaming_index = StreamingIndex::new(sbwt, lcs); 
-        let k = sbwt.k();
-        let mut elements: Vec<SetElement> = vec![];
-        let mut prev_color = usize::MAX;
-        while let Some(_) = input.stream_next() {
-            let color = input.cur_file_idx();
-            if color != prev_color {
-                log::info!("Processing color {}", color);
-            }
-            prev_color = color;
-            let seq = input.get_seq_buf_mut();
-            let ms_iter = streaming_index.matching_statistics_iter(seq);
-            for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-                assert!(colex.len() == 1);
-                elements.push(SetElement { set_id: colex.start, color });
-            }
-
-            reverse_complement_in_place(seq);
-            let ms_iter = streaming_index.matching_statistics_iter(seq);
-            for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-                assert!(colex.len() == 1);
-                elements.push(SetElement { set_id: colex.start, color });
-            }
-        }
-        elements.sort_by(|a, b| (a.color, a.set_id).cmp(&(b.color, b.set_id)));
-        elements.dedup();
-        Self { elements, pos: 0}
-    }
-}
-
-impl Iterator for MegaSimpleColorElementGenerator {
-    type Item = SetElement;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos == self.elements.len() {
-            None
-        } else {
-            let elem = self.elements[self.pos];
-            self.pos += 1;
-            Some(elem)
-        }
-    }
-
-}
-
-
 impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
     type Item = SetElement;
 
