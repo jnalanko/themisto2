@@ -247,6 +247,7 @@ impl<'a> ColorElementGenerator<'a> {
         std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
         let ids: Vec<usize> = hashset.into_iter().collect();
         self.output_buf = (self.cur_color, ids);
+        log::info!("Searched with color {}", self.cur_color);
         self.cur_color += 1;
     }
 }
