@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, builder::styling::Color};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
+use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
 use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
@@ -214,6 +215,7 @@ struct DeduplicatingColorElementGenerator<'a> {
     cur_color: usize,
     cur_color_set_ids: HashSet<usize>,
     output_buf: (usize, Vec<usize>), // (Color, set ids)
+    filter: Option<simple_sds_sbwt::bit_vector::BitVector> // Bit vector with rank support
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
@@ -225,6 +227,7 @@ impl<'a> DeduplicatingColorElementGenerator<'a> {
             cur_color: 0,
             cur_color_set_ids: HashSet::new(),
             output_buf: (0, vec![]),
+            filter: None,
         }
     }
 
@@ -291,9 +294,22 @@ impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
         // TODO: make this multithreaded
-        while let Some(elem) = self.next() {
+        while let Some(mut elem) = self.next() {
+            if let Some(filter) = &self.filter {
+                if !filter.get(elem.set_id) {
+                    continue; // This is filtered away
+                } else {
+                    // Keep and assign new id
+                    let new_id = filter.rank(elem.set_id);
+                    elem.set_id = new_id;
+                }
+            }
             callback(elem);
         }
+    }
+
+    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+        self.filter = Some(filter)
     }
 }
 
