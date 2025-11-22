@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
 
 use simple_sds_sbwt::int_vector::IntVector;
 use simple_sds_sbwt::raw_vector::{AccessRaw, RawVector};
@@ -291,8 +291,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Fill in the set elements to the zero-initialized data
         log::info!("Encoding sets");
         let callback = |element: crate::set_of_sets_construction::SetElement| {
-            // THERE IS A PARALLELISM BUG HERE: TWO THREADS MIGHT APPEND TO THE SAME
-            // SET AT THE SAME TIME. This is why i'm calling with with just one thread below.
             let set_id = element.set_id;
             let color_id = element.color;
             if is_dense_marks.get(set_id) {
@@ -300,11 +298,21 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 dense_sets.set(dense_id * n_colors + color_id, true);
             } else {
                 let sparse_id = is_dense_marks.rank_zero(set_id);
-                sparse_sets.set(sparse_set_insertion_points[sparse_id].load(Acquire) as usize, color_id);
-                sparse_set_insertion_points[sparse_id].fetch_add(1, Acquire);
+                
+                // Increment the insertion point. If I understand correctly, fetch_update will
+                // fetch the value, apply a function to it, and try to compare-and-swap it in.
+                // If the value has changed, it will fetch and try again until it succeeds.
+                // When succesful, it will return the old value that was updated.
+
+                let insertion_point = sparse_set_insertion_points[sparse_id].fetch_update(SeqCst, SeqCst, |x| Some(x+1)).unwrap();
+
+                // Hooray, we have succeeded in incrementing the insertion point. This means
+                // that no other thread can write at the point, so we can safely write it. 
+
+                sparse_sets.set(insertion_point as usize, color_id);
             }
         };
-        element_gen.run(callback, 1); // Use more threads when the parallism bug in the callback is fixed
+        element_gen.run(callback, n_threads);
 
         // Transfer atomic data to SortedIntVecs
         // TODO: we should be able to do this without making a copy.
