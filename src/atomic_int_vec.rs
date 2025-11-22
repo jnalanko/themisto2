@@ -1,0 +1,84 @@
+use std::sync::atomic::Ordering::{Acquire, Release};
+
+/// This is atomic only in a limited sense! See comments at member functions get and set.
+pub struct AtomicIntVec {
+    pub data: Vec<std::sync::atomic::AtomicU64>,
+    pub len: usize, // Number of stored integers. The last word may be only partially used.
+    pub bit_width: usize,
+}
+
+impl AtomicIntVec {
+    pub fn new(len: usize, bit_width: usize) -> Self {
+        let n_words = (len * bit_width + 63) / 64;
+        let data = (0..n_words).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
+        Self {data, len, bit_width}
+    }
+
+    /// This operation is not atomic in the sense that if some thread is writing to a
+    /// value that is being read, the result could be mixed! It's atomic in the sense that
+    /// it is safe to load a value even if another thread modifies a nearby value that is
+    /// stored in the same word.
+    pub fn get(&self, i: usize) -> usize {
+        assert!(i < self.len);
+        let bit_idx = i * self.bit_width; 
+        let word_idx = bit_idx / 64;
+        let word_offset = bit_idx % 64; // Index of the least sigfinicant bit of the bitslice that is updated
+        if word_offset + self.bit_width <= 64 { // Int fits in this word
+            let mask = (1_u64 << self.bit_width) - 1;
+            let bits = (self.data[word_idx].load(Acquire) >> word_offset) & mask;
+            bits as usize
+        } else { // Combine bits from two words
+
+            let n_bits1 = 64 - word_offset; // All of the highest-order bits in the first word
+            let n_bits2 = self.bit_width - n_bits1; // Rest of the bits from the start of the second word
+            debug_assert!(n_bits1 + n_bits2 == self.bit_width);
+
+            let x1 = self.data[word_idx].load(Acquire) >> word_offset; // Tail of the first word
+            let x2 = self.data[word_idx + 1].load(Acquire) & ((1_u64 << n_bits2) - 1); // Head of the second word
+
+            (x1 | (x2 << n_bits1)) as usize // Piece together
+        }
+    }
+
+    /// This operation is not atomic in the sense that if two threads try to modify
+    /// the same value, then the result could be a mix of the two updates! This is
+    /// atomic in the sense that modifying elements at nearby indices is ok even if
+    /// they are in the same word.
+    pub fn set(&self, i: usize, x: usize) {
+        assert!(i < self.len);
+        debug_assert!((x as u64) < (1_u64 << self.bit_width));
+        let bit_idx = i * self.bit_width; 
+        let word_idx = bit_idx / 64;
+        let word_offset = bit_idx % 64; // Index of the least sigfinicant bit of the bitslice that is updated
+        if word_offset + self.bit_width <= 64 { // Int fits in this word
+            let mask = (1_u64 << self.bit_width) - 1; // Hopefully computed at compile time
+            self.data[word_idx].fetch_and(!(mask << word_offset), Release); // Clear the bits
+            self.data[word_idx].fetch_or((x as u64) << word_offset, Release) ; // Set new bits
+        } else { // Combine bits from two words
+            let n_bits1 = 64 - word_offset; // All of the highest-order bits in the first word
+            let n_bits2 = self.bit_width - n_bits1; // Rest of the bits from the start of the second word
+
+            let mask1 = (1_u64 << n_bits1) - 1;
+            let clearmask1 = !(mask1 << word_offset);
+            let setmask1 = (x as u64 & mask1) << word_offset;
+
+            self.data[word_idx].fetch_and(clearmask1, Release); // Clear the bits
+            self.data[word_idx].fetch_or(setmask1, Release); // Set the bits
+
+            let mask2 = (1_u64 << n_bits2) - 1;
+            let clearmask2 = !mask2;
+            let setmask2 = x as u64 >> n_bits1;
+
+            self.data[word_idx + 1].fetch_and(clearmask2, Release); // Clear the bits
+            self.data[word_idx + 1].fetch_or(setmask2, Release); // Set the bits
+        }
+    }
+
+    // Returns the underlying data, length and bit width
+    pub fn into_parts(self) -> (Vec<usize>, usize, usize) {
+        let data = self.data.into_iter().map(
+            |x| x.load(Acquire) as usize
+        ).collect();
+        (data, self.len, self.bit_width) 
+    }
+}
