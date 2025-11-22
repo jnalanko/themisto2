@@ -284,6 +284,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             }
         }
 
+        dbg!(sparse_set_insertion_points.last().unwrap().load(SeqCst));
+
         log::info!("Building rank support for dense marks");
         let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
         is_dense_marks.enable_rank();
@@ -303,6 +305,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 // fetch the value, apply a function to it, and try to compare-and-swap it in.
                 // If the value has changed, it will fetch and try again until it succeeds.
                 // When succesful, it will return the old value that was updated.
+                // TODO: fetch_add instead?
 
                 let insertion_point = sparse_set_insertion_points[sparse_id].fetch_update(SeqCst, SeqCst, |x| Some(x+1)).unwrap();
 
