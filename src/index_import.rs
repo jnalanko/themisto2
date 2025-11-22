@@ -55,8 +55,6 @@ fn is_space(c: &u8) -> bool {
 
 impl<B: BufRead> USizeIteratorGenerator for ColorSetDumpIterGenerator<B> {
 
-    // The type of this iterator gets quite complex because it involves
-    // a slice split that is generic over the split predicate.
     type Iter<'a> = ColorSetDumpSetStream<'a> where B: 'a;
     
     fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
