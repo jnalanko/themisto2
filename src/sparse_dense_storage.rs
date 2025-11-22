@@ -256,6 +256,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut n_dense_sets = 0;
         let mut n_sparse_sets = 0;
+        let mut total_sparse_size = 0;
         for &size in set_sizes.iter() {
             if is_dense_formula(size, color_id_bit_width, n_colors) {
                 is_dense_marks.push_bit(true);
@@ -263,6 +264,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             } else {
                 is_dense_marks.push_bit(false);
                 n_sparse_sets += 1;
+                total_sparse_size += size;
             }
         }
         // Todo: shrink to fit dense marks
@@ -270,7 +272,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data with atomic updates 
-        let mut sparse_sets = AtomicIntVec::new(n_sparse_sets, color_id_bit_width);
+        let mut sparse_sets = AtomicIntVec::new(total_sparse_size, color_id_bit_width);
         let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
 
         let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
@@ -283,8 +285,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 ugly_sparse_id_again += 1;
             }
         }
-
-        dbg!(sparse_set_insertion_points.last().unwrap().load(SeqCst));
 
         log::info!("Building rank support for dense marks");
         let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
