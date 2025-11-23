@@ -178,6 +178,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         color_dump: impl std::io::BufRead) 
         -> Self {
 
+        assert!(sample_distance > 0);
+
         log::info!("Reading metadata");
         let metadata = index_import::read_index_dump_metadata(metadata_dump);
 
@@ -194,7 +196,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
 
-            // Store pairs (colex, color_set_id) that we want to include in the data structure
+            // Store pairs (colex, color_set_id) for the end of the unitig, and at every
+            // (sample_distance-1) k-mers on the unitig (sample_distance > 0) is asserted above.
             let mut set_ids_fn = |seq: &[u8]| {
                 if seq.len() < sbwt.k() { return }
                 let mut distance_from_end = seq.len()-sbwt.k()+1;
@@ -202,7 +205,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     distance_from_end -= 1;
                     if match_len == sbwt.k() {
                         assert_eq!(colex_range.len(), 1);
-                        if distance_from_end % sample_distance == 0 {
+                        if distance_from_end % (sample_distance-1) == 0 {
                             colex_to_color_set_id.push((colex_range.start, color_set_id));
                         }
                     } else {
