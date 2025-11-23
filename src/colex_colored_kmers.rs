@@ -11,6 +11,7 @@ use rustc_hash::FxHasher;
 use std::cmp::max;
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::thread::current;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
@@ -451,11 +452,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
-        let workspace_lock = Arc::new(Mutex::new(Vec::<u8>::new())); // Todo: give each thread their own workspace
         dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
-            if !is_canonical_unitig(unitig_string, &mut workspace_lock.lock().unwrap(), self.get_k()) {
-                return; // Not printing canonical unitigs
-            }
 
             // Break into runs of nodes with the same color set 
             let mut color_set_ids: Vec<usize> = vec![];
@@ -522,31 +519,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         metadata_out.write_all(format!("num_unitigs={}\n", n_unitigs).as_bytes()).unwrap();
         metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
         metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
-    }
-}
-
-fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool {
-    assert!(unitig.len() >= k);
-    if unitig[..k-1] == unitig[unitig.len()-(k-1)..] {
-        //eprintln!("{}", String::from_utf8_lossy(unitig));
-        
-        // Cyclic. This should not happen very often, so let's just brute force this 
-        workspace.clear();
-        workspace.extend_from_slice(unitig);
-
-        // Append reverse complement
-        workspace.extend_from_slice(unitig);
-        reverse_complement_in_place(&mut workspace[unitig.len()..]);
-
-        let fw_min_pos = (0..unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
-        let rc_min_pos = (unitig.len()..2*unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
-        workspace[fw_min_pos..fw_min_pos+k] <= workspace[rc_min_pos..rc_min_pos+k]
-    } else {
-        // non-cyclic
-        workspace.clear();
-        workspace.extend_from_slice(&unitig[unitig.len()-k..]);
-        reverse_complement_in_place(workspace.as_mut_slice());
-        unitig[0..k] <= workspace[0..k]
     }
 }
 
