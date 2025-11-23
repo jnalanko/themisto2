@@ -164,18 +164,18 @@ struct UnitigImportSeqBatch {
 }
 
 impl UnitigImportSeqBatch {
-    fn get_seq(&self, idx: usize) -> &[u8] {
-        &self.concat[self.starts[idx]..self.starts[idx+1]]
+    fn get_seq_mut(&mut self, idx: usize) -> &mut [u8] {
+        &mut self.concat[self.starts[idx]..self.starts[idx+1]]
     }
 
     fn n_seqs(&self) -> usize {
         self.starts.len() - 1 // Has concat.len() at the end
     }
 
-    fn process(&mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
+    fn process(mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
         let k = index.k();
 
-        let mut set_ids_fn = |seq: &[u8]| {
+        let mut set_ids_fn = |seq: &[u8], color_set_id| {
             if seq.len() < k { return }
             let mut distance_from_end = seq.len()-k+1;
             for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(k-1).enumerate() {
@@ -196,13 +196,13 @@ impl UnitigImportSeqBatch {
         };
 
         for seq_idx in 0..self.n_seqs() {
-            let seq = self.get_seq(seq_idx);
             let color_set_id = self.color_set_ids[seq_idx];
+            let seq = self.get_seq_mut(seq_idx);
 
             // Process both forward and reverse complement directions
-            set_ids_fn(seq);
-            reverse_complement_in_place(&mut seq); // TODO could revcomp all at once
-            set_ids_fn(seq);
+            set_ids_fn(seq, color_set_id);
+            reverse_complement_in_place(seq); // TODO could revcomp all at once
+            set_ids_fn(seq, color_set_id);
         }
 
     }
