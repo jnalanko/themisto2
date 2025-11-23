@@ -520,6 +520,10 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         self.is_dense_marks.len()
     }
     
+    fn n_colors(&self) -> usize {
+        self.n_colors;
+    }
+    
 }
 
 /*

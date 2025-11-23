@@ -31,6 +31,8 @@ pub trait ColorSetStorage {
     fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self>;
 
     fn n_sets(&self) -> usize;
+    fn n_colors(&self) -> usize;
+
     fn get_empty_set(&self) -> Self::OwnedSet;
     fn get_full_set(&self) -> Self::OwnedSet;
 
@@ -173,6 +175,10 @@ mod tests {
         
         fn n_sets(&self) -> usize {
             self.v.len()
+        }
+
+        fn n_colors(&self) -> usize {
+            unimplemented!();
         }
         
         fn get_empty_set(&self) -> Self::OwnedSet {

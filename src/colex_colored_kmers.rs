@@ -1,6 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
+use sbwt::dbg::Dbg;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
@@ -8,7 +9,9 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
 use std::cmp::max;
+use std::io::Write;
 use std::sync::Arc;
+use std::thread::current;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
@@ -433,6 +436,73 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     pub fn get_set_storage(&self) -> &CSS {
         &self.sets
+    }
+
+    /// Same format as [crate::index_import].
+    /// Select support must be built before calling this!
+    pub fn export_colored_unitigs(&mut self, mut metadata_out: impl Write + Sync + Send, mut unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize)
+        where CSS: Sync {
+        // The metadata should look like this:
+        // num_colors=3682
+        // num_unitigs=9314735
+        // num_color_sets=5591009
+        // k=31
+
+        log::info!("Exporting to colored unitigs");
+        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
+        let mut write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
+        dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+            // Break into runs of nodes with the same color set 
+            let mut color_set_ids: Vec<usize> = vec![];
+            let mut subunitigs: Vec<&[u8]> = vec![];
+            let mut current_run_set_id: Option<usize> =  None;
+            let mut current_run_start: Option<usize> =  None;
+            for (pos, node) in nodes.iter().enumerate() {
+                let colex = node.id;
+                let set_id = self.colex_to_set_id(colex); // Todo: do not need to do a full lookup like this every time
+                match current_run_set_id {
+                    None => {
+                        // Open a new run
+                        current_run_set_id = Some(set_id);
+                        current_run_start = Some(pos);
+                    },
+                    Some(cur_run_id) => {
+                        if cur_run_id == set_id {
+                            // Extend current run
+                        } else {
+                            // Close the current run and start a new one
+                            subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()]);
+                            color_set_ids.push(cur_run_id);
+                            current_run_set_id = Some(set_id);
+                            current_run_start = Some(pos);
+                        }
+                    }
+                }
+            }
+
+            // Close the last run
+            assert!(current_run_set_id.is_some());
+            subunitigs.push(&unitig_string[current_run_start.unwrap()..]);
+            color_set_ids.push(current_run_set_id.unwrap());
+
+            // Write to output
+            // The fasta header should look like this " unitig_id=0 color_set_id=0".
+            // Note the space at the start.
+            let (unitig_id, out) = &mut (*write_lock.lock().unwrap());
+            assert!(subunitigs.len() == color_set_ids.len());
+            for i in 0..subunitigs.len() {
+                write!(out, "> unitig_id={} color_set_id={}\n", unitig_id, color_set_ids[i]);
+                out.write_all(&subunitigs[i]);
+                out.write_all(b"\n");
+
+                *unitig_id += 1;
+            }
+        }, 1); // TODO: currently only single-threaded because of output!
+
+        metadata_out.write_all(format!("num_colors={}\n", self.sets.n_colors()).as_bytes()).unwrap();
+        metadata_out.write_all(format!("num_unitigs={}\n", todo!()).as_bytes()).unwrap();
+        metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
+        metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
 }
 
