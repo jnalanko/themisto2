@@ -1,6 +1,6 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::path::PathBuf;
 
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge as _, ParallelIterator};
+use rayon::iter::{ParallelBridge as _, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
