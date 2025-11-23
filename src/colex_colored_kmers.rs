@@ -183,15 +183,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Reading metadata");
         let metadata = index_import::read_index_dump_metadata(metadata_dump);
 
-        log::info!("Building colex to color set id mapping");
         let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
 
-        //let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
-        //let mut colex_to_color_set_id = CompactIntVec::new(sbwt.n_sets(), bit_width);
-        //let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, color_sets.n_sets(), n_threads);
-        //let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
-        let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![];
+        log::info!("Building (colex, color set id) pairs");
+        let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
         while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
@@ -226,13 +222,32 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let n_colors = metadata.num_colors;
 
+        log::info!("Sorting (colex, color set id) pairs");
+        colex_to_color_set_id.sort(); // Sorts by colex
+        let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
+        log::info!("Building compressed representation for color set ids");
+        let mut stored_color_set_ids = CompactIntVec::new(colex_to_color_set_id.len(), bit_width);
+        let mut sample_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
+        for (rank, (colex, id)) in colex_to_color_set_id.into_iter().enumerate() {
+            stored_color_set_ids.set(rank, id);
+            sample_marks.set_bit(colex, true);
+        }
+        let mut sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(sample_marks);
+        sample_marks.enable_rank();
+
         log::info!("Reading distinct color sets");
         let color_set_stream = index_import::ColorSetDumpIterGenerator::new(color_dump);
         let distinct_css = CSS::new(color_set_stream, n_colors);
         let distinct_css = *distinct_css; // Unbox
 
-        Self::new(Arc::new(sbwt), lcs, colex_to_color_set_id, distinct_css, metadata.num_colors, sample_distance, n_threads)
+        let sbwt = Arc::new(sbwt);
+        let colex_map = ColexToColorSetMap {
+            sbwt: sbwt.clone(), // Clones the Arc, not the sbwt
+            sampling: sample_marks,
+            color_set_ids: stored_color_set_ids,
+        };
 
+        Self {sbwt, lcs, sets: distinct_css, map: colex_map}
     }
 
 
