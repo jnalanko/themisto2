@@ -61,7 +61,7 @@ struct BitMaps {
 #[derive(Clone)]
 pub enum OwnedSparseDense {
     Dense(bitvec::vec::BitVec),
-    Sparse(IntVector),
+    Sparse(CompactIntVec),
 }
 
 // This enum is only for passing references to individual sets around. The actual
@@ -189,7 +189,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
     fn get_empty_set(&self) -> Self::OwnedSet {
         let bit_width = self.n_colors.next_power_of_two().trailing_zeros() as usize;
-        OwnedSparseDense::Sparse(IntVector::new(bit_width).unwrap())
+        OwnedSparseDense::Sparse(CompactIntVec::new(0, bit_width))
     }
 
     fn get_full_set(&self) -> Self::OwnedSet {
@@ -373,7 +373,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         assert_eq!(is_dense_marks.len(), sparse_sets.n_sets() + dense_sets.n_sets());
         assert_eq!(n_colors, dense_sets.individual_length);
-        assert!(sparse_sets.concat.width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
+        assert!(sparse_sets.concat.bit_width() >= n_colors.next_power_of_two().trailing_zeros() as usize);
 
         Self {is_dense_marks, sparse_sets, dense_sets, n_colors}
     }
@@ -385,9 +385,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             },
             SparseDenseColorSetView::Sparse(iv_slice) => {
                 let len = iv_slice.end - iv_slice.start;
-                let mut new_iv = IntVector::with_capacity(len, iv_slice.vec.width()).unwrap();
+                let mut new_iv = CompactIntVec::new(len, iv_slice.vec.bit_width());
+                let mut push_idx = 0_usize;
                 for i in iv_slice.start..iv_slice.end {
-                    new_iv.push(iv_slice.vec.get(i));
+                    new_iv.set(push_idx, iv_slice.vec.get(i));
+                    push_idx += 1;
                 }
                 OwnedSparseDense::Sparse(new_iv)
             },
@@ -429,11 +431,14 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let s = b_iv_slice.start;
                 let e = b_iv_slice.end;
                 let v = &b_iv_slice.vec;
-                let mut new_elements = IntVector::with_capacity(e-s, v.width()).unwrap();
+                //let mut new_elements = IntVector::with_capacity(e-s, v.bit_width()).unwrap();
+                let mut new_elements = CompactIntVec::new(e-s, v.bit_width());
+                let mut push_idx = 0_usize;
                 for v_idx in s..e {
                     let x = v.get(v_idx) as usize;
                     if a_bv[x] {
-                        new_elements.push(x as u64);
+                        new_elements.set(push_idx, x);
+                        push_idx += 1;
                     }
                 }
                 *a = OwnedSparseDense::Sparse(new_elements);
@@ -449,7 +454,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                         new_set_end += 1; 
                     }
                 }
-                a_iv.resize(new_set_end, 0);
+                a_iv.resize(new_set_end); // Truncate the vector
             },
             (OwnedSparseDense::Sparse(a_iv), SparseDenseColorSetView::Sparse(b_iv_slice)) => {
                 // Intersection of sparse and sparse will be sparse.
@@ -471,7 +476,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                         new_set_end += 1;
                     }
                 }
-                a_iv.resize(new_set_end, 0);
+                a_iv.resize(new_set_end);
             },
         }
     }

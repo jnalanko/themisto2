@@ -112,6 +112,14 @@ impl CompactIntVec {
         (self.data, self.len, self.bit_width)
     }
 
+    /// If new_len > current length, new elements are zero-initialized.
+    /// If new_len < current length, the vector is truncated.
+    pub fn resize(&mut self, new_len: usize) {
+        let new_n_words = (new_len * self.bit_width).div_ceil(64);
+        self.data.resize(new_n_words, 0);
+        self.len = new_len;
+    }
+
 }
 
 
