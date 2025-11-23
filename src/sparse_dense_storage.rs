@@ -476,7 +476,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                         new_set_end += 1;
                     }
                 }
-                a_iv.resize(new_set_end);
+                a_iv.resize(new_set_end); // Truncate the vector
             },
         }
     }
@@ -524,7 +524,7 @@ impl SparseDenseStorage {
     }
 
     fn sparse_bit_width(&self) -> usize {
-        self.sparse_sets.concat.width()
+        self.sparse_sets.concat.bit_width()
     }
 
     fn is_dense(&self, n_elements: usize) -> bool {
@@ -543,9 +543,11 @@ impl SparseDenseStorage {
             }
             OwnedSparseDense::Dense(bv)
         } else {
-            let mut iv = IntVector::new(bits_per_color).unwrap();
+            let mut push_idx = 0_usize;
+            let mut iv = CompactIntVec::new(elements.len(), bits_per_color);
             for color in elements.iter() {
-                iv.push(color as u64);
+                iv.set(push_idx, color);
+                push_idx += 1;
             }
             OwnedSparseDense::Sparse(iv)
         }
@@ -555,7 +557,7 @@ impl SparseDenseStorage {
 
 impl SortedIntVecs {
     fn new(bit_width: usize) -> Self {
-        SortedIntVecs{concat: IntVector::new(bit_width).unwrap(), ends: vec![0]}
+        SortedIntVecs{concat: CompactIntVec::new(0, bit_width), ends: vec![0]}
     }
 
     fn new_with_sizes(set_sizes: impl Iterator<Item = usize>, n_sets: usize, bit_width: usize) -> Self {
@@ -566,27 +568,31 @@ impl SortedIntVecs {
             total_set_size += s;
         }
 
-        let concat = IntVector::with_len(total_set_size, bit_width, 0).unwrap();
+        let concat = CompactIntVec::new(total_set_size, bit_width);
 
         Self { concat, ends }
     }
 
+    /*
     fn push(&mut self, set: impl IntoIterator<Item = usize>) { // Pushes a new set of integers
         for x in set {
             self.concat.push(x as u64);
         }
         self.ends.push(self.concat.len());
     }
+    */
 
     fn assign_element(&mut self, set_id: usize, offset_in_set: usize, element: usize) { // Pushes a new set of integers
         let size = self.ends[set_id+1] - self.ends[set_id];
         assert!(offset_in_set < size);
-        self.concat.set(self.ends[set_id] + offset_in_set, element as u64);
+        self.concat.set(self.ends[set_id] + offset_in_set, element);
     }
 
+    /*
     fn shrink_to_fit(&mut self) {
         self.concat.resize(self.concat.len(), 0);
     }
+    */
 
     fn get(&self, set_id: usize) -> IntVecSlice<'_> {
         IntVecSlice{vec: &self.concat, start: self.ends[set_id], end: self.ends[set_id+1]}
@@ -598,13 +604,13 @@ impl SortedIntVecs {
 
     fn serialize(&self, out: &mut impl std::io::Write) {
         // Serialize using bincode
-        self.concat.serialize(out).unwrap();
+        self.concat.serialize(out);
         bincode::serialize_into(out, &self.ends).unwrap();
     }
 
     fn load(input: &mut impl std::io::Read) -> Self {
         // Deserialize using bincode
-        let intvec_data = IntVector::load(input).unwrap();
+        let intvec_data = CompactIntVec::load(input);
         let ends: Vec<usize> = bincode::deserialize_from(input).unwrap();
         assert!(!ends.is_empty() && ends[0] == 0); // The first end must be 0
         SortedIntVecs{concat: intvec_data, ends}
