@@ -247,7 +247,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         sparse_concat_ends.push(sparse_concat_len);
 
         sparse_concat.resize(sparse_concat_len); // Shrink to fit
-        dbg!(&sparse_concat_ends, &sparse_concat);
         sparse_concat_ends.shrink_to_fit();
         dense_sets.shrink_to_fit();
 
@@ -457,16 +456,19 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let s = b_iv_slice.start;
                 let e = b_iv_slice.end;
                 let v = &b_iv_slice.vec;
-                //let mut new_elements = IntVector::with_capacity(e-s, v.bit_width()).unwrap();
+
+                // Let's make space for the biggest possible intersection. We'll
+                // truncante at the end.
                 let mut new_elements = CompactIntVec::new(e-s, v.bit_width());
                 let mut push_idx = 0_usize;
                 for v_idx in s..e {
-                    let x = v.get(v_idx) as usize;
+                    let x = v.get(v_idx);
                     if a_bv[x] {
                         new_elements.set(push_idx, x);
                         push_idx += 1;
                     }
                 }
+                new_elements.resize(push_idx); // Truncate to actual size
                 *a = OwnedSparseDense::Sparse(new_elements);
             },
             (OwnedSparseDense::Sparse(a_iv), SparseDenseColorSetView::Dense(b_bv)) => {
@@ -475,7 +477,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 // We do this in-place.
                 let mut new_set_end = 0_usize;
                 for i in 0..a_iv.len() {
-                    if b_bv[a_iv.get(i) as usize] {
+                    if b_bv[a_iv.get(i)] {
                         a_iv.set(new_set_end, a_iv.get(i));
                         new_set_end += 1; 
                     }
@@ -489,14 +491,14 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let mut new_set_end = 0_usize;
                 let mut b_pos = b_iv_slice.start;
                 for i in 0..a_iv.len() {
-                    let a_elem = a_iv.get(i) as usize;
-                    while b_pos < b_iv_slice.end && (b_iv_slice.vec.get(b_pos) as usize) < a_elem {
+                    let a_elem = a_iv.get(i);
+                    while b_pos < b_iv_slice.end && (b_iv_slice.vec.get(b_pos)) < a_elem {
                         b_pos += 1;
                     }
                     if b_pos == b_iv_slice.end {
                         break; // No more elements in b
                     }
-                    if b_iv_slice.vec.get(b_pos) as usize == a_elem {
+                    if b_iv_slice.vec.get(b_pos) == a_elem {
                         // Element is in both sets -> keep it
                         a_iv.set(new_set_end, a_iv.get(i));
                         new_set_end += 1;
