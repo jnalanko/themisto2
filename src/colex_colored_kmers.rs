@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
+use crate::int_vec::CompactAtomicIntVec;
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
 use crate::index_import::{self, parse_color_set_line};
 use crate::iterators::VecVecUsizeIteratorGenerator;
@@ -183,7 +184,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Building colex to color set id mapping");
         let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
-        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()]; // TODO: IntVector?
+
+        let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
+        let mut colex_to_color_set_id = CompactAtomicIntVec::new(sbwt.n_sets(), bit_width);
         while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
@@ -193,7 +196,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(sbwt.k()-1).enumerate() {
                     if match_len == sbwt.k() {
                         assert_eq!(colex_range.len(), 1);
-                        colex_to_color_set_id[colex_range.start] = color_set_id;
+                        colex_to_color_set_id.set(colex_range.start, color_set_id);
                     } else {
                         panic!( // TODO: return error instead
                             "Error reading unitigs from dump: k-mer {} not found in SBWT", 

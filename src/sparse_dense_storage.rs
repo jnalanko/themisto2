@@ -9,7 +9,7 @@ use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
-use crate::atomic_int_vec::AtomicIntVec;
+use crate::int_vec::CompactAtomicIntVec;
 use crate::bitmap_storage;
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
@@ -272,7 +272,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data with atomic updates 
-        let mut sparse_sets = AtomicIntVec::new(total_sparse_size, color_id_bit_width);
+        let mut sparse_sets = CompactAtomicIntVec::new(total_sparse_size, color_id_bit_width);
         let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
 
         let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
