@@ -520,6 +520,36 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 }
 
+fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool {
+    assert!(unitig.len() >= k);
+    if unitig[..k-1] == unitig[unitig.len()-(k-1)..] {
+        // Cyclic. This should not happen very often, so let's just brute force this 
+        workspace.clear();
+        workspace.extend_from_slice(unitig);
+        for i in 0..k { // Cycle back to the start
+            workspace.push(workspace[i+k]);
+        }
+
+        // Append reverse complement
+        let cyclic_len = workspace.len();
+        for i in 0..cyclic_len {
+            workspace.push(workspace[i]);
+        }
+
+        let fw_min = (0..cyclic_len-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
+        let rc_min = (cyclic_len..2*cyclic_len-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
+        fw_min < rc_min
+    } else {
+        // non-cyclic
+        workspace.clear();
+        for c in unitig.iter().rev().take(k) {
+            workspace.push(*c);
+        }
+        reverse_complement_in_place(workspace.as_mut_slice());
+        unitig[0..k] < workspace[0..k]
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct BitKey<'a> { // Bitslice with a custom hash function
     pub bits: &'a BitSlice,
