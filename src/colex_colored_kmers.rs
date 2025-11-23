@@ -201,7 +201,7 @@ impl UnitigImportSeqBatch {
 
             // Process both forward and reverse complement directions
             set_ids_fn(seq);
-            reverse_complement_in_place(&mut seq);
+            reverse_complement_in_place(&mut seq); // TODO could revcomp all at once
             set_ids_fn(seq);
         }
 
