@@ -1,11 +1,7 @@
-use std::{collections::{HashMap, HashSet}, sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release, SeqCst}}};
+use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
-use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
-
-use rayon::iter::ParallelBridge;
-use rayon::prelude::*;
-
+use simple_sds_sbwt::{ops::Rank, raw_vector::AccessRaw};
 use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
