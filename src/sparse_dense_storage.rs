@@ -205,7 +205,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_concat_capacity = 1; // Current capacity of sparse_concat
         let mut sparse_concat_len = 0; // Current len of sparse_concat
         let mut sparse_concat = CompactIntVec::new(sparse_concat_capacity, color_id_bit_width);
-        let mut sparse_concat_ends: Vec<usize> = vec![0];
+        let mut sparse_concat_ends: Vec<usize> = vec![];
 
         let mut dense_sets = BitMaps::new(n_colors);
 
@@ -243,6 +243,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
             n_sets_total += 1;
         }
+
+        sparse_concat_ends.push(sparse_concat_len);
 
         sparse_concat.resize(sparse_concat_len); // Shrink to fit
         sparse_concat_ends.shrink_to_fit();
