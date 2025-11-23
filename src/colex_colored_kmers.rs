@@ -299,6 +299,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     }
                 }));
             }
+
+            todo here join threads
         });
 
         todo here concatenate the (usize, usize) vector from vectors
