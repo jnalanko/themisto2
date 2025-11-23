@@ -301,7 +301,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
             producer_handle.join().unwrap(); // Wait for the producer to finish
 
-            // TODO: do we need to drop encoder_in here?
             let mut colex_to_color_set_id = Vec::<(usize, usize)>::new(); // Collect thread outputs here
             for h in worker_handles { // Wait for the workers to finish
                 colex_to_color_set_id.extend(h.join().unwrap());
