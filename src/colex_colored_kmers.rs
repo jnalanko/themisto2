@@ -1,7 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::{bitvec, vec};
-use crossbeam::channel::{Sender, unbounded};
+use crossbeam::channel::{Sender, bounded, unbounded};
 use std::io::BufRead;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -233,7 +233,7 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'stat
             // Start a new batch
             cur_concat = Vec::<u8>::with_capacity(buf_cap);
             cur_starts = Vec::<usize>::new();
-            cur_color_set_ids.clear();
+            cur_color_set_ids = Vec::<usize>::new();
         }
     }
 
@@ -275,12 +275,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Reading metadata");
         let metadata = index_import::read_index_dump_metadata(metadata_dump);
 
-        let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
-        let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
-
         log::info!("Building (colex, color set id) pairs");
-        std::thread::scope(|scope| {
-            let (parser_out, worker_in) = unbounded();
+        let mut colex_to_color_set_id = std::thread::scope(|scope| {
+            let (parser_out, worker_in) = bounded(n_threads);
 
             // Create producer
             let producer_handle = scope.spawn(move || {
@@ -288,22 +285,29 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             });
 
             // Create workers
-            let mut worker_handles = Vec::<std::thread::ScopedJoinHandle::<()>>::new();
+            let mut worker_handles = Vec::<std::thread::ScopedJoinHandle::<Vec::<_>>>::new();
 
             for _ in 0..n_threads {
                 let worker_in_clone = worker_in.clone();
+                let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
                 worker_handles.push(scope.spawn(move || {
-                    let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
-                    while let Ok(mut batch) = worker_in_clone.recv(){
-                        batch.process();
+                    let mut our_colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
+                    while let Ok(batch) = worker_in_clone.recv(){
+                        batch.process(&mut our_colex_to_color_set_id, &index, sample_distance);
                     }
+                    our_colex_to_color_set_id
                 }));
             }
 
-            todo here join threads
-        });
+            producer_handle.join().unwrap(); // Wait for the producer to finish
 
-        todo here concatenate the (usize, usize) vector from threads
+            // TODO: do we need to drop encoder_in here?
+            let mut colex_to_color_set_id = Vec::<(usize, usize)>::new(); // Collect thread outputs here
+            for h in worker_handles { // Wait for the encoders to finish
+                colex_to_color_set_id.extend(h.join().unwrap());
+            }
+            colex_to_color_set_id
+        });
 
         let n_colors = metadata.num_colors;
 
