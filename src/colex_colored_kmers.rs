@@ -491,9 +491,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             let (unitig_id, out) = &mut (*write_lock.lock().unwrap());
             assert!(subunitigs.len() == color_set_ids.len());
             for i in 0..subunitigs.len() {
-                write!(out, "> unitig_id={} color_set_id={}\n", unitig_id, color_set_ids[i]);
-                out.write_all(&subunitigs[i]);
-                out.write_all(b"\n");
+                writeln!(out, "> unitig_id={} color_set_id={}", unitig_id, color_set_ids[i]).unwrap();
+                out.write_all(subunitigs[i]).unwrap();
+                out.write_all(b"\n").unwrap();
 
                 *unitig_id += 1;
             }
@@ -506,11 +506,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         // color_set_id=9 size=7 3 4 9 12 14 15 16
         for set_id in 0..self.sets.n_sets() {
             let set_view = self.sets.get_set_view(set_id);
-            write!(colors_out, "color_set_id={} size={}", set_id, set_view.len());
+            write!(colors_out, "color_set_id={} size={}", set_id, set_view.len()).unwrap();
             for color in set_view.iter() { 
-                write!(colors_out, " {}", color); // TODO: faster IO
+                write!(colors_out, " {}", color).unwrap(); // TODO: faster IO
             }
-            writeln!(colors_out);
+            writeln!(colors_out).unwrap();
         }
 
         metadata_out.write_all(format!("num_colors={}\n", self.sets.n_colors()).as_bytes()).unwrap();
