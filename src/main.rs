@@ -186,6 +186,18 @@ pub enum Subcommands {
         #[arg(help = "Index output file", long = "out", short = 'o', required = true)]
         out: PathBuf,
     },
+
+    #[command(arg_required_else_help = true)]
+    Export {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(help = "Output file prefix", long = "output-prefix", short = 'o', required = true)]
+        color_dump_prefix: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
 }
 
 struct MyBitmapStream {
@@ -555,6 +567,25 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
     }
 }
 
+fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out_prefix: &Path, n_threads: usize) {
+    let out_prefix = out_prefix.as_os_str().to_str().unwrap().to_owned();
+
+    let mut metadata_filename = out_prefix.clone();
+    metadata_filename.push_str(".metadata.txt");
+
+    let mut unitig_filename = out_prefix.clone();
+    unitig_filename.push_str(".unitigs.fa");
+
+    let mut colors_filename = out_prefix.clone();
+    colors_filename.push_str(".color_sets.txt");
+
+    let metadata_out = BufWriter::new(File::open(metadata_filename).unwrap());
+    let unitigs_out = BufWriter::new(File::open(unitig_filename).unwrap());
+    let colors_out = BufWriter::new(File::open(colors_filename).unwrap());
+
+    index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -705,6 +736,15 @@ fn main() {
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
             }
+        },
+        Subcommands::Export { index: index_path, color_dump_prefix, n_threads } => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, true); // Select support is required for export
+            match index {
+                IndexVariant::BitmapIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
+            };
+            
         },
     }
 /*

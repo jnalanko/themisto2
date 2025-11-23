@@ -440,7 +440,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     /// Same format as [crate::index_import].
     /// Select support must be built before calling this!
-    pub fn export_colored_unitigs(&mut self, mut metadata_out: impl Write + Sync + Send, mut unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize)
+    pub fn export_colored_unitigs(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize)
         where CSS: Sync {
         // The metadata should look like this:
         // num_colors=3682
