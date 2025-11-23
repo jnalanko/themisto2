@@ -450,7 +450,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
-        let mut write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
+        let write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
         dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
             // Break into runs of nodes with the same color set 
             let mut color_set_ids: Vec<usize> = vec![];
@@ -500,7 +500,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         }, 1); // TODO: currently only single-threaded because of output!
 
         metadata_out.write_all(format!("num_colors={}\n", self.sets.n_colors()).as_bytes()).unwrap();
-        metadata_out.write_all(format!("num_unitigs={}\n", todo!()).as_bytes()).unwrap();
+        metadata_out.write_all(format!("num_unitigs={}\n", write_lock.lock().unwrap().0).as_bytes()).unwrap();
         metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
         metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
