@@ -528,6 +528,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool {
     assert!(unitig.len() >= k);
     if unitig[..k-1] == unitig[unitig.len()-(k-1)..] {
+        //eprintln!("{}", String::from_utf8_lossy(unitig));
+        
         // Cyclic. This should not happen very often, so let's just brute force this 
         workspace.clear();
         workspace.extend_from_slice(unitig);
@@ -536,15 +538,15 @@ fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool
         workspace.extend_from_slice(unitig);
         reverse_complement_in_place(&mut workspace[unitig.len()..]);
 
-        let fw_min = (0..unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
-        let rc_min = (unitig.len()..2*unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
-        fw_min < rc_min
+        let fw_min_pos = (0..unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
+        let rc_min_pos = (unitig.len()..2*unitig.len()-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
+        workspace[fw_min_pos..fw_min_pos+k] <= workspace[rc_min_pos..rc_min_pos+k]
     } else {
         // non-cyclic
         workspace.clear();
         workspace.extend_from_slice(&unitig[unitig.len()-k..]);
         reverse_complement_in_place(workspace.as_mut_slice());
-        unitig[0..k] < workspace[0..k]
+        unitig[0..k] <= workspace[0..k]
     }
 }
 
