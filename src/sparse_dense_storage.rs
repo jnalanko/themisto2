@@ -9,7 +9,7 @@ use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
-use crate::int_vec::AtomicCompactIntVec;
+use crate::int_vec::{AtomicCompactIntVec, CompactIntVec};
 use crate::bitmap_storage;
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
@@ -37,7 +37,7 @@ struct SortedIntVecs {
     // to maintained in sorted order for intersections. Since it's private, we only need 
     // to make sure that code in this module respects that. Users can get
     // immutable views to this via IntVecSlice.
-    concat: IntVector, 
+    concat: CompactIntVec, 
 
     // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
     // exclusive end of the i-th vector.
@@ -46,7 +46,7 @@ struct SortedIntVecs {
 
 #[derive(Copy, Clone, Debug)]
 pub struct IntVecSlice<'a> {
-    vec: &'a IntVector,
+    vec: &'a CompactIntVec,
     start: usize,
     end: usize, // Exclusive end
 }
@@ -272,8 +272,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
         // Zero-initialized data with atomic updates 
-        let mut sparse_sets = CompactAtomicIntVec::new(total_sparse_size, color_id_bit_width);
-        let mut dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
+        let sparse_set_concat = AtomicCompactIntVec::new(total_sparse_size, color_id_bit_width);
+        let dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
 
         let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
         let mut total_sparse_set_size = 0_usize;
@@ -312,45 +312,37 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 // Hooray, we have succeeded in incrementing the insertion point. This means
                 // that no other thread can write at the point, so we can safely write it. 
 
-                sparse_sets.set(insertion_point as usize, color_id);
+                sparse_set_concat.set(insertion_point as usize, color_id);
             }
         };
         element_gen.run(callback, n_threads);
 
-        // Transfer atomic data to SortedIntVecs
-        // TODO: we should be able to do this without making a copy.
-        log::info!("Re-encoding sparse sets");
-        let mut re_encoded_sparse_sets = SortedIntVecs::new(color_id_bit_width);
-        let mut total_elements_pushed = 0_usize;
-        for set_id in 0..set_sizes.len() {
-            if !is_dense_marks.get(set_id) {
-                let mut offset = 0_usize;
-                re_encoded_sparse_sets.push(std::iter::from_fn(|| {
-                    if offset < set_sizes[set_id] {
-                        let x = sparse_sets.get(total_elements_pushed + offset);
-                        offset += 1;
-                        Some(x)
-                    } else {
-                        None
-                    }
-                }));
-                total_elements_pushed += offset;
-            } 
-        }
-        drop(sparse_sets); // Free memory
+        // Atomicity no longer needed
+        let sparse_set_concat = CompactIntVec::from_atomic(sparse_set_concat);
+        let mut sparse_set_ends: Vec<usize> = sparse_set_insertion_points.into_iter().map(
+            |x| x.load(Acquire) as usize
+        ).collect();
+
+        // Make a SortedIntVecs out of the sparse set concatenation
+        sparse_set_ends.insert(0, 0); // This is required (see SortedIntVecs commends)
+        sparse_set_ends.shrink_to_fit();
+        let mut sorted_sparse_sets = SortedIntVecs {
+            concat: sparse_set_concat,
+            ends: sparse_set_ends,
+        };
 
         log::info!("Sorting sparse sets");
         let mut sort_buf = Vec::<usize>::new();
-        for sparse_id in 0..re_encoded_sparse_sets.n_sets() {
+        for sparse_id in 0..sorted_sparse_sets.n_sets() {
             sort_buf.clear();
 
-            let piece = re_encoded_sparse_sets.get(sparse_id);
+            let piece = sorted_sparse_sets.get(sparse_id);
             for i in piece.start..piece.end {
                 sort_buf.push(piece.vec.get(i) as usize);
             }
             sort_buf.sort();
             for offset in 0..sort_buf.len() {
-                re_encoded_sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
+                sorted_sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
             }
         }
         log::info!("Sparse sets sorted");
@@ -360,7 +352,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 bitmap_data: dense_sets.into_bitvec(), 
                 individual_length: n_colors
             },
-            sparse_sets: re_encoded_sparse_sets,
+            sparse_sets: sorted_sparse_sets,
             n_colors,
             is_dense_marks,
         })

@@ -1,5 +1,6 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
+#[derive(Debug, Clone)]
 pub struct CompactIntVec {
     pub data: Vec<u64>,
     pub len: usize, // Number of stored integers. The last word may be only partially used.
@@ -105,6 +106,10 @@ impl CompactIntVec {
 
     pub fn bit_width(&self) -> usize {
         self.bit_width
+    }
+
+    pub fn into_parts(self) -> (Vec<u64>, usize, usize) {
+        (self.data, self.len, self.bit_width)
     }
 
 }
