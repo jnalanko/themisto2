@@ -166,6 +166,8 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
 
 #[cfg(test)]
 mod tests{
+    use simple_sds_sbwt::ops::BitVec;
+
     use crate::{coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
 
     use super::*;
