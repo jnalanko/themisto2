@@ -2,9 +2,7 @@ use std::io::BufRead;
 
 use bitvec::prelude::*;
 use bitvec::vec::BitVec;
-use clap::builder::styling::Color;
 use sbwt::SubsetSeq;
-use simple_sds_sbwt::raw_vector::AccessRaw;
 
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 

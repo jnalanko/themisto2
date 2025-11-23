@@ -1,16 +1,14 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
 
-use simple_sds_sbwt::int_vector::IntVector;
-use simple_sds_sbwt::raw_vector::{AccessRaw, RawVector};
+use simple_sds_sbwt::raw_vector::AccessRaw;
 use simple_sds_sbwt::serialize::Serialize;
-use simple_sds_sbwt::{ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::PushRaw};
+use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::{AtomicCompactIntVec, CompactIntVec};
-use crate::bitmap_storage;
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 
