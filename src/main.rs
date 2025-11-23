@@ -579,9 +579,9 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     let mut colors_filename = out_prefix.clone();
     colors_filename.push_str(".color_sets.txt");
 
-    let metadata_out = BufWriter::new(File::open(metadata_filename).unwrap());
-    let unitigs_out = BufWriter::new(File::open(unitig_filename).unwrap());
-    let colors_out = BufWriter::new(File::open(colors_filename).unwrap());
+    let metadata_out = BufWriter::new(File::create(metadata_filename).unwrap());
+    let unitigs_out = BufWriter::new(File::create(unitig_filename).unwrap());
+    let colors_out = BufWriter::new(File::create(colors_filename).unwrap());
 
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
