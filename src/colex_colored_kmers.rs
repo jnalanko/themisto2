@@ -172,7 +172,7 @@ impl UnitigImportSeqBatch {
         self.starts.len() - 1 // Has concat.len() at the end
     }
 
-    fn process(&mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) {
+    fn process(&mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
         let k = index.k();
 
         let mut set_ids_fn = |seq: &[u8]| {
