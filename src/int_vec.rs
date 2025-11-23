@@ -81,35 +81,30 @@ impl CompactIntVec {
         Self{ data, len, bit_width }
     }
 
-    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+    fn serialize(&self, writer: &mut impl std::io::Write) {
         // Write length and bit width
-        writer.write_all(&(self.len as u64).to_le_bytes())?;
-        writer.write_all(&(self.bit_width as u64).to_le_bytes())?;
+        writer.write_all(&(self.len as u64).to_le_bytes()).unwrap();
+        writer.write_all(&(self.bit_width as u64).to_le_bytes()).unwrap();
 
         // Write data
-        bincode::serialize(&self.data)?;
-
-        Ok(())
-
+        bincode::serialize(&self.data).unwrap();
     }
 
-    fn load(reader: &mut impl std::io::Read) -> std::io::Result<Self> {
-        use std::io::Read;
-
+    fn load(reader: &mut impl std::io::Read) -> Self {
         let mut buf8 = [0_u8; 8];
 
         // Read length
-        reader.read_exact(&mut buf8)?;
+        reader.read_exact(&mut buf8).unwrap();
         let len = u64::from_le_bytes(buf8) as usize;
 
         // Read bit width
-        reader.read_exact(&mut buf8)?;
+        reader.read_exact(&mut buf8).unwrap();
         let bit_width = u64::from_le_bytes(buf8) as usize;
 
         // Read data
-        let data = bincode::deserialize_from(reader)?;
+        let data = bincode::deserialize_from(reader).unwrap();
 
-        Ok(Self{ data, len, bit_width })
+        Self{ data, len, bit_width }
     }
 }
 
