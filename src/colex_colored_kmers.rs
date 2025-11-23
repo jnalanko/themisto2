@@ -471,7 +471,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                             // Extend current run
                         } else {
                             // Close the current run and start a new one
-                            subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()]);
+                            subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()-1]);
                             color_set_ids.push(cur_run_id);
                             current_run_set_id = Some(set_id);
                             current_run_start = Some(pos);
