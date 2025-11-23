@@ -247,6 +247,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         sparse_concat_ends.push(sparse_concat_len);
 
         sparse_concat.resize(sparse_concat_len); // Shrink to fit
+        dbg!(&sparse_concat_ends, &sparse_concat);
         sparse_concat_ends.shrink_to_fit();
         dense_sets.shrink_to_fit();
 
@@ -629,16 +630,20 @@ impl SortedIntVecs {
 
     fn serialize(&self, out: &mut impl std::io::Write) {
         // Serialize using bincode
+        eprintln!("==== SERIALIZING ====");
+        dbg!(&self.concat, &self.ends);
         self.concat.serialize(out);
         bincode::serialize_into(out, &self.ends).unwrap();
     }
 
     fn load(input: &mut impl std::io::Read) -> Self {
         // Deserialize using bincode
-        let intvec_data = CompactIntVec::load(input);
+        eprintln!("==== LOADING ====");
+        let concat = CompactIntVec::load(input);
         let ends: Vec<usize> = bincode::deserialize_from(input).unwrap();
+        dbg!(&concat, &ends);
         assert!(!ends.is_empty() && ends[0] == 0); // The first end must be 0
-        SortedIntVecs{concat: intvec_data, ends}
+        SortedIntVecs{concat, ends}
     }
 
 }
@@ -722,9 +727,12 @@ mod tests {
         let storage = SparseDenseStorage::new(iter_of_iter, n_colors);
 
         // Serialize and load
+        eprintln!("HERE");
         let mut buf: Vec<u8> = vec![];
         storage.serialize(&mut buf);
+        eprintln!("HERE2");
         let storage = SparseDenseStorage::load(&mut buf.as_slice());
+        eprintln!("HERE3");
 
         // Check that we can retrieve the sets correctly
         for (i, true_set) in sets.iter().enumerate() {

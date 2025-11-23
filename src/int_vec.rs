@@ -80,7 +80,7 @@ impl CompactIntVec {
         writer.write_all(&(self.bit_width as u64).to_le_bytes()).unwrap();
 
         // Write data
-        bincode::serialize(&self.data).unwrap();
+        bincode::serialize_into(writer, &self.data).unwrap();
     }
 
     pub fn load(reader: &mut impl std::io::Read) -> Self {
@@ -204,5 +204,26 @@ impl AtomicCompactIntVec {
             |x| x.load(Acquire) as usize
         ).collect();
         (data, self.len, self.bit_width) 
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn serialize_and_load() {
+        use super::CompactIntVec;
+        let mut vec = CompactIntVec::new(105, 30);
+        for i in 0..100 {
+            vec.set(i, i*i);
+        }
+
+        let mut buf: Vec<u8> = vec![];
+        vec.serialize(&mut buf);
+
+        let vec2 = CompactIntVec::load(&mut buf.as_slice());
+
+        assert_eq!(vec.data, vec2.data);
+        assert_eq!(vec.len, vec2.len);
+        assert_eq!(vec.bit_width, vec2.bit_width);
     }
 }
