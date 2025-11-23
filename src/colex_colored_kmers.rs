@@ -175,7 +175,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         n_threads: usize,
         metadata_dump: impl std::io::BufRead, 
         unitig_dump: impl std::io::BufRead + Send + 'static, 
-        mut color_dump: impl std::io::BufRead) 
+        color_dump: impl std::io::BufRead) 
         -> Self {
 
         log::info!("Reading metadata");
@@ -187,18 +187,24 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         //let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
         //let mut colex_to_color_set_id = CompactIntVec::new(sbwt.n_sets(), bit_width);
-        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+        //let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, color_sets.n_sets(), n_threads);
+        //let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+        let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![];
         while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
 
-            // Function to set color ids of all k-mers in this unitig
+            // Store pairs (colex, color_set_id) that we want to include in the data structure
             let mut set_ids_fn = |seq: &[u8]| {
+                if seq.len() < sbwt.k() { return }
+                let mut distance_from_end = seq.len()-sbwt.k()+1;
                 for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(sbwt.k()-1).enumerate() {
+                    distance_from_end -= 1;
                     if match_len == sbwt.k() {
                         assert_eq!(colex_range.len(), 1);
-                        //colex_to_color_set_id.set(colex_range.start, color_set_id);
-                        colex_to_color_set_id[colex_range.start] = color_set_id;
+                        if distance_from_end % sample_distance == 0 {
+                            colex_to_color_set_id.push((colex_range.start, color_set_id));
+                        }
                     } else {
                         panic!( // TODO: return error instead
                             "Error reading unitigs from dump: k-mer {} not found in SBWT", 
@@ -206,6 +212,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         );
                     }
                 }
+                assert!(distance_from_end == 0);
             };
 
             // Process both forward and reverse complement directions
