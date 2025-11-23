@@ -1,6 +1,6 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
-use bitvec::bitvec;
+use bitvec::{bitvec, vec};
 use std::io::BufRead;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::int_vec::CompactAtomicIntVec;
+use crate::int_vec::{AtomicCompactIntVec, CompactIntVec};
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
 use crate::index_import::{self, parse_color_set_line};
 use crate::iterators::VecVecUsizeIteratorGenerator;
@@ -44,7 +44,7 @@ pub struct ColexToColorSetMap {
     sbwt: Arc<SbwtIndex<SubsetMatrix>>,
 
     sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
-    color_set_ids: IntVector, // One color set id for every 1-bit in the sampling
+    color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
 
 impl ColexToColorSetMap {
@@ -56,12 +56,11 @@ impl ColexToColorSetMap {
         let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, lcs, get_colorset_fn, n_threads);
 
         let color_set_id_bit_width = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
-        let mut sampled_color_set_ids = IntVector::new(color_set_id_bit_width).unwrap(); // In colex order
-        sampled_color_set_ids.resize(sampling_marks.count_ones(), 0);
+        let mut sampled_color_set_ids = CompactIntVec::new(sampling_marks.count_ones(), color_set_id_bit_width); // In colex order
         let mut n_ids_stored = 0_usize;
         for colex in 0..sbwt.n_sets() {
             if sampling_marks.get(colex) {
-                sampled_color_set_ids.set(n_ids_stored, colex_to_color_set_id[colex] as u64);
+                sampled_color_set_ids.set(n_ids_stored, colex_to_color_set_id[colex]);
                 n_ids_stored += 1;
             }
         }
@@ -96,12 +95,12 @@ impl ColexToColorSetMap {
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
         self.sampling.serialize(out).unwrap();
-        self.color_set_ids.serialize(out).unwrap();
+        self.color_set_ids.serialize(out);
     }
 
     pub fn load(input: &mut impl std::io::Read, sbwt: Arc<SbwtIndex<SubsetMatrix>>) -> Self {
         let sampling = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
-        let color_set_ids = IntVector::load(input).unwrap();
+        let color_set_ids = CompactIntVec::load(input);
 
         assert_eq!(sampling.len(), sbwt.n_sets());
         assert_eq!(color_set_ids.len(), sampling.count_ones());
@@ -162,6 +161,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Input: 
     /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
     ///   color j is present in set i.
+    /// TODO: take CompactIntVec for colex_to_color_set_id instead of Vec<usize>
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_to_color_set_id: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexKmers<CSS> {
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, color_sets.n_sets(), n_threads);
@@ -185,8 +185,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
 
-        let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
-        let mut colex_to_color_set_id = CompactAtomicIntVec::new(sbwt.n_sets(), bit_width);
+        //let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
+        //let mut colex_to_color_set_id = CompactIntVec::new(sbwt.n_sets(), bit_width);
+        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
         while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
 
             let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
@@ -196,7 +197,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(sbwt.k()-1).enumerate() {
                     if match_len == sbwt.k() {
                         assert_eq!(colex_range.len(), 1);
-                        colex_to_color_set_id.set(colex_range.start, color_set_id);
+                        //colex_to_color_set_id.set(colex_range.start, color_set_id);
+                        colex_to_color_set_id[colex_range.start] = color_set_id;
                     } else {
                         panic!( // TODO: return error instead
                             "Error reading unitigs from dump: k-mer {} not found in SBWT", 
@@ -236,7 +238,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| 0, n_threads);
         unitig_samples.enable_rank();
         log::info!("Storing color set ids for sampled nodes");
-        let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
+        //let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
+        let color_set_ids = CompactIntVec::new(unitig_samples.count_ones(), int_bitwidth);
         let colex_map = ColexToColorSetMap{
             sbwt: sbwt.clone(),
             sampling: unitig_samples,
@@ -669,12 +672,13 @@ fn encode_merged_color_sets<CSS: ColorSetStorage>(new_id_map: &PartitionedReadOn
 
 }
 
-fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> simple_sds_sbwt::int_vector::IntVector {
+fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usize, merge_plan: &MergeInterleaving, color_set_sample_marks: &simple_sds_sbwt::bit_vector::BitVector, coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, pair_to_new_id_maps: &PartitionedReadOnlyIdMap) -> CompactIntVec {
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
     let merged_len = merge_plan.s1.len();
 
     let bits_per_color_set_id = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
-    let mut sampled_ids = simple_sds_sbwt::int_vector::IntVector::with_capacity(color_set_sample_marks.count_ones(), bits_per_color_set_id).unwrap();
+    let mut sampled_ids = CompactIntVec::new(color_set_sample_marks.count_ones(), bits_per_color_set_id);
+    let mut n_items_pushed = 0_usize;
     let mut colex1 = 0_usize;
     let mut colex2 = 0_usize;
     for merged_colex in 0..merged_len {
@@ -694,7 +698,8 @@ fn store_new_sampled_color_ids<CSS: ColorSetStorage>(n_distinct_color_sets: usiz
             // The merge plan should not have a zero-bit at the same position in s1 and s2
             assert!(color_set_id_1.is_some() || color_set_id_2.is_some());
             let id = pair_to_new_id_maps.get_new_id_of_pair((color_set_id_1, color_set_id_2));
-            sampled_ids.push(id as u64);
+            sampled_ids.set(n_items_pushed, id);
+            n_items_pushed += 1;
         }
 
         colex1 += merge_plan.s1[merged_colex] as usize;

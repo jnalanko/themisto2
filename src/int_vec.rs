@@ -1,6 +1,5 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-
 pub struct CompactIntVec {
     pub data: Vec<u64>,
     pub len: usize, // Number of stored integers. The last word may be only partially used.
@@ -9,15 +8,12 @@ pub struct CompactIntVec {
 
 impl CompactIntVec {
     pub fn new(len: usize, bit_width: usize) -> Self {
+        assert!(bit_width <= 64);
         let n_words = (len * bit_width + 63) / 64;
         let data = vec![0; n_words];
         Self {data, len, bit_width}
     }
 
-    /// This operation is not atomic in the sense that if some thread is writing to a
-    /// value that is being read, the result could be mixed! It's atomic in the sense that
-    /// it is safe to load a value even if another thread modifies a nearby value that is
-    /// stored in the same word.
     pub fn get(&self, i: usize) -> usize {
         assert!(i < self.len);
         let bit_idx = i * self.bit_width; 
@@ -40,10 +36,6 @@ impl CompactIntVec {
         }
     }
 
-    /// This operation is not atomic in the sense that if two threads try to modify
-    /// the same value, then the result could be a mix of the two updates! This is
-    /// atomic in the sense that modifying elements at nearby indices is ok even if
-    /// they are in the same word.
     pub fn set(&mut self, i: usize, x: usize) {
         assert!(i < self.len);
         debug_assert!((x as u64) < (1_u64 << self.bit_width));
@@ -74,14 +66,14 @@ impl CompactIntVec {
         }
     }
 
-    fn from_atomic(other: AtomicCompactIntVec) -> Self {
+    pub fn from_atomic(other: AtomicCompactIntVec) -> Self {
         let len = other.len;
         let bit_width = other.bit_width;
         let data: Vec<u64> = other.data.into_iter().map(|x| x.load(Relaxed)).collect();
         Self{ data, len, bit_width }
     }
 
-    fn serialize(&self, writer: &mut impl std::io::Write) {
+    pub fn serialize(&self, writer: &mut impl std::io::Write) {
         // Write length and bit width
         writer.write_all(&(self.len as u64).to_le_bytes()).unwrap();
         writer.write_all(&(self.bit_width as u64).to_le_bytes()).unwrap();
@@ -90,7 +82,7 @@ impl CompactIntVec {
         bincode::serialize(&self.data).unwrap();
     }
 
-    fn load(reader: &mut impl std::io::Read) -> Self {
+    pub fn load(reader: &mut impl std::io::Read) -> Self {
         let mut buf8 = [0_u8; 8];
 
         // Read length
@@ -106,6 +98,15 @@ impl CompactIntVec {
 
         Self{ data, len, bit_width }
     }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn bit_width(&self) -> usize {
+        self.bit_width
+    }
+
 }
 
 
@@ -118,6 +119,7 @@ pub struct AtomicCompactIntVec {
 
 impl AtomicCompactIntVec {
     pub fn new(len: usize, bit_width: usize) -> Self {
+        assert!(bit_width <= 64);
         let n_words = (len * bit_width + 63) / 64;
         let data = (0..n_words).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
         Self {data, len, bit_width}

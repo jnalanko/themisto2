@@ -9,7 +9,7 @@ use bitvec::slice::BitSlice;
 use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
-use crate::int_vec::CompactAtomicIntVec;
+use crate::int_vec::AtomicCompactIntVec;
 use crate::bitmap_storage;
 use crate::coloring_interface::{ColorSetOwned, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
