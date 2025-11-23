@@ -1,6 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use bitvec::{bitvec, vec};
+use crossbeam::channel::{Sender, unbounded};
 use std::io::BufRead;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -156,6 +157,97 @@ impl ColexToColorSetMap {
 
 }
 
+struct UnitigImportSeqBatch {
+    pub concat: Vec<u8>,
+    pub starts: Vec<usize>, // Has concat.len() at the end 
+    pub color_set_ids: Vec<usize>, // The color set id for each sequence in the concatenation
+}
+
+impl UnitigImportSeqBatch {
+    fn get_seq(&self, idx: usize) -> &[u8] {
+        &self.concat[self.starts[idx]..self.starts[idx+1]]
+    }
+
+    fn n_seqs(&self) -> usize {
+        self.starts.len() - 1 // Has concat.len() at the end
+    }
+
+    fn process(&mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) {
+        let k = index.k();
+
+        let mut set_ids_fn = |seq: &[u8]| {
+            if seq.len() < k { return }
+            let mut distance_from_end = seq.len()-k+1;
+            for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(k-1).enumerate() {
+                distance_from_end -= 1;
+                if match_len == k {
+                    assert_eq!(colex_range.len(), 1);
+                    if distance_from_end % (sample_distance-1) == 0 {
+                        results_out.push((colex_range.start, color_set_id));
+                    }
+                } else {
+                    panic!( // TODO: return error instead
+                        "Error reading unitigs from dump: k-mer {} not found in SBWT", 
+                        String::from_utf8_lossy(&seq[start..start+k])
+                    );
+                }
+            }
+            assert!(distance_from_end == 0);
+        };
+
+        for seq_idx in 0..self.n_seqs() {
+            let seq = self.get_seq(seq_idx);
+            let color_set_id = self.color_set_ids[seq_idx];
+
+            // Process both forward and reverse complement directions
+            set_ids_fn(seq);
+            reverse_complement_in_place(&mut seq);
+            set_ids_fn(seq);
+        }
+
+    }
+}
+
+// Todo: the logic associated with this is all over the place. Refactor into one place.
+fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'static, buf_cap: usize, out: Sender<UnitigImportSeqBatch>){
+        
+    let mut seqs = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
+
+    let mut cur_concat = Vec::<u8>::with_capacity(buf_cap);
+    let mut cur_starts = Vec::<usize>::new();
+    let mut cur_color_set_ids = Vec::<usize>::new();
+    
+    while let Some(rec) = seqs.read_next().unwrap() {
+        let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
+        cur_color_set_ids.push(color_set_id);
+
+        // Add to concatenation
+        cur_starts.push(cur_concat.len());
+        cur_concat.extend(rec.seq);
+
+        if cur_concat.len() >= buf_cap {
+            cur_starts.push(cur_concat.len()); // End sentinel, as required
+            let batch = UnitigImportSeqBatch{concat: cur_concat, starts: cur_starts, color_set_ids: cur_color_set_ids};
+            out.send(batch).unwrap();
+
+            // Start a new batch
+            cur_concat = Vec::<u8>::with_capacity(buf_cap);
+            cur_starts = Vec::<usize>::new();
+            cur_color_set_ids.clear();
+        }
+    }
+
+    if !cur_concat.is_empty() {
+        // Send remaining batch
+        cur_starts.push(cur_concat.len()); // End sentinel, as required
+        let batch = UnitigImportSeqBatch{concat: cur_concat, starts: cur_starts, color_set_ids: cur_color_set_ids};
+        out.send(batch).unwrap();
+    }
+
+    log::info!("Producer thread: all work pushed to work queue");
+    drop(out);
+}
+
 impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     /// Input: 
@@ -187,38 +279,27 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
 
         log::info!("Building (colex, color set id) pairs");
-        let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
-        while let Some(rec) = reader.read_next_mut().unwrap() { // TODO: parallelism
+        std::thread::scope(|scope| {
+            let (parser_out, worker_in) = unbounded();
 
-            let color_set_id = index_import::get_color_set_id_from_fasta_header(rec.head);
+            // Create producer
+            let producer_handle = scope.spawn(move || {
+                unitig_import_parser_thread(unitig_dump, 1 << 20, parser_out);
+            });
 
-            // Store pairs (colex, color_set_id) for the end of the unitig, and at every
-            // (sample_distance-1) k-mers on the unitig (sample_distance > 0) is asserted above.
-            let mut set_ids_fn = |seq: &[u8]| {
-                if seq.len() < sbwt.k() { return }
-                let mut distance_from_end = seq.len()-sbwt.k()+1;
-                for (start, (match_len, colex_range)) in index.matching_statistics_iter(seq).skip(sbwt.k()-1).enumerate() {
-                    distance_from_end -= 1;
-                    if match_len == sbwt.k() {
-                        assert_eq!(colex_range.len(), 1);
-                        if distance_from_end % (sample_distance-1) == 0 {
-                            colex_to_color_set_id.push((colex_range.start, color_set_id));
-                        }
-                    } else {
-                        panic!( // TODO: return error instead
-                            "Error reading unitigs from dump: k-mer {} not found in SBWT", 
-                            String::from_utf8_lossy(&seq[start..start+sbwt.k()])
-                        );
+            // Create workers
+            let mut worker_handles = Vec::<std::thread::ScopedJoinHandle::<()>>::new();
+
+            for _ in 0..n_threads {
+                let worker_in_clone = worker_in.clone();
+                worker_handles.push(scope.spawn(move || {
+                    let mut colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
+                    while let Ok(mut batch) = worker_in_clone.recv(){
+                        batch.process();
                     }
-                }
-                assert!(distance_from_end == 0);
-            };
-
-            // Process both forward and reverse complement directions
-            set_ids_fn(rec.seq);
-            reverse_complement_in_place(rec.seq);
-            set_ids_fn(rec.seq);
-        }
+                }));
+            }
+        });
 
         let n_colors = metadata.num_colors;
 
