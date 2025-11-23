@@ -1,4 +1,4 @@
-// This file described an interface to a color set storage.
+// This file describes an interface to a color set storage.
 
 // There are two traits for color sets: one where the underlying data is borrows, and one
 // where it is owned. They are separate because abstracting over ownership in Rust is 
