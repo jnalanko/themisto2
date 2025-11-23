@@ -689,21 +689,19 @@ fn main() {
             let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
                 log::info!("Loading SBWT from {}", sbwt_path.display());
                 let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
-                let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+                let sbwt::SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
                 if sbwt.k() != metadata.k {
                     log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
                     return;
                 }
 
-                log::info!("Building select support for SBWT");
-                sbwt.build_select();
                 log::info!("Building LCS array");
                 let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
                 (sbwt, lcs)
             } else {
                 log::info!("No precomputed SBWT given. Building the SBWT and the LCS array");
                 let input_stream = io::ChainedInputStream::new(vec![PathBuf::from(&unitig_filename)]);
-                let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+                let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
                     .add_rev_comp(true)
                     .k(metadata.k)
                     .build_lcs(true)
@@ -711,8 +709,6 @@ fn main() {
                     .precalc_length(8)
                     .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(false).temp_dir(&temp_dir))
                 .run(input_stream); // No batch dedup because unitigs should not have duplicates
-                log::info!("Building SBWT select support");
-                sbwt.build_select();
                 (sbwt, lcs.unwrap())
             };
 
