@@ -521,7 +521,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
     
     fn n_colors(&self) -> usize {
-        self.n_colors;
+        self.n_colors
     }
     
 }
