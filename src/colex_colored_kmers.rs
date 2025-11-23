@@ -1,22 +1,20 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
-use bitvec::{bitvec, vec};
-use crossbeam::channel::{Sender, bounded, unbounded};
-use std::io::BufRead;
+use crossbeam::channel::{Sender, bounded};
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
-use simple_sds_sbwt::{int_vector::IntVector, ops::{Access, BitVec, Push, Rank, Resize, Vector}, raw_vector::AccessRaw};
+use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
 use std::cmp::max;
 use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
-use crate::int_vec::{AtomicCompactIntVec, CompactIntVec};
+use crate::int_vec::CompactIntVec;
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
-use crate::index_import::{self, parse_color_set_line};
+use crate::index_import;
 use crate::iterators::VecVecUsizeIteratorGenerator;
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
@@ -923,7 +921,7 @@ mod tests {
     use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
     use simple_sds_sbwt::ops::BitVec;
 
-    use crate::{bitmap_storage::build_from_seq_dbs, build_coloring, colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::{ColorSetStorage, ColorSetView}, sparse_dense_storage::SparseDenseStorage};
+    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::{ColorSetStorage, ColorSetView}, sparse_dense_storage::SparseDenseStorage};
 
     use super::{CompactColexKmers, merge_compact_colorings};
 
