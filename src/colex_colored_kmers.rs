@@ -301,6 +301,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             }
         });
 
+        todo here concatenate the (usize, usize) vector from vectors
+
         let n_colors = metadata.num_colors;
 
         log::info!("Sorting (colex, color set id) pairs");
