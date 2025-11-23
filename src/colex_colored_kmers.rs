@@ -451,7 +451,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
+        let workspace_lock = Arc::new(Mutex::new(Vec::<u8>::new())); // Todo: give each thread their own workspace
         dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+            if !is_canonical_unitig(unitig_string, &mut workspace_lock.lock().unwrap(), self.get_k()) {
+                return; // Not printing canonical unitigs
+            }
+
             // Break into runs of nodes with the same color set 
             let mut color_set_ids: Vec<usize> = vec![];
             let mut subunitigs: Vec<&[u8]> = vec![];
@@ -535,6 +540,7 @@ fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool
         for i in 0..cyclic_len {
             workspace.push(workspace[i]);
         }
+        reverse_complement_in_place(&mut workspace[cyclic_len..]);
 
         let fw_min = (0..cyclic_len-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
         let rc_min = (cyclic_len..2*cyclic_len-k+1).min_by_key(|&i| &workspace[i..i+k]).unwrap();
@@ -542,9 +548,7 @@ fn is_canonical_unitig(unitig: &[u8], workspace: &mut Vec<u8>, k: usize) -> bool
     } else {
         // non-cyclic
         workspace.clear();
-        for c in unitig.iter().rev().take(k) {
-            workspace.push(*c);
-        }
+        workspace.extend_from_slice(&unitig[unitig.len()-k..]);
         reverse_complement_in_place(workspace.as_mut_slice());
         unitig[0..k] < workspace[0..k]
     }
