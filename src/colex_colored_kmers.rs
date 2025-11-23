@@ -499,8 +499,22 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             }
         }, 1); // TODO: currently only single-threaded because of output!
 
+        let (n_unitigs, out) = &mut (*write_lock.lock().unwrap());
+
+        // Write color sets
+        // Lines should look like this:
+        // color_set_id=9 size=7 3 4 9 12 14 15 16
+        for set_id in 0..self.sets.n_sets() {
+            let set_view = self.sets.get_set_view(set_id);
+            write!(out, "color_set_id={} size={}", set_id, set_view.len());
+            for color in set_view.iter() { 
+                write!(out, " {}", color); // TODO: faster IO
+            }
+            writeln!(out);
+        }
+
         metadata_out.write_all(format!("num_colors={}\n", self.sets.n_colors()).as_bytes()).unwrap();
-        metadata_out.write_all(format!("num_unitigs={}\n", write_lock.lock().unwrap().0).as_bytes()).unwrap();
+        metadata_out.write_all(format!("num_unitigs={}\n", n_unitigs).as_bytes()).unwrap();
         metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
         metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
