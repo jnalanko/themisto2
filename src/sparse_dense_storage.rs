@@ -201,7 +201,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
 
-        let mut sparse_sets = SortedIntVecs::new(color_id_bit_width);
+        // Since CompactIntVec does not support push, we need to simulate it here.
+        let mut sparse_concat_capacity = 1; // Current capacity of sparse_concat
+        let mut sparse_concat_len = 0; // Current len of sparse_concat
+        let mut sparse_concat = CompactIntVec::new(sparse_concat_capacity, color_id_bit_width);
+        let mut sparse_concat_ends: Vec<usize> = vec![0];
+
         let mut dense_sets = BitMaps::new(n_colors);
 
         let mut buf = Vec::<usize>::new();
@@ -220,15 +225,33 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 is_dense_marks.push_bit(true);
             } else {
                 buf.sort_unstable(); // We need sorted sets for intersections
-                sparse_sets.push(buf.iter());
+
+                // Push the sorted set to the sparse concat
+                sparse_concat_ends.push(sparse_concat_len);
+                for x in buf.iter() {
+                    if sparse_concat_len == sparse_concat_capacity {
+                        // Make more space
+                        sparse_concat_capacity *= 2;
+                        sparse_concat.resize(sparse_concat_capacity);
+                    }
+                    sparse_concat.set(sparse_concat_len, x);
+                    sparse_concat_len += 1;
+                }
+
                 is_dense_marks.push_bit(false);
             }
 
             n_sets_total += 1;
         }
 
-        sparse_sets.shrink_to_fit();
+        sparse_concat.resize(sparse_concat_len); // Shrink to fit
+        sparse_concat_ends.shrink_to_fit();
         dense_sets.shrink_to_fit();
+
+        let sparse_sets = SortedIntVecs {
+            concat: sparse_concat,
+            ends: sparse_concat_ends,
+        };
 
         log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / n_sets_total as f64 * 100.0);
 
