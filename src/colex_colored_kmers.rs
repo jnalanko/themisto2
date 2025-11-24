@@ -12,6 +12,7 @@ use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use rustc_hash::FxHasher;
 use std::cmp::max;
 use std::io::Write;
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::thread::current;
@@ -441,9 +442,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
-    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], unitig_string: &'a [u8]) -> (Vec<usize>, Vec<&'a [u8]>){
+    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
         let mut subunitig_color_set_ids: Vec<usize> = vec![];
-        let mut subunitigs: Vec<&[u8]> = vec![];
+        let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
         let mut current_run_set_id: Option<usize> =  None;
         let mut current_run_start: Option<usize> =  None;
         for (pos, &colex) in unitig_colex_ranks.iter().enumerate() {
@@ -459,7 +460,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         // Extend current run
                     } else {
                         // Close the current run and start a new one
-                        subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()-1]);
+                        subunitigs.push(current_run_start.unwrap()..pos);
                         subunitig_color_set_ids.push(cur_run_id);
                         current_run_set_id = Some(set_id);
                         current_run_start = Some(pos);
@@ -481,8 +482,14 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         std::thread::scope(|scope| {
 
-            // Channels with element: (forward colex ranks, reverse complement colex ranks, forward color set ids, unitig string) // TODO: no heap alloc
-            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>, Vec<u8>)>(n_threads);
+            // Channels of tuples of with these fields: 
+            //   * forward colex ranks 
+            //   * reverse complement colex ranks
+            //   * unitig string
+            //   * colored subunitig k-mer ranges
+            //   * color set ids of the colored subunitig ranges
+            // TODO: less heap allocation
+            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>)>(n_threads);
 
             // Create unitig search threads 
             let mut worker_handles = Vec::<_>::new();
