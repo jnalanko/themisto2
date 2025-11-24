@@ -477,6 +477,82 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
+    fn search_unitig_from(&self, v: Node, dbg: &Dbg<'_, SubsetMatrix>, out: &Sender<(Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>)>) {
+        // Walk the unitig in forward orientation, and then backwards
+        let k = self.sbwt.k();
+        let mut workspace = Vec::<u8>::new();
+        let (nodes, unitig_string) = dbg.walk_unitig_from(v, &mut workspace);
+        workspace.clear();
+
+        let string_len = unitig_string.len();
+        assert!(string_len >= k);
+        let last_kmer = &unitig_string[string_len-k..];
+        let last_kmer_rc = reverse_complement(last_kmer);
+        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
+            "Reverse complement of k-mer {} not found in index", 
+            String::from_utf8_lossy(last_kmer))
+        ).start;
+        let (rc_nodes, _rc_unitig_string) = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
+
+        let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
+        let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+
+        // Figure out color set id runs in the forward strand 
+        let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
+
+        out.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
+    }
+
+    fn visit_and_output_kmers(&self, unitig_string: &[u8], subunitig_kmer_ranges: &[Range<usize>], subunitig_color_set_ids: &[usize], fw_colex: &[usize], rc_colex: &[usize], visited: &mut bitvec::vec::BitVec, unitigs_out: &mut impl Write, unitig_id: &mut usize) {
+
+        let k = self.sbwt.k();
+
+        for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
+            // All k-mers in this subunitig have the same color set id.
+            // It would be nice if we could just figure out the unvisited
+            // runs of k-mers and visit and output those, but there is a subtle problem:
+            // A subunitig may loop back to itself in reverse complement orientation.
+            // Printing the subunitig would print the same k-mer in both orientations.
+            // So, we need to keep track of the visited bit vector also while processing
+            // a subunitig, and end the subunitig when we encounter a visited k-mer.
+            let subunitig = &unitig_string[r.start..r.end+k-1];
+            let color_set_id = subunitig_color_set_ids[subunitig_idx];
+            let fw_colex_slice = &fw_colex[r.start..r.end];
+            let rc_colex_slice = &rc_colex[r.start..r.end];
+
+            let mut subsubunitig_start: Option<usize> = None;
+            for kmer_idx in 0..fw_colex_slice.len() {
+                if !visited[fw_colex_slice[kmer_idx]] {
+                    // Extend the current subunitig and visit this k-mer
+                    if subsubunitig_start.is_none() {
+                        subsubunitig_start = Some(kmer_idx);
+                    }
+                    visited.set(fw_colex_slice[kmer_idx], true);
+                    visited.set(rc_colex_slice[rc_colex_slice.len()-1-kmer_idx], true);
+                } else {
+                    // Already visited! Output the current subunitig
+                    if let Some(s) = subsubunitig_start {
+                        let e = kmer_idx + k - 1;
+                        writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
+                        unitigs_out.write_all(&subunitig[s..e]).unwrap();
+                        unitigs_out.write_all(b"\n").unwrap();
+                        *unitig_id += 1;
+                    }
+                    subsubunitig_start = None;
+                }
+            }
+
+            // Write the last subunitig if it's still open
+            if let Some(s) = subsubunitig_start {
+                let e = fw_colex_slice.len() + k - 1;
+                writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
+                unitigs_out.write_all(&subunitig[s..e]).unwrap();
+                unitigs_out.write_all(b"\n").unwrap();
+                *unitig_id += 1;
+            }
+        }
+    }
+
     /// Canonical here means whichever strand is visited first.
     /// This assumes that the color set of a forward k-mer and a reverse k-mer is the same.
     /// Returns the number of unitigs written
@@ -509,30 +585,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let handle = scope.spawn(move || {
                     // Iterating all colex positions that have remainder thread_id modulo number of threads
                     let mut colex = thread_id;
-                    let mut workspace = Vec::<u8>::new();
                     while colex < self.sbwt.n_sets() {
                         let v = Node { id: colex };
                         if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
-                            // Walk the unitig in forward orientation, and then backwards
-                            let (nodes, unitig_string) = dbg_ref.walk_unitig_from(v, &mut workspace);
-                            workspace.clear();
-                            let string_len = unitig_string.len();
-                            assert!(string_len >= k);
-                            let last_kmer = &unitig_string[string_len-k..];
-                            let last_kmer_rc = reverse_complement(last_kmer);
-                            let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
-                                "Reverse complement of k-mer {} not found in index", 
-                                String::from_utf8_lossy(last_kmer))
-                            ).start;
-                            let (rc_nodes, _rc_unitig_string) = dbg_ref.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
-
-                            let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
-                            let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
-
-                            // Figure out color set id runs in the forward strand 
-                            let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
-
-                            worker_out_clone.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
+                            self.search_unitig_from(v, dbg_ref, &worker_out_clone);
                         }
                         colex += n_threads;
                     }
@@ -545,54 +601,14 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // We maintain the visited bit vector so that when we mark a k-mer, we also mark its
                 // reverse complement.
                 let mut unitig_id = 0_usize;
+
                 // Bitvector marking visited colex ranks 
                 let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
-                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
-                    for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
-                        // All k-mers in this subunitig have the same color set id.
-                        // It would be nice if we could just figure out the unvisited
-                        // runs of k-mers and visit and output those, but there is a subtle problem:
-                        // A subunitig may loop back to itself in reverse complement orientation.
-                        // Printing the subunitig would print the same k-mer in both orientations.
-                        // So, we need to keep track of the visited bit vector also while processing
-                        // a subunitig, and end the subunitig when we encounter a visited k-mer.
-                        let subunitig = &unitig_string[r.start..r.end+k-1];
-                        let color_set_id = subuniting_color_set_ids[subunitig_idx];
-                        let fw_colex_slice = &fw_colex[r.start..r.end];
-                        let rc_colex_slice = &rc_colex[r.start..r.end];
 
-                        let mut subsubunitig_start: Option<usize> = None;
-                        for kmer_idx in 0..fw_colex_slice.len() {
-                            if !visited[fw_colex_slice[kmer_idx]] {
-                                // Extend the current subunitig and visit this k-mer
-                                if subsubunitig_start.is_none() {
-                                    subsubunitig_start = Some(kmer_idx);
-                                }
-                                visited.set(fw_colex_slice[kmer_idx], true);
-                                visited.set(rc_colex_slice[rc_colex_slice.len()-1-kmer_idx], true);
-                            } else {
-                                // Already visited! Output the current subunitig
-                                if let Some(s) = subsubunitig_start {
-                                    let e = kmer_idx + k - 1;
-                                    writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
-                                    unitigs_out.write_all(&subunitig[s..e]).unwrap();
-                                    unitigs_out.write_all(b"\n").unwrap();
-                                    unitig_id += 1;
-                                }
-                                subsubunitig_start = None;
-                            }
-                        }
-
-                        // Write the last subunitig if it's still open
-                        if let Some(s) = subsubunitig_start {
-                            let e = fw_colex_slice.len() + k - 1;
-                            writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
-                            unitigs_out.write_all(&subunitig[s..e]).unwrap();
-                            unitigs_out.write_all(b"\n").unwrap();
-                            unitig_id += 1;
-                        }
-                    } 
+                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subunitig_color_set_ids)) = collector_in.recv() {
+                    self.visit_and_output_kmers(&unitig_string, &subunitig_kmer_ranges, &subunitig_color_set_ids, &fw_colex, &rc_colex, &mut visited, &mut unitigs_out, &mut unitig_id); 
                 }
+
                 unitig_id
             });
 
