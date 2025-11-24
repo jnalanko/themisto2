@@ -467,6 +467,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 }
             }
         }
+
+        // Close the last run
+        assert!(current_run_set_id.is_some());
+        subunitigs.push(current_run_start.unwrap()..subunitigs.len());
+        subunitig_color_set_ids.push(current_run_set_id.unwrap());
+
         (subunitig_color_set_ids, subunitigs)
     }
 
@@ -534,6 +540,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // Bitvector marking visited colex ranks 
                 let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
                 while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
+                    eprintln!("{}", &String::from_utf8_lossy(&unitig_string));
                     for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
                         // All k-mers in this subunitig have the same color set id.
                         // It would be nice if we could just figure out the unvisited
@@ -546,6 +553,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         let color_set_id = subuniting_color_set_ids[subunitig_idx];
                         let fw_colex_slice = &fw_colex[r.start..r.end];
                         let rc_colex_slice = &rc_colex[r.start..r.end];
+                        eprintln!("sub {}", &String::from_utf8_lossy(subunitig));
 
                         let mut subsubunitig_start: Option<usize> = None;
                         for kmer_idx in 0..fw_colex_slice.len() {
@@ -560,6 +568,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                                 // Already visited! Output the current subunitig
                                 if let Some(s) = subsubunitig_start {
                                     let e = kmer_idx + k - 1;
+                                    eprintln!("Writing range {} {}", s, e);
                                     writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
                                     unitigs_out.write_all(&subunitig[s..e]).unwrap();
                                     unitigs_out.write_all(b"\n").unwrap();
