@@ -470,7 +470,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
-    /// Canonical here means whichever strand is visited first
+    /// Canonical here means whichever strand is visited first.
+    /// This assumes that the color set of a forward k-mer and a reverse k-mer is the same.
     /// Returns the number of unitigs written
     fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) -> usize where CSS : Sync {
 
