@@ -471,19 +471,19 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
-    fn get_unvisited_kmer_runs<'a>(&self, seq: &'a[u8], unitig_colex_ranks: &[usize], visited_marks: &BitVec<usize, Lsb0>) -> Vec<&'a [u8]>{
+    fn get_unvisited_kmer_runs(&self, seq: &[u8], unitig_colex_ranks: &[usize], visited_marks: &BitVec<usize, Lsb0>) -> Vec<Range<usize>>{
         let k = self.get_k();
         assert!(seq.len() >= k);
         assert_eq!(unitig_colex_ranks.len(), seq.len()-k+1);
 
-        let mut subseqs = Vec::<&[u8]>::new();
+        let mut subseqs = Vec::<Range<usize>>::new();
         let mut start: Option<usize> = Some(0_usize);
         for pos in 0..unitig_colex_ranks.len() {
             if visited_marks[pos] { // Run ends here (not including here)
                 let end = pos;
                 if let Some(s) = start { // There is an active run
                     if end > s {
-                        subseqs.push(&seq[s..end+k-1]);
+                        subseqs.push(s..end);
                     }
                     start = None
                 }
@@ -497,20 +497,21 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         if let Some(s) = start {
             // There is an active run to the end of the unitig
             let end = unitig_colex_ranks.len();
-            subseqs.push(&seq[s..end+k-1]);
+            assert!(end > s);
+            subseqs.push(s..end);
         }
 
         subseqs
     }
 
-    pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
+    pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, mut unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
 
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let k = self.get_k();
 
         // Bitvector marking visited colex ranks 
-        let visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
+        let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
 
         std::thread::scope(|scope| {
 
@@ -557,8 +558,46 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             }
 
             let collector_handle = scope.spawn(move || {
-                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
+                // We maintain the visited bit vector so that when we mark a k-mer, we also mark its
+                // reverse complement.
+                let mut unitig_id = 0_usize;
+                while let Ok((fw_colex, mut rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
+                    for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
+                        // All k-mers in this subunitig have the same color set id.
+                        // It would be nice if we could just figure out the unvisited
+                        // runs of k-mers and visit and output those, but there is a subtle problem:
+                        // A subunitig may loop back to itself in reverse complement orientation.
+                        // Printing the subunitig would print the same k-mer in both orientations.
+                        // So, we need to keep track of the visited bit vector also while processing
+                        // a subunitig, and end the subunitig is we encounted a visited k-mer.
+                        let subunitig = &unitig_string[r.start..r.end+k-1];
+                        let color_set_id = subuniting_color_set_ids[subunitig_idx];
+                        let fw_colex_slice = &fw_colex[r.start..r.end];
+                        rc_colex.reverse();
+                        let rc_colex_slice = &rc_colex[r.start..r.end];
 
+                        let mut subsubunitig_start: Option<usize> = None;
+                        for kmer_idx in 0..fw_colex_slice.len() {
+                            if !visited[fw_colex_slice[kmer_idx]] && !visited[rc_colex_slice[kmer_idx]] {
+                                // Extend the current subunitig and visit this k-mer
+                                if subsubunitig_start.is_none() {
+                                    subsubunitig_start = Some(kmer_idx);
+                                }
+                                visited.set(fw_colex_slice[fw_colex_slice[kmer_idx]], true);
+                                visited.set(rc_colex_slice[rc_colex_slice[kmer_idx]], true);
+                            } else {
+                                // Already visited! Output the current subunitig
+                                if let Some(s) = subsubunitig_start {
+                                    let e = kmer_idx + k - 1;
+                                    writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
+                                    unitigs_out.write_all(&subunitig[s..e]).unwrap();
+                                    unitigs_out.write_all(b"\n").unwrap();
+                                    unitig_id += 1;
+                                }
+                                subsubunitig_start = None;
+                            }
+                        }
+                    } 
                 }
             });
 
