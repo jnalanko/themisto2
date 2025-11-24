@@ -471,6 +471,38 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
+    fn get_unvisited_kmer_runs<'a>(&self, seq: &'a[u8], unitig_colex_ranks: &[usize], visited_marks: &BitVec<usize, Lsb0>) -> Vec<&'a [u8]>{
+        let k = self.get_k();
+        assert!(seq.len() >= k);
+        assert_eq!(unitig_colex_ranks.len(), seq.len()-k+1);
+
+        let mut subseqs = Vec::<&[u8]>::new();
+        let mut start: Option<usize> = Some(0_usize);
+        for pos in 0..unitig_colex_ranks.len() {
+            if visited_marks[pos] { // Run ends here (not including here)
+                let end = pos;
+                if let Some(s) = start { // There is an active run
+                    if end > s {
+                        subseqs.push(&seq[s..end+k-1]);
+                    }
+                    start = None
+                }
+            } else {
+                match start {
+                    Some(_) => (), // Ok, extend the run
+                    None => start = Some(pos), // Start a new run here
+                }
+            }
+        }
+        if let Some(s) = start {
+            // There is an active run to the end of the unitig
+            let end = unitig_colex_ranks.len();
+            subseqs.push(&seq[s..end+k-1]);
+        }
+
+        subseqs
+    }
+
     pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
 
         log::info!("Exporting to colored unitigs");
@@ -516,17 +548,16 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
 
                         // Figure out color set id runs in the forward strand 
-                        let (subuniting_color_set_ids, subunitigs) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
+                        let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
 
-
-                        worker_out_clone.send((fw_colex, rc_colex, unitig_string)).unwrap();
+                        worker_out_clone.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
                     });
                 });
                 worker_handles.push(handle);
             }
 
             let collector_handle = scope.spawn(move || {
-                while let Ok((fw_colex, rc_colex, unitig_string)) = collector_in.recv(){
+                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
 
                 }
             });
