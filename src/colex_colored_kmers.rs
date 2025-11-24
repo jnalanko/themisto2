@@ -546,7 +546,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
                         let mut subsubunitig_start: Option<usize> = None;
                         for kmer_idx in 0..fw_colex_slice.len() {
-                            if !visited[fw_colex_slice[kmer_idx]] && !visited[rc_colex_slice[kmer_idx]] {
+                            if !visited[fw_colex_slice[kmer_idx]] {
                                 // Extend the current subunitig and visit this k-mer
                                 if subsubunitig_start.is_none() {
                                     subsubunitig_start = Some(kmer_idx);
