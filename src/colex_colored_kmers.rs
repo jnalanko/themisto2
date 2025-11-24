@@ -439,6 +439,42 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
+    pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize){
+
+        log::info!("Exporting to colored unitigs");
+        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
+
+        std::thread::scope(|scope| {
+
+            // Channels with pairs of vectors: forward colex ranks, reverse complement colex ranks
+            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>)>(n_threads);
+
+            // Create unitig search threads 
+            let mut worker_handles = Vec::<_>::new();
+            for _ in 0..n_threads { 
+                let dbg_ref = &dbg;
+                let handle = scope.spawn(move || {
+                    dbg_ref.node_iterator().filter(|&v| dbg_ref.is_first_kmer_of_unitig(v)).for_each(|v| {
+                        todo!();
+                        // Push to channel
+                    });
+                });
+                worker_handles.push(handle);
+            }
+
+            let collector_handle = scope.spawn(move || {
+
+            });
+
+            for h in worker_handles { // Wait for the workers to finish
+                h.join().unwrap();
+            }
+
+            // Wait for the collector to finish
+            collector_handle.join().unwrap();
+        });
+    }
+
     /// Same format as [crate::index_import].
     /// Select support must be built before calling this!
     pub fn export_colored_unitigs(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize)
