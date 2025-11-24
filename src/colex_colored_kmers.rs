@@ -1,6 +1,7 @@
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
+use jseqio::reverse_complement;
 use sbwt::dbg::Dbg;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -439,24 +440,39 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
-    pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize){
+    pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
 
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
+        let k = self.get_k();
 
         std::thread::scope(|scope| {
 
-            // Channels with pairs of vectors: forward colex ranks, reverse complement colex ranks
-            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>)>(n_threads);
+            // Channels with element: (forward colex ranks, reverse complement colex ranks, unitig string) // TODO: no heap alloc
+            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>, Vec<u8>)>(n_threads);
 
             // Create unitig search threads 
             let mut worker_handles = Vec::<_>::new();
             for _ in 0..n_threads { 
                 let dbg_ref = &dbg;
+                let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
+                    let mut workspace = Vec::<u8>::new();
                     dbg_ref.node_iterator().filter(|&v| dbg_ref.is_first_kmer_of_unitig(v)).for_each(|v| {
-                        todo!();
-                        // Push to channel
+                        let (nodes, unitig_string) = dbg_ref.walk_unitig_from(v, &mut workspace);
+                        let string_len = unitig_string.len();
+                        assert!(string_len >= k);
+                        let last_kmer = &unitig_string[string_len-k..];
+                        let last_kmer_rc = reverse_complement(last_kmer);
+                        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).expect(
+                            &format!("Reverse complement of k-mer {} not found in index", 
+                            String::from_utf8_lossy(last_kmer))
+                        ).start;
+                        let (rc_nodes, _rc_unitig_string) = dbg_ref.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
+
+                        let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
+                        let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+                        worker_out_clone.send((fw_colex, rc_colex, unitig_string)).unwrap();
                     });
                 });
                 worker_handles.push(handle);
