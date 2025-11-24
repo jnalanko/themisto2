@@ -464,8 +464,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         assert!(string_len >= k);
                         let last_kmer = &unitig_string[string_len-k..];
                         let last_kmer_rc = reverse_complement(last_kmer);
-                        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).expect(
-                            &format!("Reverse complement of k-mer {} not found in index", 
+                        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
+                            "Reverse complement of k-mer {} not found in index", 
                             String::from_utf8_lossy(last_kmer))
                         ).start;
                         let (rc_nodes, _rc_unitig_string) = dbg_ref.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
