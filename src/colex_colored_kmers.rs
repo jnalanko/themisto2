@@ -471,39 +471,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
-    fn get_unvisited_kmer_runs(&self, seq: &[u8], unitig_colex_ranks: &[usize], visited_marks: &BitVec<usize, Lsb0>) -> Vec<Range<usize>>{
-        let k = self.get_k();
-        assert!(seq.len() >= k);
-        assert_eq!(unitig_colex_ranks.len(), seq.len()-k+1);
-
-        let mut subseqs = Vec::<Range<usize>>::new();
-        let mut start: Option<usize> = Some(0_usize);
-        for pos in 0..unitig_colex_ranks.len() {
-            if visited_marks[pos] { // Run ends here (not including here)
-                let end = pos;
-                if let Some(s) = start { // There is an active run
-                    if end > s {
-                        subseqs.push(s..end);
-                    }
-                    start = None
-                }
-            } else {
-                match start {
-                    Some(_) => (), // Ok, extend the run
-                    None => start = Some(pos), // Start a new run here
-                }
-            }
-        }
-        if let Some(s) = start {
-            // There is an active run to the end of the unitig
-            let end = unitig_colex_ranks.len();
-            assert!(end > s);
-            subseqs.push(s..end);
-        }
-
-        subseqs
-    }
-
     pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, mut unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
 
         log::info!("Exporting to colored unitigs");
