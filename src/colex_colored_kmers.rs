@@ -587,7 +587,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     while colex < self.sbwt.n_sets() {
                         let v = Node { id: colex };
                         if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
-                            worker_out_clone.send(self.search_unitig_from(v, dbg_ref));
+                            worker_out_clone.send(self.search_unitig_from(v, dbg_ref)).unwrap();
                         }
                         colex += n_threads;
                     }
