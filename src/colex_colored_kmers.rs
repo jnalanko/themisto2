@@ -470,7 +470,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         // Close the last run
         assert!(current_run_set_id.is_some());
-        subunitigs.push(current_run_start.unwrap()..subunitigs.len());
+        subunitigs.push(current_run_start.unwrap()..unitig_colex_ranks.len());
         subunitig_color_set_ids.push(current_run_set_id.unwrap());
 
         (subunitig_color_set_ids, subunitigs)
