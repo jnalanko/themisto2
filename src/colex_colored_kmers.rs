@@ -477,7 +477,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
-    fn search_unitig_from(&self, v: Node, dbg: &Dbg<'_, SubsetMatrix>, out: &Sender<(Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>)>) {
+    fn search_unitig_from(&self, v: Node, dbg: &Dbg<'_, SubsetMatrix>) -> (Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>) {
         // Walk the unitig in forward orientation, and then backwards
         let k = self.sbwt.k();
         let mut workspace = Vec::<u8>::new();
@@ -500,7 +500,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         // Figure out color set id runs in the forward strand 
         let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
 
-        out.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
+        (fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)
     }
 
     fn visit_and_output_kmers(&self, unitig_string: &[u8], subunitig_kmer_ranges: &[Range<usize>], subunitig_color_set_ids: &[usize], fw_colex: &[usize], rc_colex: &[usize], visited: &mut bitvec::vec::BitVec, unitigs_out: &mut impl Write, unitig_id: &mut usize) {
@@ -562,6 +562,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         log::info!("Initializing the de Bruijn graph");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
+        let dbg_ref = &dbg;
+
         let k = self.get_k();
 
         log::info!("Computing unitigs");
@@ -580,7 +582,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             // Create unitig search threads 
             let mut worker_handles = Vec::<_>::new();
             for thread_id in 0..n_threads { 
-                let dbg_ref = &dbg;
                 let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
                     // Iterating all colex positions that have remainder thread_id modulo number of threads
@@ -588,7 +589,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     while colex < self.sbwt.n_sets() {
                         let v = Node { id: colex };
                         if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
-                            self.search_unitig_from(v, dbg_ref, &worker_out_clone);
+                            worker_out_clone.send(self.search_unitig_from(v, dbg_ref));
                         }
                         colex += n_threads;
                     }
@@ -605,10 +606,30 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // Bitvector marking visited colex ranks 
                 let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
 
+                // Process all non-cyclic unitigs
                 while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subunitig_color_set_ids)) = collector_in.recv() {
                     self.visit_and_output_kmers(&unitig_string, &subunitig_kmer_ranges, &subunitig_color_set_ids, &fw_colex, &rc_colex, &mut visited, &mut unitigs_out, &mut unitig_id); 
                 }
 
+                // Process remaining cyclic unitigs
+                log::info!("Processing remaining cyclic unitigs");
+                let mut colex = 0_usize;
+                while colex < visited.len() {
+                    colex = match visited[colex..].first_zero() {
+                        Some(i) => i,
+                        None => break,
+                    };
+                    if !dbg_ref.is_dummy_colex_position(colex) {
+                        let (fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subunitig_color_set_ids)
+                        = self.search_unitig_from(Node { id: colex }, dbg_ref);
+
+                        // Make sure it's really cyclic
+                        assert!(unitig_string[..k-1] == unitig_string[unitig_string.len()-(k-1)..]);
+
+                        self.visit_and_output_kmers(&unitig_string, &subunitig_kmer_ranges, &subunitig_color_set_ids, &fw_colex, &rc_colex, &mut visited, &mut unitigs_out, &mut unitig_id);
+                    }
+                    colex += 1;
+                }
                 unitig_id
             });
 
