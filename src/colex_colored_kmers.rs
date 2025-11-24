@@ -475,9 +475,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Returns the number of unitigs written
     fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) -> usize where CSS : Sync {
 
+        log::info!("Initializing the de Bruijn graph");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let k = self.get_k();
 
+        log::info!("Computing unitigs");
         // Bitvector marking visited colex ranks 
         let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
 
