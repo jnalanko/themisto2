@@ -482,6 +482,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Returns the number of unitigs written
     fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) -> usize where CSS : Sync {
 
+        todo!("THIS ALGORITHM IS NOT ITERATING CYCLIC UNITIGS");
+
         log::info!("Initializing the de Bruijn graph");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let k = self.get_k();
