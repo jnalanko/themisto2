@@ -537,7 +537,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         // A subunitig may loop back to itself in reverse complement orientation.
                         // Printing the subunitig would print the same k-mer in both orientations.
                         // So, we need to keep track of the visited bit vector also while processing
-                        // a subunitig, and end the subunitig is we encounted a visited k-mer.
+                        // a subunitig, and end the subunitig when we encounter a visited k-mer.
                         let subunitig = &unitig_string[r.start..r.end+k-1];
                         let color_set_id = subuniting_color_set_ids[subunitig_idx];
                         let fw_colex_slice = &fw_colex[r.start..r.end];
