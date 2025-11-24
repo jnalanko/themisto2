@@ -494,7 +494,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
             // Create unitig search threads 
             let mut worker_handles = Vec::<_>::new();
-            for _ in 0..n_threads { 
+            for thread_id in 0..n_threads { 
                 let dbg_ref = &dbg;
                 let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
@@ -522,6 +522,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
                         worker_out_clone.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
                     });
+                    log::info!("Thread {} finished", thread_id);
                 });
                 worker_handles.push(handle);
             }
