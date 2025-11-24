@@ -480,8 +480,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let k = self.get_k();
 
         log::info!("Computing unitigs");
-        // Bitvector marking visited colex ranks 
-        let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
 
         let n_unitigs = std::thread::scope(|scope| {
 
@@ -531,6 +529,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // We maintain the visited bit vector so that when we mark a k-mer, we also mark its
                 // reverse complement.
                 let mut unitig_id = 0_usize;
+                // Bitvector marking visited colex ranks 
+                let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
                 while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
                     for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
                         // All k-mers in this subunitig have the same color set id.
@@ -565,6 +565,15 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                                 }
                                 subsubunitig_start = None;
                             }
+                        }
+
+                        // Write the last subunitig if it's still open
+                        if let Some(s) = subsubunitig_start {
+                            let e = fw_colex_slice.len() + k - 1;
+                            writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
+                            unitigs_out.write_all(&subunitig[s..e]).unwrap();
+                            unitigs_out.write_all(b"\n").unwrap();
+                            unitig_id += 1;
                         }
                     } 
                 }
