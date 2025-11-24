@@ -541,7 +541,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         let subunitig = &unitig_string[r.start..r.end+k-1];
                         let color_set_id = subuniting_color_set_ids[subunitig_idx];
                         let fw_colex_slice = &fw_colex[r.start..r.end];
-                        rc_colex.reverse();
                         let rc_colex_slice = &rc_colex[r.start..r.end];
 
                         let mut subsubunitig_start: Option<usize> = None;
@@ -552,7 +551,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                                     subsubunitig_start = Some(kmer_idx);
                                 }
                                 visited.set(fw_colex_slice[kmer_idx], true);
-                                visited.set(rc_colex_slice[kmer_idx], true);
+                                visited.set(rc_colex_slice[rc_colex_slice.len()-1-kmer_idx], true);
                             } else {
                                 // Already visited! Output the current subunitig
                                 if let Some(s) = subsubunitig_start {
