@@ -499,6 +499,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
                     let mut workspace = Vec::<u8>::new();
+                    // TODO: each thread iterates a disjoint slice of the colex space
                     dbg_ref.node_iterator().filter(|&v| dbg_ref.is_first_kmer_of_unitig(v)).for_each(|v| {
 
                         // Walk the unitig in forward orientation, and then backwards
