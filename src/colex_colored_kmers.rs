@@ -614,7 +614,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let mut colex = 0_usize;
                 while colex < visited.len() {
                     colex = match visited[colex..].first_zero() {
-                        Some(i) => i,
+                        Some(i) => colex + i,
                         None => break,
                     };
                     if !dbg_ref.is_dummy_colex_position(colex) {
