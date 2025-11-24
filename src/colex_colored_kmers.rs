@@ -611,6 +611,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
                 // Process remaining cyclic unitigs
                 log::info!("Processing remaining cyclic unitigs");
+                let n_acyclic = unitig_id; // This many unitigs have been written so far
                 let mut colex = 0_usize;
                 while colex < visited.len() {
                     colex = match visited[colex..].first_zero() {
@@ -628,6 +629,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     }
                     colex += 1;
                 }
+                log::info!("Found {} cyclic unitigs", unitig_id - n_acyclic);
                 unitig_id
             });
 
