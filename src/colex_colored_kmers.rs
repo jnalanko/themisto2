@@ -586,6 +586,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 h.join().unwrap();
             }
 
+            drop(worker_out);
+
             // Wait for the collector to finish
             let n_unitigs = collector_handle.join().unwrap();
 
