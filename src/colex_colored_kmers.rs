@@ -1,5 +1,4 @@
 use bitvec::order::Lsb0;
-use bitvec::vec::BitVec;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use jseqio::reverse_complement;
@@ -471,16 +470,17 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
-    fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
+    /// Canonical here means whichever strand is visited first
+    /// Returns the number of unitigs written
+    fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) -> usize where CSS : Sync {
 
-        log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let k = self.get_k();
 
         // Bitvector marking visited colex ranks 
         let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
 
-        std::thread::scope(|scope| {
+        let n_unitigs = std::thread::scope(|scope| {
 
             // Channels of tuples of with these fields: 
             //   * forward colex ranks 
@@ -566,6 +566,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         }
                     } 
                 }
+                unitig_id
             });
 
             for h in worker_handles { // Wait for the workers to finish
@@ -573,8 +574,14 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             }
 
             // Wait for the collector to finish
-            collector_handle.join().unwrap();
+            let n_unitigs = collector_handle.join().unwrap();
+
+            #[allow(clippy::let_and_return)] // It's renaming of the variable. Clearer this way.
+            n_unitigs
         });
+
+        log::info!("Wrote {} unitigs", n_unitigs);
+        n_unitigs
     }
 
     /// Same format as [crate::index_import].
@@ -588,58 +595,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         // k=31
 
         log::info!("Exporting to colored unitigs");
-        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
-        let write_lock = Arc::new(Mutex::new((0_usize, unitigs_out))); // Pair (unitig_id, out). TODO: better parallelism
-        dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
 
-            // Break into runs of nodes with the same color set 
-            let mut color_set_ids: Vec<usize> = vec![];
-            let mut subunitigs: Vec<&[u8]> = vec![];
-            let mut current_run_set_id: Option<usize> =  None;
-            let mut current_run_start: Option<usize> =  None;
-            for (pos, node) in nodes.iter().enumerate() {
-                let colex = node.id;
-                let set_id = self.colex_to_set_id(colex); // Todo: do not need to do a full lookup like this every time
-                match current_run_set_id {
-                    None => {
-                        // Open a new run
-                        current_run_set_id = Some(set_id);
-                        current_run_start = Some(pos);
-                    },
-                    Some(cur_run_id) => {
-                        if cur_run_id == set_id {
-                            // Extend current run
-                        } else {
-                            // Close the current run and start a new one
-                            subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()-1]);
-                            color_set_ids.push(cur_run_id);
-                            current_run_set_id = Some(set_id);
-                            current_run_start = Some(pos);
-                        }
-                    }
-                }
-            }
-
-            // Close the last run
-            assert!(current_run_set_id.is_some());
-            subunitigs.push(&unitig_string[current_run_start.unwrap()..]);
-            color_set_ids.push(current_run_set_id.unwrap());
-
-            // Write to output
-            // The fasta header should look like this " unitig_id=0 color_set_id=0".
-            // Note the space at the start.
-            let (unitig_id, out) = &mut (*write_lock.lock().unwrap());
-            assert!(subunitigs.len() == color_set_ids.len());
-            for i in 0..subunitigs.len() {
-                writeln!(out, "> unitig_id={} color_set_id={}", unitig_id, color_set_ids[i]).unwrap();
-                out.write_all(subunitigs[i]).unwrap();
-                out.write_all(b"\n").unwrap();
-
-                *unitig_id += 1;
-            }
-        }, 1); // TODO: currently only single-threaded because of output!
-
-        let (n_unitigs, _) = &mut (*write_lock.lock().unwrap());
+        let n_unitigs = self.export_canonical_unitigs_with_shared_color_set(unitigs_out, n_threads);
 
         // Write color sets
         // Lines should look like this:
