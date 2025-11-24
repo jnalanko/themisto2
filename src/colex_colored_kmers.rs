@@ -2,6 +2,7 @@ use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use jseqio::reverse_complement;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::dbg::Dbg;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -504,30 +505,35 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let dbg_ref = &dbg;
                 let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
+                    // Iterating all colex positions that have remainder thread_id modulo number of threads
+                    let mut colex = thread_id;
                     let mut workspace = Vec::<u8>::new();
-                    // TODO: each thread iterates a disjoint slice of the colex space
-                    dbg_ref.node_iterator().filter(|&v| dbg_ref.is_first_kmer_of_unitig(v)).for_each(|v| {
+                    while colex < self.sbwt.n_sets() {
+                        let v = Node { id: colex };
+                        if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
+                            // Walk the unitig in forward orientation, and then backwards
+                            let (nodes, unitig_string) = dbg_ref.walk_unitig_from(v, &mut workspace);
+                            workspace.clear();
+                            let string_len = unitig_string.len();
+                            assert!(string_len >= k);
+                            let last_kmer = &unitig_string[string_len-k..];
+                            let last_kmer_rc = reverse_complement(last_kmer);
+                            let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
+                                "Reverse complement of k-mer {} not found in index", 
+                                String::from_utf8_lossy(last_kmer))
+                            ).start;
+                            let (rc_nodes, _rc_unitig_string) = dbg_ref.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
 
-                        // Walk the unitig in forward orientation, and then backwards
-                        let (nodes, unitig_string) = dbg_ref.walk_unitig_from(v, &mut workspace);
-                        let string_len = unitig_string.len();
-                        assert!(string_len >= k);
-                        let last_kmer = &unitig_string[string_len-k..];
-                        let last_kmer_rc = reverse_complement(last_kmer);
-                        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
-                            "Reverse complement of k-mer {} not found in index", 
-                            String::from_utf8_lossy(last_kmer))
-                        ).start;
-                        let (rc_nodes, _rc_unitig_string) = dbg_ref.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
+                            let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
+                            let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
 
-                        let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
-                        let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+                            // Figure out color set id runs in the forward strand 
+                            let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
 
-                        // Figure out color set id runs in the forward strand 
-                        let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
-
-                        worker_out_clone.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
-                    });
+                            worker_out_clone.send((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)).unwrap();
+                        }
+                        colex += n_threads;
+                    }
                     log::info!("Thread {} finished", thread_id);
                 });
                 worker_handles.push(handle);
