@@ -529,7 +529,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 // We maintain the visited bit vector so that when we mark a k-mer, we also mark its
                 // reverse complement.
                 let mut unitig_id = 0_usize;
-                while let Ok((fw_colex, mut rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
+                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)) = collector_in.recv(){
                     for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
                         // All k-mers in this subunitig have the same color set id.
                         // It would be nice if we could just figure out the unvisited
