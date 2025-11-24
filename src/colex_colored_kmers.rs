@@ -1,4 +1,5 @@
 use bitvec::order::Lsb0;
+use bitvec::vec::BitVec;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use jseqio::reverse_complement;
@@ -440,15 +441,47 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
+    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], unitig_string: &'a [u8]) -> (Vec<usize>, Vec<&'a [u8]>){
+        let mut subunitig_color_set_ids: Vec<usize> = vec![];
+        let mut subunitigs: Vec<&[u8]> = vec![];
+        let mut current_run_set_id: Option<usize> =  None;
+        let mut current_run_start: Option<usize> =  None;
+        for (pos, &colex) in unitig_colex_ranks.iter().enumerate() {
+            let set_id = self.colex_to_set_id(colex); // Todo: do not need to do a full lookup like this every time
+            match current_run_set_id {
+                None => {
+                    // Open a new run
+                    current_run_set_id = Some(set_id);
+                    current_run_start = Some(pos);
+                },
+                Some(cur_run_id) => {
+                    if cur_run_id == set_id {
+                        // Extend current run
+                    } else {
+                        // Close the current run and start a new one
+                        subunitigs.push(&unitig_string[current_run_start.unwrap()..pos+self.sbwt.k()-1]);
+                        subunitig_color_set_ids.push(cur_run_id);
+                        current_run_set_id = Some(set_id);
+                        current_run_start = Some(pos);
+                    }
+                }
+            }
+        }
+        (subunitig_color_set_ids, subunitigs)
+    }
+
     pub fn export_colored_unitigs_new(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize) where CSS : Sync {
 
         log::info!("Exporting to colored unitigs");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let k = self.get_k();
 
+        // Bitvector marking visited colex ranks 
+        let visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
+
         std::thread::scope(|scope| {
 
-            // Channels with element: (forward colex ranks, reverse complement colex ranks, unitig string) // TODO: no heap alloc
+            // Channels with element: (forward colex ranks, reverse complement colex ranks, forward color set ids, unitig string) // TODO: no heap alloc
             let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>, Vec<u8>)>(n_threads);
 
             // Create unitig search threads 
@@ -459,6 +492,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let handle = scope.spawn(move || {
                     let mut workspace = Vec::<u8>::new();
                     dbg_ref.node_iterator().filter(|&v| dbg_ref.is_first_kmer_of_unitig(v)).for_each(|v| {
+
+                        // Walk the unitig in forward orientation, and then backwards
                         let (nodes, unitig_string) = dbg_ref.walk_unitig_from(v, &mut workspace);
                         let string_len = unitig_string.len();
                         assert!(string_len >= k);
@@ -472,6 +507,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
                         let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
                         let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+
+                        // Figure out color set id runs in the forward strand 
+                        let (subuniting_color_set_ids, subunitigs) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
+
+
                         worker_out_clone.send((fw_colex, rc_colex, unitig_string)).unwrap();
                     });
                 });
@@ -479,7 +519,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             }
 
             let collector_handle = scope.spawn(move || {
+                while let Ok((fw_colex, rc_colex, unitig_string)) = collector_in.recv(){
 
+                }
             });
 
             for h in worker_handles { // Wait for the workers to finish
