@@ -136,7 +136,9 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let shared_visited_marks = bitvec::bitvec![0; sbwt.n_sets()];
     let mut n_correct_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
     let mut n_wrong_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
-    let mut critical_data = Arc::new(Mutex::new((shared_visited_marks, n_correct_by_finimizer_len, n_wrong_by_finimizer_len)));
+    let mut class_size_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let mut n_finimizers_by_len: Vec<usize> = vec![0; sbwt.k()+1];
+    let mut critical_data = Arc::new(Mutex::new((shared_visited_marks, n_correct_by_finimizer_len, n_wrong_by_finimizer_len, class_size_by_finimizer_len, n_finimizers_by_len)));
 
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
 
@@ -165,7 +167,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
 
                 // Critical section: we must make sure that each class is counted only once
-                let (visited, n_correct_vec, n_wrong_vec) = &mut *critical_data.lock().unwrap();
+                let (visited, n_correct_vec, n_wrong_vec, class_size_by_finimizer_len, n_finimizers_by_len) = &mut *critical_data.lock().unwrap();
                 // We need to check the visited bit again here because some other thread could have visited
                 // this k-mer since we last checked the visited bit. The earlier check is redundant in the
                 // sense that is does not change the result of the computation, but it does save unnecessary
@@ -174,6 +176,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                     // Count this class
                     n_correct_vec[f_len] += n_correct;
                     n_wrong_vec[f_len] += n_wrong;
+                    class_size_by_finimizer_len[f_len] += kmer_equivalence_class.len();
+                    n_finimizers_by_len[f_len] += 1;
                     for p in kmer_equivalence_class.iter() {
                         visited.set(p, true);
                     }
@@ -194,7 +198,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     });
     bar.finish();
 
-    let (_visited, n_correct_vec, n_wrong_vec) = &*critical_data.lock().unwrap();
+    let (_visited, n_correct_vec, n_wrong_vec, class_size_vec, n_finimizers_vec) = &*critical_data.lock().unwrap();
     let n_correct_total: usize = n_correct_vec.iter().sum();
     let n_wrong_total: usize = n_wrong_vec.iter().sum();
     assert_eq!(n_correct_total + n_wrong_total, sbwt.n_kmers()); // No double counting
@@ -202,7 +206,15 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     for f_len in 0..=sbwt.k() {
         let n_correct: usize = n_correct_vec[f_len];
         let n_wrong: usize = n_wrong_vec[f_len];
-        eprintln!("Fraction correct for len {}: {:.2}% ({}/{})", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0, n_correct, n_correct + n_wrong);
+        let mean_class_size = class_size_vec[f_len] as f64 / n_finimizers_vec[f_len] as f64;
+        eprintln!("{}\t{:.5}\t{}\t{}\t{}\t{}", 
+            f_len, 
+            n_correct as f64 / (n_correct + n_wrong) as f64, 
+            n_correct, 
+            n_correct + n_wrong,
+            mean_class_size,
+            n_finimizers_vec[f_len]
+        );
     }
 
     /*
