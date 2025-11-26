@@ -26,7 +26,7 @@ fn pick_finimizer(sfs_slice: &[Option<(usize, std::ops::Range<usize>)>]) -> (usi
 
     if best == (usize::MAX, usize::MAX){
         dbg!(sfs_slice);
-        panic!("Finimizer not found for kmer");
+        panic!("Finimizer not found for SFS slice");
     }   
 
     (best.0, best.1, best_i)
@@ -41,19 +41,22 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
 
     let mut kmer_colex_with_same_finimizer = Vec::<usize>::new();
     
-    let initial_kmer = sbwt.access_kmer(f_colex);
-    let initial_kmer_colex = f_colex;
+    // Build the finimizer string. Note that this might not be a suffix
+    // of any full k-mer, but a suffix of a dummy k-mer.
+    let initial_suffix_match = sbwt.access_kmer(f_colex)[k-f_len..k].to_vec();
+    assert!(initial_suffix_match.iter().all(|&c| c != b'$'));
 
     let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
-    dfs_stack.push((0, initial_kmer, initial_kmer_colex, false));
+    dfs_stack.push((0, initial_suffix_match, f_colex, false));
 
-    while let Some((depth, mut kmer, colex, selected_before)) = dfs_stack.pop() {
-        if depth == k - f_len + 1 { continue } // Finimizer has falled out of the k-mer
-        let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
+    while let Some((depth, suffix_match, colex, selected_before)) = dfs_stack.pop() {
+        if depth == k - f_len + 1 { continue } // Finimizer has fallen out of the k-mer
+        let sfs = si.shortest_freq_bound_suffixes(&suffix_match, 1);
         let selected_here = pick_finimizer(&sfs).1 == f_colex;
         if selected_here { 
             kmer_colex_with_same_finimizer.push(colex);
         } else { 
+            /*
             if selected_before {
                 // The finimizer with colex rank f_colex was selected in a previous
                 // k-mer, but is not selected anymore. This means that there is now
@@ -64,15 +67,24 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
                 // unique finimizers.
                 continue; 
             }
+            */
         }
 
         // Push out-neighbors to the dfs stack
         for c in [b'A', b'C', b'G', b'T'] {
-            kmer.push(c);
-            if let Some(r) = sbwt.search(&kmer[1..k+1]) {
-                dfs_stack.push((depth+1, kmer[1..k+1].to_vec(), r.start, selected_here));
+            let mut new_suffix_match = suffix_match.clone();
+            new_suffix_match.push(c);
+            if new_suffix_match.len() > k {
+                assert!(new_suffix_match.len() == k+1);
+                new_suffix_match.remove(0); // Pop front to get back to length k
             }
-            kmer.pop().unwrap(); 
+
+            if let Some(r) = sbwt.search(&new_suffix_match) {
+                assert!(r.len() <= 1); // Still unique
+                if r.len() > 0 { // Extension with c successful
+                    dfs_stack.push((depth+1, new_suffix_match, r.start, selected_here));
+                }
+            }
         }
     }
     kmer_colex_with_same_finimizer
@@ -91,6 +103,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         Some(HashMap::new()) 
     } else { None };
 
+    eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
+
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
@@ -99,16 +113,17 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
-            for &p in kmer_equivalence_class.iter() {
-                visited.set(p, true);
-            }
-            println!("{}", kmer_equivalence_class.len());
-
-            for &kmer_colex in kmer_equivalence_class.iter() {
-                if let Some(map) = finimizer_to_kmers.as_mut() {
+            //println!("{}", kmer_equivalence_class.len());
+            
+            if let Some(map) = finimizer_to_kmers.as_mut() {
+                for &kmer_colex in kmer_equivalence_class.iter() {
                     let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
                     class.push(kmer_colex);
                 }
+            }
+
+            for &p in kmer_equivalence_class.iter() {
+                visited.set(p, true);
             }
         }
     }
@@ -125,6 +140,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
                 let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
                 let our_class = &finimizer_to_kmers[&f_colex];
+                eprintln!("{}, {:?} {:?}", String::from_utf8_lossy(&kmer), colex, our_class);
                 assert!(our_class.contains(&colex));
                 n_kmers_checked += 1;
             }

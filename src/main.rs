@@ -1,4 +1,5 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
+#![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 
 use std::{collections::HashSet, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
