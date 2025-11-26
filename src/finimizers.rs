@@ -190,7 +190,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let (_visited, n_correct_vec, n_wrong_vec) = &*critical_data.lock().unwrap();
     let n_correct_total: usize = n_correct_vec.iter().sum();
     let n_wrong_total: usize = n_wrong_vec.iter().sum();
-    assert_eq!(n_correct_total + n_wrong_total, sbwt.n_sets()); // No double counting
+    assert_eq!(n_correct_total + n_wrong_total, sbwt.n_kmers()); // No double counting
     eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     for f_len in 0..=sbwt.k() {
         let n_correct: usize = n_correct_vec[f_len];
