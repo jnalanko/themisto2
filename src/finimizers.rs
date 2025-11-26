@@ -207,7 +207,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         let n_correct: usize = n_correct_vec[f_len];
         let n_wrong: usize = n_wrong_vec[f_len];
         let mean_class_size = class_size_vec[f_len] as f64 / n_finimizers_vec[f_len] as f64;
-        eprintln!("{}\t{:.5}\t{}\t{}\t{:.5}\t{}", 
+        println!("{}\t{:.5}\t{}\t{}\t{:.5}\t{}", 
             f_len, 
             n_correct as f64 / (n_correct + n_wrong) as f64, 
             n_correct, 
