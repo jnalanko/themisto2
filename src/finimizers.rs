@@ -113,6 +113,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
+            assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
             //println!("{}", kmer_equivalence_class.len());
             
             if let Some(map) = finimizer_to_kmers.as_mut() {
@@ -135,7 +136,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         let mut n_kmers_checked = 0;
         for colex in 0..sbwt.n_sets() {
             bar.inc(1);
-            let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
+            let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
                 let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
                 let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
