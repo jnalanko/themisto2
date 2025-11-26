@@ -204,6 +204,9 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
+        #[arg(long = "verify", default_value = "false")]
+        verify: bool,
+
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
@@ -750,12 +753,12 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
             };
         },
-        Subcommands::FinimizerStats { index: index_path, n_threads } => {
+        Subcommands::FinimizerStats { index: index_path, n_threads, verify} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for export
             match index {
-                IndexVariant::BitmapIndex(idx) => finimizers::finimizer_stats(&idx, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => finimizers::finimizer_stats(&idx, n_threads),
+                IndexVariant::BitmapIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
+                IndexVariant::SparseDenseIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
             };
         },
             }

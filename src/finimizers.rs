@@ -117,7 +117,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
     if let Some(finimizer_to_kmers) = finimizer_to_kmers {
-        log::info!("Verifying");
+        log::info!("Verifying that the classes contain every k-mer they are supposed to.");
         let mut n_kmers_checked = 0;
         for colex in 0..sbwt.n_sets() {
             bar.inc(1);
@@ -130,6 +130,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 n_kmers_checked += 1;
             }
         }
+
         log::info!("Checking that classes are disjoint have total size equal to the number of k-mers in the sbwt");
         let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
         let mut total_class_size = 0;
