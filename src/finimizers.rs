@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{max, min};
 
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
@@ -83,13 +83,21 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let sbwt = index.sbwt();
     let lcs = index.lcs();
     let si = StreamingIndex::new(sbwt, lcs);
+    let mut visited = bitvec::bitvec![0; sbwt.n_sets()];
+    let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
     for colex in 0..sbwt.n_sets() {
+        bar.inc(1);
+        if visited[colex] { continue }
         let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
         if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
             let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
-            eprintln!("{:?}", kmer_equivalence_class);
+            for &p in kmer_equivalence_class.iter() {
+                visited.set(p, true);
+            }
+            println!("{}", kmer_equivalence_class.len());
         }
     }
+    bar.finish();
 }
