@@ -1,5 +1,6 @@
-use std::{cmp::{max, min}, collections::HashMap};
+use std::{cmp::{max, min}, collections::HashMap, sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering::Relaxed}}};
 
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
@@ -124,7 +125,14 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let sbwt = index.sbwt();
     let lcs = index.lcs();
     let si = StreamingIndex::new(sbwt, lcs);
-    let mut visited = bitvec::bitvec![0; sbwt.n_sets()];
+
+
+    // Data for the critical section
+    let shared_visited_marks = bitvec::bitvec![0; sbwt.n_sets()];
+    let mut n_correct_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let mut n_wrong_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let mut critical_data = Arc::new(Mutex::new((shared_visited_marks, n_correct_by_finimizer_len, n_wrong_by_finimizer_len)));
+
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
 
     /*
@@ -135,45 +143,57 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
-    let mut n_correct_by_finimizer_len = vec![0_usize; sbwt.k()+1];
-    let mut n_wrong_by_finimizer_len = vec![0_usize; sbwt.k()+1];
-    for colex in 0..sbwt.n_sets() {
-        bar.inc(1);
-        if visited[colex] { continue }
-        let kmer = sbwt.access_kmer(colex);
-        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-            //eprintln!("kmer {}", String::from_utf8_lossy(&kmer));
-            let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
-            let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
-            let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
-            assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
-            let (n_correct, n_wrong) = evaluate_equivalence_class(index, &kmer_equivalence_class);
-            assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
-            n_correct_by_finimizer_len[f_len] += n_correct;
-            n_wrong_by_finimizer_len[f_len] += n_wrong;
-            
-            /*
-            if let Some(map) = finimizer_to_kmers.as_mut() {
-                for kmer_colex in kmer_equivalence_class.iter() {
-                    let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
-                    class.push(kmer_colex);
-                }
-            }
-            */
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+    pool.install(|| {
+        (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
+            bar.inc(1);
+            if critical_data.lock().unwrap().0[colex] { return } // Already visited
+            let kmer = sbwt.access_kmer(colex);
+            if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+                let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
+                let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
+                let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
+                assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
+                let (n_correct, n_wrong) = evaluate_equivalence_class(index, &kmer_equivalence_class);
+                assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
 
-            for p in kmer_equivalence_class.iter() {
-                visited.set(p, true);
+                // Critical section: we must make sure that each class is counted only once
+                let (visited, n_correct_vec, n_wrong_vec) = &mut *critical_data.lock().unwrap();
+                // We need to check the visited bit again here because some other thread could have visited
+                // this k-mer since we last checked the visited bit. The earlier check is redundant in the
+                // sense that is does not change the result of the computation, but it does save unnecessary
+                // computation.
+                if !visited[colex] {
+                    // Count this class
+                    n_correct_vec[f_len] += n_correct;
+                    n_wrong_vec[f_len] += n_wrong;
+                    for p in kmer_equivalence_class.iter() {
+                        visited.set(p, true);
+                    }
+                }
+                // End of critical section
+
+                /*
+                if let Some(map) = finimizer_to_kmers.as_mut() {
+                    for kmer_colex in kmer_equivalence_class.iter() {
+                        let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
+                        class.push(kmer_colex);
+                    }
+                }
+                */
+
             }
-        }
-    }
+        })
+    });
     bar.finish();
 
-    let n_correct_total: usize = n_correct_by_finimizer_len.iter().sum();
-    let n_wrong_total: usize = n_wrong_by_finimizer_len.iter().sum();
+    let (_visited, n_correct_vec, n_wrong_vec) = &*critical_data.lock().unwrap();
+    let n_correct_total: usize = n_correct_vec.iter().sum();
+    let n_wrong_total: usize = n_wrong_vec.iter().sum();
     eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     for f_len in 0..=sbwt.k() {
-        let n_correct: usize = n_correct_by_finimizer_len[f_len];
-        let n_wrong: usize = n_wrong_by_finimizer_len[f_len];
+        let n_correct: usize = n_correct_vec[f_len];
+        let n_wrong: usize = n_wrong_vec[f_len];
         eprintln!("Fraction correct for len {}: {:.2}%", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0);
     }
 
