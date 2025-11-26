@@ -2,7 +2,7 @@ use std::{cmp::{max, min}, collections::HashMap};
 
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
 
 // Returns (len, colex, position in sfs slice)
@@ -98,6 +98,27 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
 }
 
 
+// Returns (n_correct, n_wrong)
+fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, class: &[usize]) -> (usize, usize) {
+    let storage = index.get_set_storage();
+    let mut finimizer_colors = storage.get_empty_set();
+    for &colex in class {
+        storage.union(&mut finimizer_colors, &index.colex_to_set(colex)); 
+    }
+    
+    let mut n_correct = 0_usize;
+    let mut n_wrong = 0_usize;
+    for &colex in class {
+        let view = index.colex_to_set(colex);
+        if view.iter().eq(finimizer_colors.iter()) {
+            n_correct += 1; // This k-mer has the same color set as the finimizer
+        } else {
+            n_wrong += 1;
+        }
+    }
+    (n_correct, n_wrong)
+}
+
 // Requires select support
 pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, verify: bool) {
     let sbwt = index.sbwt();
@@ -112,6 +133,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
+    let mut n_correct_total = 0_usize;
+    let mut n_wrong_total = 0_usize;
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
@@ -122,20 +145,24 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
             assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
-            println!("{}", kmer_equivalence_class.len());
+            let (n_correct, n_wrong) = evaluate_equivalence_class(index, &kmer_equivalence_class);
+            assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
+            n_correct_total += n_correct;
+            n_wrong_total += n_wrong;
             
             if let Some(map) = finimizer_to_kmers.as_mut() {
-                for &kmer_colex in kmer_equivalence_class.iter() {
+                for kmer_colex in kmer_equivalence_class.iter() {
                     let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
                     class.push(kmer_colex);
                 }
             }
 
-            for &p in kmer_equivalence_class.iter() {
+            for p in kmer_equivalence_class.iter() {
                 visited.set(p, true);
             }
         }
     }
+    eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     bar.finish();
 
     if let Some(finimizer_to_kmers) = finimizer_to_kmers {
@@ -161,7 +188,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
         let mut total_class_size = 0;
         for (_, class) in finimizer_to_kmers.iter() {
-            for &r in class.iter() {
+            for r in class.iter() {
                 assert!(!seen_colex_ranks[r]);
                 seen_colex_ranks.set(r, true);
             }

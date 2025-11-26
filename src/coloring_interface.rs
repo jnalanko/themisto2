@@ -77,7 +77,11 @@ pub trait ColorSetStorage {
 pub trait ColorSetView<'a> {
 
     // This associated iterator type may have lifetime parameters even though they
-    // are not listed here.
+    // are not listed here. The iterator must iterate the elements in increasing order!
+    // This assumption is useful e.g. for fast set operations on the sets. Todo:
+    // I should make Iter also a subtype of a marker trait that represents that the
+    // iterator gives its values in order. This would prevent accidentally using
+    // a non-sorted iterator here. 
     type Iter: Iterator<Item = usize>;
 
     // The returned iterator may have lifetime parameters even though they are 
