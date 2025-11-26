@@ -150,9 +150,9 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
-        (0..sbwt.n_sets()).par_bridge().for_each(|colex| {
+        (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
             if colex % 10000 == 0 {
-                bar.set_position(colex as u64);
+                bar.inc(10000);
             }
             if critical_data.lock().unwrap().0[colex] { return } // Already visited
             let kmer = sbwt.access_kmer(colex);
