@@ -155,6 +155,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 n_kmers_checked += 1;
             }
         }
+    bar.finish();
 
         log::info!("Checking that classes are disjoint and have total size equal to the number of k-mers in the sbwt");
         let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
@@ -169,5 +170,4 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         assert_eq!(n_kmers_checked, sbwt.n_kmers());
         assert_eq!(total_class_size, sbwt.n_kmers());
     }
-    bar.finish();
 }
