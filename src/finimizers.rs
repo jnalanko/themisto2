@@ -86,7 +86,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     for colex in 0..sbwt.n_sets() {
         let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
         let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
-        let (f_len, f_colex, f_pos) = pick_finimizer(&sfs);
-        let finimizer_kmer_set = explore(sbwt, lcs, f_colex, f_len); 
+        let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
+        let kmer_equivalence_class = explore(sbwt, lcs, f_colex, f_len); 
+        eprintln!("{:?}", kmer_equivalence_class);
     }
 }
