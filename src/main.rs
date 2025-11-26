@@ -25,6 +25,7 @@ mod iterators;
 mod parallel_ms_iteration;
 mod atomic_bitmap;
 mod int_vec;
+mod finimizers;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -594,10 +595,6 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
-fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize) {
-    todo!();
-}
-
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -757,8 +754,8 @@ fn main() {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for export
             match index {
-                IndexVariant::BitmapIndex(idx) => finimizer_stats(&idx, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => finimizer_stats(&idx, n_threads),
+                IndexVariant::BitmapIndex(idx) => finimizers::finimizer_stats(&idx, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => finimizers::finimizer_stats(&idx, n_threads),
             };
         },
             }

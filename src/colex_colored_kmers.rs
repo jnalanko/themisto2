@@ -159,7 +159,6 @@ impl ColexToColorSetMap {
 
         marks
     }
-
 }
 
 struct UnitigImportSeqBatch {
@@ -263,6 +262,14 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     -> CompactColexKmers<CSS> {
         let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, color_sets.n_sets(), n_threads);
         Self {sbwt, lcs, sets: color_sets, map: colex_map}
+    }
+
+    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
+        &self.sbwt
+    }
+
+    pub fn lcs(&self) -> &LcsArray {
+        &self.lcs
     }
 
     pub fn new_from_colored_unitig_dump(
