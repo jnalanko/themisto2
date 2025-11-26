@@ -124,7 +124,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
             assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
-            //println!("{}", kmer_equivalence_class.len());
+            println!("{}", kmer_equivalence_class.len());
             
             if let Some(map) = finimizer_to_kmers.as_mut() {
                 for &kmer_colex in kmer_equivalence_class.iter() {
@@ -158,7 +158,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             }
         }
 
-        log::info!("Checking that classes are disjoint have total size equal to the number of k-mers in the sbwt");
+        log::info!("Checking that classes are disjoint and have total size equal to the number of k-mers in the sbwt");
         let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
         let mut total_class_size = 0;
         for (_, class) in finimizer_to_kmers.iter() {
