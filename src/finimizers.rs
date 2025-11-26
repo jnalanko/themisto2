@@ -1,4 +1,4 @@
-use std::cmp::{max, min};
+use std::{cmp::{max, min}, collections::HashMap};
 
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
@@ -79,12 +79,17 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
 }
 
 
-pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize) {
+pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, verify: bool) {
     let sbwt = index.sbwt();
     let lcs = index.lcs();
     let si = StreamingIndex::new(sbwt, lcs);
     let mut visited = bitvec::bitvec![0; sbwt.n_sets()];
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
+
+    let mut finimizer_to_kmers: Option<HashMap<usize, Vec<usize>>> = if verify { 
+        Some(HashMap::new()) 
+    } else { None };
+
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
@@ -97,7 +102,46 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 visited.set(p, true);
             }
             println!("{}", kmer_equivalence_class.len());
+
+            for &kmer_colex in kmer_equivalence_class.iter() {
+                if let Some(map) = finimizer_to_kmers.as_mut() {
+                    if !map.contains_key(&f_colex) {
+                        map.insert(f_colex, Vec::new());
+                    }
+                    map.get_mut(&f_colex).unwrap().push(kmer_colex);
+                }
+            }
         }
+    }
+    bar.finish();
+
+    let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
+    if let Some(finimizer_to_kmers) = finimizer_to_kmers {
+        log::info!("Verifying");
+        let mut n_kmers_checked = 0;
+        for colex in 0..sbwt.n_sets() {
+            bar.inc(1);
+            let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
+            if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+                let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
+                let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
+                let our_class = &finimizer_to_kmers[&f_colex];
+                assert!(our_class.contains(&colex));
+                n_kmers_checked += 1;
+            }
+        }
+        log::info!("Checking that classes are disjoint have total size equal to the number of k-mers in the sbwt");
+        let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
+        let mut total_class_size = 0;
+        for (_, class) in finimizer_to_kmers.iter() {
+            for &r in class.iter() {
+                assert!(!seen_colex_ranks[r]);
+                seen_colex_ranks.set(r, true);
+            }
+            total_class_size += class.len();
+        }
+        assert_eq!(n_kmers_checked, sbwt.n_kmers());
+        assert_eq!(total_class_size, sbwt.n_kmers());
     }
     bar.finish();
 }
