@@ -133,8 +133,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
-    let mut n_correct_total = 0_usize;
-    let mut n_wrong_total = 0_usize;
+    let mut n_correct_by_finimizer_len = vec![0_usize; sbwt.k()+1];
+    let mut n_wrong_by_finimizer_len = vec![0_usize; sbwt.k()+1];
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
@@ -147,8 +147,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
             let (n_correct, n_wrong) = evaluate_equivalence_class(index, &kmer_equivalence_class);
             assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
-            n_correct_total += n_correct;
-            n_wrong_total += n_wrong;
+            n_correct_by_finimizer_len[f_len] += n_correct;
+            n_wrong_by_finimizer_len[f_len] += n_wrong;
             
             if let Some(map) = finimizer_to_kmers.as_mut() {
                 for kmer_colex in kmer_equivalence_class.iter() {
@@ -162,8 +162,16 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             }
         }
     }
-    eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     bar.finish();
+
+    let n_correct_total: usize = n_correct_by_finimizer_len.iter().sum();
+    let n_wrong_total: usize = n_wrong_by_finimizer_len.iter().sum();
+    eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
+    for f_len in 0..=sbwt.k() {
+        let n_correct: usize = n_correct_by_finimizer_len[f_len];
+        let n_wrong: usize = n_wrong_by_finimizer_len[f_len];
+        eprintln!("Fraction correct for len {}: {:.2}%", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0);
+    }
 
     if let Some(finimizer_to_kmers) = finimizer_to_kmers {
         log::info!("Verifying that the classes contain every k-mer they are supposed to.");
