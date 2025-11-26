@@ -127,9 +127,11 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let mut visited = bitvec::bitvec![0; sbwt.n_sets()];
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
 
+    /*
     let mut finimizer_to_kmers: Option<HashMap<usize, Vec<usize>>> = if verify { 
         Some(HashMap::new()) 
     } else { None };
+     */
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
@@ -150,12 +152,14 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             n_correct_by_finimizer_len[f_len] += n_correct;
             n_wrong_by_finimizer_len[f_len] += n_wrong;
             
+            /*
             if let Some(map) = finimizer_to_kmers.as_mut() {
                 for kmer_colex in kmer_equivalence_class.iter() {
                     let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
                     class.push(kmer_colex);
                 }
             }
+            */
 
             for p in kmer_equivalence_class.iter() {
                 visited.set(p, true);
@@ -173,6 +177,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         eprintln!("Fraction correct for len {}: {:.2}%", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0);
     }
 
+    /*
     if let Some(finimizer_to_kmers) = finimizer_to_kmers {
         log::info!("Verifying that the classes contain every k-mer they are supposed to.");
         let mut n_kmers_checked = 0;
@@ -205,4 +210,5 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         assert_eq!(n_kmers_checked, sbwt.n_kmers());
         assert_eq!(total_class_size, sbwt.n_kmers());
     }
+    */
 }
