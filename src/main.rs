@@ -198,6 +198,14 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
+    #[command(arg_required_else_help = true, hide = true)]
+    FinimizerStats {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
 }
 
 struct MyBitmapStream {
@@ -586,6 +594,10 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
+fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize) {
+    todo!();
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -740,9 +752,16 @@ fn main() {
                 IndexVariant::BitmapIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
                 IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
             };
-            
         },
-    }
+        Subcommands::FinimizerStats { index: index_path, n_threads } => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, true); // Select support is required for export
+            match index {
+                IndexVariant::BitmapIndex(idx) => finimizer_stats(&idx, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => finimizer_stats(&idx, n_threads),
+            };
+        },
+            }
 /*
         Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
             let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
