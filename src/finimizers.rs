@@ -106,10 +106,8 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
             for &kmer_colex in kmer_equivalence_class.iter() {
                 if let Some(map) = finimizer_to_kmers.as_mut() {
-                    if !map.contains_key(&f_colex) {
-                        map.insert(f_colex, Vec::new());
-                    }
-                    map.get_mut(&f_colex).unwrap().push(kmer_colex);
+                    let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
+                    class.push(kmer_colex);
                 }
             }
         }
