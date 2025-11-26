@@ -202,7 +202,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     for f_len in 0..=sbwt.k() {
         let n_correct: usize = n_correct_vec[f_len];
         let n_wrong: usize = n_wrong_vec[f_len];
-        eprintln!("Fraction correct for len {}: {:.2}%", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0);
+        eprintln!("Fraction correct for len {}: {:.2}% ({}/{})", f_len, n_correct as f64 / (n_correct + n_wrong) as f64 * 100.0, n_correct, n_correct + n_wrong);
     }
 
     /*
