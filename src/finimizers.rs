@@ -104,8 +104,8 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
 }
 
 
-// Returns (n_correct, n_wrong)
-fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, class: &[usize]) -> (usize, usize) {
+// Returns (n_correct, n_wrong, mean jaccard index)
+fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, class: &[usize]) -> (usize, usize, f64) {
     let storage = index.get_set_storage();
     let mut finimizer_colors = storage.get_empty_set();
     for &colex in class {
@@ -114,15 +114,26 @@ fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexK
     
     let mut n_correct = 0_usize;
     let mut n_wrong = 0_usize;
+    let mut sum_jaccard = 0_f64;
     for &colex in class {
-        let view = index.colex_to_set(colex);
-        if view.iter().eq(finimizer_colors.iter()) {
+        let kmer_colors_view = index.colex_to_set(colex);
+
+        if kmer_colors_view.iter().eq(finimizer_colors.iter()) {
             n_correct += 1; // This k-mer has the same color set as the finimizer
         } else {
             n_wrong += 1;
         }
+
+        let mut intersection = finimizer_colors.clone();
+        storage.intersect(&mut intersection, &kmer_colors_view);
+
+        let mut union = finimizer_colors.clone();
+        storage.union(&mut union, &kmer_colors_view);
+
+        sum_jaccard += intersection.len() as f64 / union.len() as f64;
+
     }
-    (n_correct, n_wrong)
+    (n_correct, n_wrong, sum_jaccard / class.len() as f64)
 }
 
 // Requires select support
@@ -131,13 +142,13 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let lcs = index.lcs();
     let si = StreamingIndex::new(sbwt, lcs);
 
-
     // Data for the critical section
     struct CriticalSectionData {
         visited_marks: bitvec::vec::BitVec,
         n_correct_by_finimizer_len: Vec<usize>,
         n_wrong_by_finimizer_len: Vec<usize>,
         class_size_by_finimizer_len: Vec<usize>,
+        sum_mean_jaccard_by_finimizer_len: Vec<f64>,
         n_finimizers_by_len: Vec<usize>,
     }
     
@@ -146,6 +157,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         n_correct_by_finimizer_len: vec![0; sbwt.k()+1],
         n_wrong_by_finimizer_len: vec![0; sbwt.k()+1],
         class_size_by_finimizer_len: vec![0; sbwt.k()+1],
+        sum_mean_jaccard_by_finimizer_len: vec![0.0; sbwt.k()+1],
         n_finimizers_by_len: vec![0; sbwt.k()+1],
     };
     let crit = Arc::new(Mutex::new(crit));
@@ -173,7 +185,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                 let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
                 let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
                 assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
-                let (n_correct, n_wrong) = evaluate_equivalence_class(index, &kmer_equivalence_class);
+                let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &kmer_equivalence_class);
                 assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
 
                 // Critical section: we must make sure that each class is counted only once
@@ -187,6 +199,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
                     cr.n_correct_by_finimizer_len[f_len] += n_correct;
                     cr.n_wrong_by_finimizer_len[f_len] += n_wrong;
                     cr.class_size_by_finimizer_len[f_len] += kmer_equivalence_class.len();
+                    cr.sum_mean_jaccard_by_finimizer_len[f_len] += mean_jaccard;
                     cr.n_finimizers_by_len[f_len] += 1;
                     for p in kmer_equivalence_class.iter() {
                         cr.visited_marks.set(p, true);
@@ -217,12 +230,14 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         let n_correct: usize = cr.n_correct_by_finimizer_len[f_len];
         let n_wrong: usize = cr.n_wrong_by_finimizer_len[f_len];
         let mean_class_size = cr.class_size_by_finimizer_len[f_len] as f64 / cr.n_finimizers_by_len[f_len] as f64;
-        println!("{}\t{:.5}\t{}\t{}\t{:.5}\t{}", 
+        let mean_jaccard = cr.sum_mean_jaccard_by_finimizer_len[f_len] / cr.n_finimizers_by_len[f_len] as f64;
+        println!("{}\t{:.5}\t{}\t{}\t{:.5}\t{:.5}\t{}", 
             f_len, 
             n_correct as f64 / (n_correct + n_wrong) as f64, 
             n_correct, 
             n_correct + n_wrong,
             mean_class_size,
+            mean_jaccard,
             cr.n_finimizers_by_len[f_len]
         );
     }

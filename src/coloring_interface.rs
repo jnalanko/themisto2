@@ -107,6 +107,8 @@ pub trait ColorSetOwned {
     // iterator is tied to the &self borrow, allowing us to return values
     // that borrow from &self.
     fn iter(&self) -> Self::Iter<'_>; 
+
+    fn len(&self) -> usize;
 }
 
 impl ColorSetOwned for Vec<usize> {
@@ -116,6 +118,10 @@ impl ColorSetOwned for Vec<usize> {
 
     fn iter(&self) -> Self::Iter<'_> {
         self.as_slice().iter().copied()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
     }
 
 }

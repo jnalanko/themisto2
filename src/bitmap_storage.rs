@@ -69,6 +69,11 @@ impl coloring_interface::ColorSetOwned for BitSetOwned {
     fn iter(&self) -> Self::Iter<'_> {
         BitSetOwnedIter{it: self.bv.iter_ones()}
     }
+    
+    fn len(&self) -> usize {
+        self.bv.count_ones()
+    }
+
 }
 
 impl<'a> Iterator for BitSetOwnedIter<'a> {

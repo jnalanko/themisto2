@@ -153,6 +153,14 @@ impl crate::coloring_interface::ColorSetOwned for OwnedSparseDense {
             },
         }
     }
+    
+    fn len(&self) -> usize {
+        match &self {
+            OwnedSparseDense::Dense(bit_vec) => bit_vec.count_ones(),
+            OwnedSparseDense::Sparse(compact_int_vec) => compact_int_vec.len(),
+        } 
+    }
+
 }
 
 impl<'a> crate::coloring_interface::ColorSetView<'a> for SparseDenseColorSetView<'a> {
