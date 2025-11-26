@@ -10,6 +10,8 @@ use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSet
 fn pick_finimizer(sfs_slice: &[Option<(usize, std::ops::Range<usize>)>]) -> (usize, usize, usize){
     // The finimizer is the shortest unique suffix, with ties broken by colex
 
+    dbg!(&sfs_slice);
+
     // The full k-mer should have an existing unique match
     assert!(sfs_slice.last().expect("Empty slice").as_ref().expect("Last SFS pos is None").1.len() == 1); 
 
@@ -85,9 +87,11 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     let si = StreamingIndex::new(sbwt, lcs);
     for colex in 0..sbwt.n_sets() {
         let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
-        let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
-        let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
-        let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
-        eprintln!("{:?}", kmer_equivalence_class);
+        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+            let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
+            let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
+            let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
+            eprintln!("{:?}", kmer_equivalence_class);
+        }
     }
 }
