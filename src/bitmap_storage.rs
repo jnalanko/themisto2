@@ -122,7 +122,7 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     }
 
     fn get_empty_set(&self) -> Self::OwnedSet {
-        BitSetOwned{bv: bitvec![]}
+        BitSetOwned{bv: bitvec![usize, Lsb0; 0; self.n_colors]}
     }
 
     fn get_full_set(&self) -> Self::OwnedSet {
