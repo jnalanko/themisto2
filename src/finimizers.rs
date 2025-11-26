@@ -79,6 +79,7 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
 }
 
 
+// Requires select support
 pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, verify: bool) {
     let sbwt = index.sbwt();
     let lcs = index.lcs();
@@ -93,7 +94,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
-        let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
+        let kmer = sbwt.access_kmer(colex);
         if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
             let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);

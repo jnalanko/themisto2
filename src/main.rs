@@ -755,7 +755,7 @@ fn main() {
         },
         Subcommands::FinimizerStats { index: index_path, n_threads, verify} => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path, true); // Select support is required for export
+            let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
                 IndexVariant::BitmapIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
                 IndexVariant::SparseDenseIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
