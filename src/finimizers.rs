@@ -134,11 +134,11 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     // Data for the critical section
     let shared_visited_marks = bitvec::bitvec![0; sbwt.n_sets()];
-    let mut n_correct_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
-    let mut n_wrong_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
-    let mut class_size_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
-    let mut n_finimizers_by_len: Vec<usize> = vec![0; sbwt.k()+1];
-    let mut critical_data = Arc::new(Mutex::new((shared_visited_marks, n_correct_by_finimizer_len, n_wrong_by_finimizer_len, class_size_by_finimizer_len, n_finimizers_by_len)));
+    let n_correct_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let n_wrong_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let class_size_by_finimizer_len: Vec<usize> = vec![0; sbwt.k()+1]; 
+    let n_finimizers_by_len: Vec<usize> = vec![0; sbwt.k()+1];
+    let critical_data = Arc::new(Mutex::new((shared_visited_marks, n_correct_by_finimizer_len, n_wrong_by_finimizer_len, class_size_by_finimizer_len, n_finimizers_by_len)));
 
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
 
