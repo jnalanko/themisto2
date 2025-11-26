@@ -1,6 +1,6 @@
 use std::{cmp::{max, min}, collections::HashMap, sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering::Relaxed}}};
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
@@ -150,8 +150,10 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
-        (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
-            bar.inc(1);
+        (0..sbwt.n_sets()).par_bridge().for_each(|colex| {
+            if colex % 10000 == 0 {
+                bar.set_position(colex as u64);
+            }
             if critical_data.lock().unwrap().0[colex] { return } // Already visited
             let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
