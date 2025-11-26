@@ -43,14 +43,21 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
     
     // Build the finimizer string. Note that this might not be a suffix
     // of any full k-mer, but a suffix of a dummy k-mer.
-    let initial_suffix_match = sbwt.access_kmer(f_colex)[k-f_len..k].to_vec();
-    assert!(initial_suffix_match.iter().all(|&c| c != b'$'));
+    let mut initial_suffix_match = sbwt.access_kmer(f_colex).to_vec();
+    while *initial_suffix_match.first().unwrap() == b'$' {
+        initial_suffix_match.remove(0);
+    }
+
+    //eprintln!("finimizer {}", String::from_utf8_lossy(&initial_suffix_match));
 
     let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
     dfs_stack.push((0, initial_suffix_match, f_colex, false));
 
+
     while let Some((depth, suffix_match, colex, selected_before)) = dfs_stack.pop() {
         if depth == k - f_len + 1 { continue } // Finimizer has fallen out of the k-mer
+        //eprintln!("suffix match {}", String::from_utf8_lossy(&suffix_match));
+
         let sfs = si.shortest_freq_bound_suffixes(&suffix_match, 1);
         let selected_here = pick_finimizer(&sfs).1 == f_colex;
         if selected_here { 
@@ -105,13 +112,14 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         Some(HashMap::new()) 
     } else { None };
 
-    eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
+    //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
     for colex in 0..sbwt.n_sets() {
         bar.inc(1);
         if visited[colex] { continue }
         let kmer = sbwt.access_kmer(colex);
         if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+            //eprintln!("kmer {}", String::from_utf8_lossy(&kmer));
             let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
             let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
             let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
