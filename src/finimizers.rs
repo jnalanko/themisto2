@@ -54,7 +54,9 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
         let sfs = si.shortest_freq_bound_suffixes(&suffix_match, 1);
         let selected_here = pick_finimizer(&sfs).1 == f_colex;
         if selected_here { 
-            kmer_colex_with_same_finimizer.push(colex);
+            if suffix_match.len() == k {
+                kmer_colex_with_same_finimizer.push(colex);
+            }
         } else { 
             /*
             if selected_before {
@@ -140,6 +142,7 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
                 let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
                 let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
+                eprintln!("{}, {} {}", _f_len, f_colex, _f_pos);
                 let our_class = &finimizer_to_kmers[&f_colex];
                 eprintln!("{}, {:?} {:?}", String::from_utf8_lossy(&kmer), colex, our_class);
                 assert!(our_class.contains(&colex));
