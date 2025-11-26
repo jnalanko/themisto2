@@ -95,6 +95,11 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
             }
         }
     }
+
+    // Duplicate k-mers can happen if the DBG loops back to itself before the dfs depth limit
+    kmer_colex_with_same_finimizer.sort();
+    kmer_colex_with_same_finimizer.dedup();
+
     kmer_colex_with_same_finimizer
 }
 
