@@ -150,9 +150,9 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
                 let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
                 let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
-                eprintln!("{}, {} {}", _f_len, f_colex, _f_pos);
+                //eprintln!("{}, {} {}", _f_len, f_colex, _f_pos);
                 let our_class = &finimizer_to_kmers[&f_colex];
-                eprintln!("{}, {:?} {:?}", String::from_utf8_lossy(&kmer), colex, our_class);
+                //eprintln!("{}, {:?} {:?}", String::from_utf8_lossy(&kmer), colex, our_class);
                 assert!(our_class.contains(&colex));
                 n_kmers_checked += 1;
             }
