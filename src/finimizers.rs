@@ -10,8 +10,6 @@ use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSet
 fn pick_finimizer(sfs_slice: &[Option<(usize, std::ops::Range<usize>)>]) -> (usize, usize, usize){
     // The finimizer is the shortest unique suffix, with ties broken by colex
 
-    dbg!(&sfs_slice);
-
     // The full k-mer should have an existing unique match
     assert!(sfs_slice.last().expect("Empty slice").as_ref().expect("Last SFS pos is None").1.len() == 1); 
 
