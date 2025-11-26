@@ -32,16 +32,18 @@ fn pick_finimizer(sfs_slice: &[Option<(usize, std::ops::Range<usize>)>]) -> (usi
     (best.0, best.1, best_i)
 
 }
-// Explore from a colex position that has a finimizer as a suffix
+// Explore from a colex position that has a finimizer as a suffix, and return colex ranks of
+// all k-mers that have the finimizer as their finimizer.
 #[allow(clippy::collapsible_else_if)]
-fn explore(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_colex: usize, f_len: usize, f_pos: usize) -> Vec<usize> {
+fn explore(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_colex: usize, f_len: usize) -> Vec<usize> {
     let si = StreamingIndex::new(sbwt, lcs);
     let k = sbwt.k();
 
     let mut kmer_colex_with_same_finimizer = Vec::<usize>::new();
     
-    let mut initial_kmer = sbwt.access_kmer(f_colex);
-    let mut initial_kmer_colex = f_colex;
+    let initial_kmer = sbwt.access_kmer(f_colex);
+    let initial_kmer_colex = f_colex;
+
     let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
     dfs_stack.push((0, initial_kmer, initial_kmer_colex, false));
 
@@ -85,6 +87,6 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         let kmer = sbwt.access_kmer(colex); // TODO: need to build select support for this
         let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
         let (f_len, f_colex, f_pos) = pick_finimizer(&sfs);
-        let finimizer_kmer_set = explore(sbwt, lcs, f_colex, f_len, f_pos); 
+        let finimizer_kmer_set = explore(sbwt, lcs, f_colex, f_len); 
     }
 }
