@@ -65,7 +65,6 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
                 kmer_colex_with_same_finimizer.push(colex);
             }
         } else { 
-            /*
             if selected_before {
                 // The finimizer with colex rank f_colex was selected in a previous
                 // k-mer, but is not selected anymore. This means that there is now
@@ -76,7 +75,6 @@ fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_
                 // unique finimizers.
                 continue; 
             }
-            */
         }
 
         // Push out-neighbors to the dfs stack
