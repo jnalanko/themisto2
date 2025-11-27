@@ -1,16 +1,16 @@
 #![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
 #![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 
-use std::{collections::HashSet, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, sync::Arc};
+use std::{collections::HashSet, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
-use clap::{Parser, Subcommand, builder::styling::Color};
+use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, MatchingStatisticsIterator, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::hash_and_encode_distinct_sets, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 mod EM;
 mod bitmap_storage;

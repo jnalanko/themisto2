@@ -2,7 +2,7 @@ use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use jseqio::reverse_complement;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use sbwt::dbg::Dbg;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
 use sbwt::LcsArray;
@@ -14,8 +14,6 @@ use std::cmp::max;
 use std::io::Write;
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::thread::current;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 

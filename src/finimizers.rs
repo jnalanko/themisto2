@@ -1,7 +1,7 @@
-use std::{cmp::{max, min}, collections::HashMap, sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering::Relaxed}}};
+use std::{cmp::min, sync::{Arc, Mutex}};
 
-use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
-use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq, dbg::Dbg};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
