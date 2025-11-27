@@ -1,9 +1,5 @@
 use std::io::BufRead;
 
-use bitvec::prelude::*;
-use bitvec::vec::BitVec;
-use sbwt::SubsetSeq;
-
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 
 pub fn ascii_to_int(ascii: &[u8]) -> usize {
