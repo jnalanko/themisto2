@@ -205,8 +205,16 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "verify", default_value = "false")]
-        verify: bool,
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
+    #[command(arg_required_else_help = true, hide = true)]
+    MinimizerStats {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "minimizer-length", short = 'm', required = true)]
+        m: usize,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
@@ -754,12 +762,20 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
             };
         },
-        Subcommands::FinimizerStats { index: index_path, n_threads, verify} => {
+        Subcommands::FinimizerStats { index: index_path, n_threads} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
-                IndexVariant::BitmapIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
-                IndexVariant::SparseDenseIndex(idx) => finimizers::finimizer_stats(&idx, n_threads, verify),
+                IndexVariant::BitmapIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Finimizer),
+                IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Finimizer),
+            };
+        },
+        Subcommands::MinimizerStats { index: index_path, n_threads, m} => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, true); // Select support is required for verify
+            match index {
+                IndexVariant::BitmapIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
+                IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
             };
         },
             }

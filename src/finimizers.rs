@@ -43,6 +43,21 @@ fn create_finimizer_function<'b>(index: StreamingIndex<'b, SbwtIndex<SubsetMatri
     }
 }
 
+fn create_minimizer_function<'b>(m: usize) -> impl (for<'a> Fn(&'a [u8]) -> (usize, usize)) + 'b {
+    move |kmer: &[u8]| {
+        let mut minimizer = &kmer[0..m];
+        let mut min_pos = 0;
+        for j in 1 .. (kmer.len() as i64) - (m as i64) + 1 {
+            let j = j as usize;
+            if kmer[j..j+m] < *minimizer {
+                minimizer = &kmer[j..j+m];
+                min_pos = j;
+            }
+        }
+        (min_pos, m)
+    }
+}
+
 // The finimizer function should return a pair (start, len)
 #[allow(clippy::collapsible_else_if)]
 fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, minimizer: &[u8], minimizer_fn: impl for<'a> Fn(&'a [u8]) -> (usize, usize)) -> Vec<usize> {
@@ -141,11 +156,14 @@ fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexK
     (n_correct, n_wrong, sum_jaccard / class.len() as f64)
 }
 
-// Requires select support
-pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, verify: bool) {
+pub enum MinimizerType {
+    Finimizer,
+    Minimizer(usize), // The usize is the minimizer length
+}
+
+pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
     let lcs = index.lcs();
-    let si = StreamingIndex::new(sbwt, lcs);
 
     // Data for the critical section
     struct CriticalSectionData {
@@ -177,8 +195,6 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
-    let si = StreamingIndex::new(sbwt, lcs);
-    let finimizer_fn = create_finimizer_function(si);
 
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
@@ -189,9 +205,9 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             if crit.lock().unwrap().visited_marks[colex] { return } // Already visited
             let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-                let (f_start, f_len) = finimizer_fn(&kmer);
+                let (f_start, f_len) = minimizer_fn(&kmer);
                 let finimizer = &kmer[f_start..f_start+f_len];
-                let kmer_equivalence_class = find_kmer_class_of_minimizer(sbwt, lcs, finimizer, &finimizer_fn); 
+                let kmer_equivalence_class = find_kmer_class_of_minimizer(sbwt, lcs, finimizer, &minimizer_fn); 
 
                 assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
                 let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &kmer_equivalence_class);
@@ -285,4 +301,22 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
         assert_eq!(total_class_size, sbwt.n_kmers());
     }
     */
+
+}
+
+// Requires select support
+pub fn minimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_type: MinimizerType) {
+    let sbwt = index.sbwt();
+    let lcs = index.lcs();
+    let si = StreamingIndex::new(sbwt, lcs);
+    match minimizer_type {
+        MinimizerType::Finimizer => {
+            let finimizer_fn = create_finimizer_function(si);
+            generic_minimizer_stats(index, n_threads, finimizer_fn);
+        },
+        MinimizerType::Minimizer(m) => {
+            let minimizer_fn = create_minimizer_function(m);
+            generic_minimizer_stats(index, n_threads, minimizer_fn);
+        },
+    }
 }
