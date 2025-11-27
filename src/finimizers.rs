@@ -75,10 +75,8 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
         let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
         dfs_stack.push((0, initial_suffix_match, minimizer_colex, false));
 
-
         while let Some((depth, suffix_match, kmer_colex, selected_before)) = dfs_stack.pop() {
             if depth == k - minimizer.len() + 1 { continue } // Finimizer has fallen out of the k-mer
-            //eprintln!("suffix match {}", String::from_utf8_lossy(&suffix_match));
 
             let mut selected_here = false;
             if suffix_match.len() == k {
@@ -115,7 +113,7 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
                         new_suffix_match.remove(0); // Pop front to get back to length k
                     }
 
-                    let new_colex = sbwt.lf_step(kmer_colex, c_idx);
+                    let new_colex = sbwt.lf_step(suffix_group_start, c_idx);
                     dfs_stack.push((depth+1, new_suffix_match, new_colex, selected_here));
                 }
             }
@@ -222,6 +220,7 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
                     cr.sum_mean_jaccard_by_finimizer_len[f_len] += mean_jaccard;
                     cr.n_finimizers_by_len[f_len] += 1;
                     for p in kmer_equivalence_class.iter() {
+                        //assert!(!cr.visited_marks[p]);
                         cr.visited_marks.set(p, true);
                     }
                 }
@@ -234,6 +233,7 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     let cr = &*crit.lock().unwrap();
     let n_correct_total: usize = cr.n_correct_by_finimizer_len.iter().sum();
     let n_wrong_total: usize = cr.n_wrong_by_finimizer_len.iter().sum();
+    assert_eq!(n_correct_total + n_wrong_total, sbwt.n_kmers()); // No double counting
     eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     for f_len in 0..=sbwt.k() {
         let n_correct: usize = cr.n_correct_by_finimizer_len[f_len];
