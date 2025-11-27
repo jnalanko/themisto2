@@ -37,9 +37,8 @@ struct SortedIntVecs {
     // immutable views to this via IntVecSlice.
     concat: CompactIntVec, 
 
-    // Ends of individual intvecs, such that ends[0] = 0 and ends[i+1] is the
-    // exclusive end of the i-th vector.
-    ends: Vec<usize>, 
+    // Starts of individual sets, with a final sentinel value at the exclusive end of the last one.
+    starts: Vec<usize>, 
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -211,7 +210,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_concat_capacity = 1; // Current capacity of sparse_concat
         let mut sparse_concat_len = 0; // Current len of sparse_concat
         let mut sparse_concat = CompactIntVec::new(sparse_concat_capacity, color_id_bit_width);
-        let mut sparse_concat_ends: Vec<usize> = vec![];
+        let mut sparse_concat_starts: Vec<usize> = vec![];
 
         let mut dense_sets = BitMaps::new(n_colors);
 
@@ -233,7 +232,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 buf.sort_unstable(); // We need sorted sets for intersections
 
                 // Push the sorted set to the sparse concat
-                sparse_concat_ends.push(sparse_concat_len);
+                sparse_concat_starts.push(sparse_concat_len);
                 for x in buf.iter() {
                     if sparse_concat_len == sparse_concat_capacity {
                         // Make more space
@@ -250,15 +249,15 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             n_sets_total += 1;
         }
 
-        sparse_concat_ends.push(sparse_concat_len);
+        sparse_concat_starts.push(sparse_concat_len); // Final sentinel start, as required
 
         sparse_concat.resize(sparse_concat_len); // Shrink to fit
-        sparse_concat_ends.shrink_to_fit();
+        sparse_concat_starts.shrink_to_fit();
         dense_sets.shrink_to_fit();
 
         let sparse_sets = SortedIntVecs {
             concat: sparse_concat,
-            ends: sparse_concat_ends,
+            starts: sparse_concat_starts,
         };
 
         log::info!("{}% of the sets are sparse", sparse_sets.n_sets() as f64 / n_sets_total as f64 * 100.0);
@@ -350,16 +349,18 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         // Atomicity no longer needed
         let sparse_set_concat = CompactIntVec::from_atomic(sparse_set_concat);
-        let mut sparse_set_ends: Vec<usize> = sparse_set_insertion_points.into_iter().map(
+        let mut sparse_set_starts: Vec<usize> = sparse_set_insertion_points.into_iter().map(
             |x| x.load(Acquire) as usize
         ).collect();
+        // After inserting everything, the insertion points are now that the starts of
+        // the next set. Let's add the start of the first set to the beginning:
+        sparse_set_starts.insert(0, 0);
 
         // Make a SortedIntVecs out of the sparse set concatenation
-        sparse_set_ends.insert(0, 0); // This is required (see SortedIntVecs commends)
-        sparse_set_ends.shrink_to_fit();
+        sparse_set_starts.shrink_to_fit();
         let mut sorted_sparse_sets = SortedIntVecs {
             concat: sparse_set_concat,
-            ends: sparse_set_ends,
+            starts: sparse_set_starts,
         };
 
         log::info!("Sorting sparse sets");
@@ -595,35 +596,26 @@ impl SparseDenseStorage {
 
 impl SortedIntVecs {
     fn new(bit_width: usize) -> Self {
-        SortedIntVecs{concat: CompactIntVec::new(0, bit_width), ends: vec![0]}
+        SortedIntVecs{concat: CompactIntVec::new(0, bit_width), starts: vec![0]}
     }
 
     fn new_with_sizes(set_sizes: impl Iterator<Item = usize>, n_sets: usize, bit_width: usize) -> Self {
-        let mut ends: Vec<usize> = vec![0; n_sets + 1];
+        let mut starts: Vec<usize> = vec![0; n_sets + 1];
         let mut total_set_size = 0_usize;
         for (i, s) in set_sizes.enumerate() {
-            ends[i+1] = ends[i] + s;
+            starts[i+1] = starts[i] + s;
             total_set_size += s;
         }
 
         let concat = CompactIntVec::new(total_set_size, bit_width);
 
-        Self { concat, ends }
+        Self { concat, starts }
     }
-
-    /*
-    fn push(&mut self, set: impl IntoIterator<Item = usize>) { // Pushes a new set of integers
-        for x in set {
-            self.concat.push(x as u64);
-        }
-        self.ends.push(self.concat.len());
-    }
-    */
 
     fn assign_element(&mut self, set_id: usize, offset_in_set: usize, element: usize) { // Pushes a new set of integers
-        let size = self.ends[set_id+1] - self.ends[set_id];
+        let size = self.starts[set_id+1] - self.starts[set_id];
         assert!(offset_in_set < size);
-        self.concat.set(self.ends[set_id] + offset_in_set, element);
+        self.concat.set(self.starts[set_id] + offset_in_set, element);
     }
 
     /*
@@ -633,25 +625,25 @@ impl SortedIntVecs {
     */
 
     fn get(&self, set_id: usize) -> IntVecSlice<'_> {
-        IntVecSlice{vec: &self.concat, start: self.ends[set_id], end: self.ends[set_id+1]}
+        IntVecSlice{vec: &self.concat, start: self.starts[set_id], end: self.starts[set_id+1]}
     }
 
     fn n_sets(&self) -> usize {
-        self.ends.len() - 1 // Minus 1 because there is a 0 at the start of ends
+        self.starts.len() - 1 // Minus 1 because there is a sentinel start at the end
     }
 
     fn serialize(&self, out: &mut impl std::io::Write) {
         // Serialize using bincode
         self.concat.serialize(out);
-        bincode::serialize_into(out, &self.ends).unwrap();
+        bincode::serialize_into(out, &self.starts).unwrap();
     }
 
     fn load(input: &mut impl std::io::Read) -> Self {
         // Deserialize using bincode
         let concat = CompactIntVec::load(input);
-        let ends: Vec<usize> = bincode::deserialize_from(input).unwrap();
-        assert!(!ends.is_empty() && ends[0] == 0); // The first end must be 0
-        SortedIntVecs{concat, ends}
+        let starts: Vec<usize> = bincode::deserialize_from(input).unwrap();
+        assert!(!starts.is_empty() && *starts.last().unwrap() == concat.len());
+        SortedIntVecs{concat, starts}
     }
 
 }
