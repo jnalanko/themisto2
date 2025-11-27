@@ -252,9 +252,6 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'stat
 
 impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
-    /// Input: 
-    /// - Color sets in bitmap representation: bm[i * n_colors + j] tells whether
-    ///   color j is present in set i.
     /// TODO: take CompactIntVec for colex_to_color_set_id instead of Vec<usize>
     pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_to_color_set_id: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
     -> CompactColexKmers<CSS> {
