@@ -223,7 +223,7 @@ mod tests {
         let vec2 = CompactIntVec::load(&mut buf.as_slice());
 
         for i in 0..100 {
-            assert_eq!(vec.get(i), i*i);
+            assert_eq!(vec2.get(i), i*i);
         }
 
         assert_eq!(vec.data, vec2.data);
