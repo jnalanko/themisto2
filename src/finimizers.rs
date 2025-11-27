@@ -33,74 +33,79 @@ fn pick_finimizer(sfs_slice: &[Option<(usize, std::ops::Range<usize>)>]) -> (usi
     (best.0, best.1, best_i)
 
 }
-// Explore from a colex position that has a finimizer as a suffix, and return colex ranks of
-// all k-mers that have the finimizer as their finimizer.
+
+fn create_finimizer_function<'b>(index: StreamingIndex<'b, SbwtIndex<SubsetMatrix>, LcsArray>) -> impl (for<'a> Fn(&'a [u8]) -> (usize, usize)) + 'b {
+    move |kmer: &[u8]| {
+        assert!(kmer.len() == index.k());
+        let sfs = index.shortest_freq_bound_suffixes(kmer, 1);
+        let (len, _colex, end) = pick_finimizer(&sfs);
+        (end-len, len)
+    }
+}
+
+// The finimizer function should return a pair (start, len)
 #[allow(clippy::collapsible_else_if)]
-fn finimizer_inverse_function(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, f_colex: usize, f_len: usize) -> Vec<usize> {
-    let si = StreamingIndex::new(sbwt, lcs);
+fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, minimizer: &[u8], minimizer_fn: impl for<'a> Fn(&'a [u8]) -> (usize, usize)) -> Vec<usize> {
     let k = sbwt.k();
 
-    let mut kmer_colex_with_same_finimizer = Vec::<usize>::new();
+    let mut kmer_colex_with_same_minimizer = Vec::<usize>::new();
     
-    // Build the finimizer string. Note that this might not be a suffix
-    // of any full k-mer, but a suffix of a dummy k-mer.
-    let mut initial_suffix_match = sbwt.access_kmer(f_colex).to_vec();
-    while *initial_suffix_match.first().unwrap() == b'$' {
-        initial_suffix_match.remove(0);
-    }
-
-    //eprintln!("finimizer {}", String::from_utf8_lossy(&initial_suffix_match));
-
-    let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
-    dfs_stack.push((0, initial_suffix_match, f_colex, false));
-
-
-    while let Some((depth, suffix_match, colex, selected_before)) = dfs_stack.pop() {
-        if depth == k - f_len + 1 { continue } // Finimizer has fallen out of the k-mer
-        //eprintln!("suffix match {}", String::from_utf8_lossy(&suffix_match));
-
-        let sfs = si.shortest_freq_bound_suffixes(&suffix_match, 1);
-        let selected_here = pick_finimizer(&sfs).1 == f_colex;
-        if selected_here { 
-            if suffix_match.len() == k {
-                kmer_colex_with_same_finimizer.push(colex);
-            }
-        } else { 
-            if selected_before {
-                // The finimizer with colex rank f_colex was selected in a previous
-                // k-mer, but is not selected anymore. This means that there is now
-                // a smaller finimizer in the same window, so we must wait for that
-                // to fall our of the k-mer window before we can select f_colex again.
-                // But if this happens, then f_colex is a suffix of the current k-mer,
-                // which means we are back to where we started from because we have
-                // unique finimizers.
-                continue; 
-            }
+    let minimizer_colex_range = sbwt.search(minimizer).unwrap();
+    for minimizer_colex in minimizer_colex_range {
+        let mut initial_suffix_match = sbwt.access_kmer(minimizer_colex).to_vec();
+        while *initial_suffix_match.first().unwrap() == b'$' {
+            initial_suffix_match.remove(0);
         }
 
-        // Push out-neighbors to the dfs stack
-        for c in [b'A', b'C', b'G', b'T'] {
-            let mut new_suffix_match = suffix_match.clone();
-            new_suffix_match.push(c);
-            if new_suffix_match.len() > k {
-                assert!(new_suffix_match.len() == k+1);
-                new_suffix_match.remove(0); // Pop front to get back to length k
+        let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
+        dfs_stack.push((0, initial_suffix_match, minimizer_colex, false));
+
+
+        while let Some((depth, suffix_match, kmer_colex, selected_before)) = dfs_stack.pop() {
+            if depth == k - minimizer.len() + 1 { continue } // Finimizer has fallen out of the k-mer
+            //eprintln!("suffix match {}", String::from_utf8_lossy(&suffix_match));
+
+            let mut selected_here = false;
+            if suffix_match.len() == k {
+                let (f_start, f_len) = minimizer_fn(&suffix_match);
+                let new_minimizer  = &suffix_match[f_start..f_start+f_len];
+                if new_minimizer == minimizer {
+                    kmer_colex_with_same_minimizer.push(kmer_colex);
+                    selected_here = true;
+                } else if selected_before {
+                    // The minimizer with was selected in a previous
+                    // k-mer, but is not selected anymore. This means that there is now
+                    // a smaller ,inimizer in the same window, so we must wait for that
+                    // to fall our of the k-mer window before we can select the old minimizer again.
+                    // But if this happens, then the minimizer is a suffix of the current k-mer,
+                    // so it will processed on some other round of the out for-loop.
+                    continue; 
+                }
             }
 
-            if let Some(r) = sbwt.search(&new_suffix_match) {
-                assert!(r.len() <= 1); // Still unique
-                if r.len() > 0 { // Extension with c successful
-                    dfs_stack.push((depth+1, new_suffix_match, r.start, selected_here));
+            // Push out-neighbors to the dfs stack
+            for c in [b'A', b'C', b'G', b'T'] {
+                let mut new_suffix_match = suffix_match.clone();
+                new_suffix_match.push(c);
+                if new_suffix_match.len() > k {
+                    assert!(new_suffix_match.len() == k+1);
+                    new_suffix_match.remove(0); // Pop front to get back to length k
+                }
+
+                if let Some(r) = sbwt.search(&new_suffix_match) {
+                    assert!(r.len() <= 1); // Still unique
+                    if r.len() > 0 { // Extension with c successful
+                        dfs_stack.push((depth+1, new_suffix_match, r.start, selected_here));
+                    }
                 }
             }
         }
     }
 
-    // Duplicate k-mers can happen if the DBG loops back to itself before the dfs depth limit
-    kmer_colex_with_same_finimizer.sort();
-    kmer_colex_with_same_finimizer.dedup();
-
-    kmer_colex_with_same_finimizer
+    // Duplicate k-mers can happen e.g. if the DBG loops back to itself before the dfs depth limit
+    kmer_colex_with_same_minimizer.sort();
+    kmer_colex_with_same_minimizer.dedup();
+    kmer_colex_with_same_minimizer
 }
 
 
@@ -172,6 +177,9 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
 
     //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
 
+    let si = StreamingIndex::new(sbwt, lcs);
+    let finimizer_fn = create_finimizer_function(si);
+
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
         (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
@@ -181,9 +189,10 @@ pub fn finimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CS
             if crit.lock().unwrap().visited_marks[colex] { return } // Already visited
             let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-                let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
-                let (f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
-                let kmer_equivalence_class = finimizer_inverse_function(sbwt, lcs, f_colex, f_len); 
+                let (f_start, f_len) = finimizer_fn(&kmer);
+                let finimizer = &kmer[f_start..f_start+f_len];
+                let kmer_equivalence_class = find_kmer_class_of_minimizer(sbwt, lcs, finimizer, &finimizer_fn); 
+
                 assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
                 let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &kmer_equivalence_class);
                 assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
