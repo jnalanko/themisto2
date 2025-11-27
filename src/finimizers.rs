@@ -1,7 +1,7 @@
 use std::{cmp::{max, min}, collections::HashMap, sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering::Relaxed}}};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
-use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
+use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq, dbg::Dbg};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
@@ -99,19 +99,24 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
             }
 
             // Push out-neighbors to the dfs stack
-            for c in [b'A', b'C', b'G', b'T'] {
-                let mut new_suffix_match = suffix_match.clone();
-                new_suffix_match.push(c);
-                if new_suffix_match.len() > k {
-                    assert!(new_suffix_match.len() == k+1);
-                    new_suffix_match.remove(0); // Pop front to get back to length k
-                }
 
-                if let Some(r) = sbwt.search(&new_suffix_match) {
-                    assert!(r.len() <= 1); // Still unique
-                    if r.len() > 0 { // Extension with c successful
-                        dfs_stack.push((depth+1, new_suffix_match, r.start, selected_here));
+            // Find the suffix group start of the k-mer. The outgoing DBG-edge labels are listed there.
+            let mut suffix_group_start = kmer_colex;
+            while suffix_group_start > 0 && lcs.access(suffix_group_start) == k - 1 {
+                suffix_group_start -= 1;
+            }
+            for (c_idx, &c) in [b'A', b'C', b'G', b'T'].iter().enumerate() {
+                if sbwt.sbwt().set_contains(suffix_group_start, c_idx as u8) {
+                    // c is an outgoing edge from here
+                    let mut new_suffix_match = suffix_match.clone();
+                    new_suffix_match.push(c);
+                    if new_suffix_match.len() > k {
+                        assert!(new_suffix_match.len() == k+1);
+                        new_suffix_match.remove(0); // Pop front to get back to length k
                     }
+
+                    let new_colex = sbwt.lf_step(kmer_colex, c_idx);
+                    dfs_stack.push((depth+1, new_suffix_match, new_colex, selected_here));
                 }
             }
         }
