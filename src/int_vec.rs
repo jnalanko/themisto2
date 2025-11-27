@@ -225,6 +225,9 @@ mod tests {
         for i in 0..100 {
             assert_eq!(vec2.get(i), i*i);
         }
+        for i in 100..vec2.len() {
+            assert_eq!(vec2.get(i), 0);
+        }
 
         assert_eq!(vec.data, vec2.data);
         assert_eq!(vec.len, vec2.len);
