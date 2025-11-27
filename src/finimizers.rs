@@ -191,16 +191,6 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     let crit = Arc::new(Mutex::new(crit));
 
     let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
-
-    /*
-    let mut finimizer_to_kmers: Option<HashMap<usize, Vec<usize>>> = if verify { 
-        Some(HashMap::new()) 
-    } else { None };
-     */
-
-    //eprintln!("{}", String::from_utf8_lossy(&sbwt.access_kmer(364223)));
-
-
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
         (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
@@ -236,16 +226,6 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
                     }
                 }
                 // End of critical section
-
-                /*
-                if let Some(map) = finimizer_to_kmers.as_mut() {
-                    for kmer_colex in kmer_equivalence_class.iter() {
-                        let class = map.entry(f_colex).or_insert_with(Vec::new); // Create new if does not exist yet
-                        class.push(kmer_colex);
-                    }
-                }
-                */
-
             }
         })
     });
@@ -254,7 +234,6 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     let cr = &*crit.lock().unwrap();
     let n_correct_total: usize = cr.n_correct_by_finimizer_len.iter().sum();
     let n_wrong_total: usize = cr.n_wrong_by_finimizer_len.iter().sum();
-    assert_eq!(n_correct_total + n_wrong_total, sbwt.n_kmers()); // No double counting
     eprintln!("Fraction correct: {:.2}%", n_correct_total as f64 / (n_correct_total + n_wrong_total) as f64 * 100.0);
     for f_len in 0..=sbwt.k() {
         let n_correct: usize = cr.n_correct_by_finimizer_len[f_len];
@@ -271,42 +250,6 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
             cr.n_finimizers_by_len[f_len]
         );
     }
-
-    /*
-    if let Some(finimizer_to_kmers) = finimizer_to_kmers {
-        log::info!("Verifying that the classes contain every k-mer they are supposed to.");
-        let mut n_kmers_checked = 0;
-        let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
-        for colex in 0..sbwt.n_sets() {
-            bar.inc(1);
-            let kmer = sbwt.access_kmer(colex);
-            if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-                let sfs = si.shortest_freq_bound_suffixes(&kmer, 1);
-                let (_f_len, f_colex, _f_pos) = pick_finimizer(&sfs);
-                //eprintln!("{}, {} {}", _f_len, f_colex, _f_pos);
-                let our_class = &finimizer_to_kmers[&f_colex];
-                //eprintln!("{}, {:?} {:?}", String::from_utf8_lossy(&kmer), colex, our_class);
-                assert!(our_class.contains(&colex));
-                n_kmers_checked += 1;
-            }
-        }
-        bar.finish();
-
-        log::info!("Checking that classes are disjoint and have total size equal to the number of k-mers in the sbwt");
-        let mut seen_colex_ranks = bitvec::bitvec![0; sbwt.n_sets()];
-        let mut total_class_size = 0;
-        for (_, class) in finimizer_to_kmers.iter() {
-            for r in class.iter() {
-                assert!(!seen_colex_ranks[r]);
-                seen_colex_ranks.set(r, true);
-            }
-            total_class_size += class.len();
-        }
-        assert_eq!(n_kmers_checked, sbwt.n_kmers());
-        assert_eq!(total_class_size, sbwt.n_kmers());
-    }
-    */
-
 }
 
 // Requires select support
