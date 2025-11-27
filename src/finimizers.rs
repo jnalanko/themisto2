@@ -39,7 +39,7 @@ fn create_finimizer_function<'b>(index: StreamingIndex<'b, SbwtIndex<SubsetMatri
         assert!(kmer.len() == index.k());
         let sfs = index.shortest_freq_bound_suffixes(kmer, 1);
         let (len, _colex, end) = pick_finimizer(&sfs);
-        (end-len, len)
+        (end+1-len, len)
     }
 }
 
