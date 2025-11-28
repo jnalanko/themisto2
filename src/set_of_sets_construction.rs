@@ -79,7 +79,7 @@ pub trait ParallelElementGenerator {
 pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
     mut gen: impl ParallelElementGenerator,
     mut gen_again: impl ParallelElementGenerator,
-    key_kmer_marks: bitvec::vec::BitVec::<u64, Lsb0>,
+    key_kmer_marks: bitvec::vec::BitVec,
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
     -> (CSS, Vec<usize>) {
 
@@ -244,6 +244,7 @@ mod tests{
         let (distinct_sets, old_id_to_new_id) = construct_from_generators_that_do_not_give_duplicates::<SparseDenseStorage>(
             VecVecGenerator::new(sets.clone()),
             VecVecGenerator::new(sets.clone()),
+            bitvec::bitvec![1; sets.len()], // TODO: test sparser marking
             sets.len(),
             5,
             3,

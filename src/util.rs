@@ -3,7 +3,8 @@ use std::io::{Cursor, Read};
 use bitvec::order::Lsb0;
 use simple_sds_sbwt::serialize::Serialize;
 
-pub(crate) fn bitvec_to_simple_sds_raw_bitvec(bv: bitvec::vec::BitVec<u64, Lsb0>) -> simple_sds_sbwt::raw_vector::RawVector {
+pub(crate) fn bitvec_to_simple_sds_raw_bitvec(bv: bitvec::vec::BitVec) -> simple_sds_sbwt::raw_vector::RawVector {
+    // TODO: We really hope that usize equals u64 here, otherwise this this is probably broken.
     // Let's use the deserialization function in simple_sds_sbwt for a raw bitvector.
     // It requires the following header:
     let mut header = [0u64, 0u64]; // bits, words
