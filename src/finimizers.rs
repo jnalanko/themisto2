@@ -310,7 +310,6 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
 
         acc
     });
-    bar.finish();
 
     // Sum up stats from all threads
     let stats = par_fold.reduce(|| Stats::new(k), |mut acc, s| {
@@ -323,6 +322,7 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
         }
         acc
     });
+    bar.finish(); // Must finish *after* the reduce because the fold is lazy.
 
     log::info!("Printing");
     let n_correct_total: usize = stats.n_correct_by_finimizer_len.iter().sum();
