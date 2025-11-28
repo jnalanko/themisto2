@@ -304,7 +304,7 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
         acc.sum_mean_jaccard_by_finimizer_len[f_len] += mean_jaccard;
         acc.n_finimizers_by_len[f_len] += 1;
 
-        if minimizer_id % 1000000 == 0 {
+        if minimizer_id > 0 && minimizer_id % 1000000 == 0 {
             bar.inc(1000000);
         }
 
