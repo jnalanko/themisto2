@@ -173,29 +173,28 @@ pub enum MinimizerType {
 
 struct ElementGenerator<'a, 'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> {
     sbwt: &'a SbwtIndex<SubsetMatrix>,
+    dbg: &'a Dbg<'a, SubsetMatrix>,
     minimizer_marks: &'c simple_sds_sbwt::bit_vector::BitVector,
     minimizer_fn: F,
 } 
 
 impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_of_sets_construction::ParallelElementGenerator for ElementGenerator<'a, 'c, F> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        let k = self.sbwt.k();
         let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
-        pool.install(|| {
-            (0..self.sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
-                if kmer_colex % 1000000 == 0 {
-                    bar.inc(1000000);
-                }
-                let kmer = self.sbwt.access_kmer(kmer_colex);
-                if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-                    let (f_start, f_len) = (self.minimizer_fn)(kmer.as_slice());
-                    let finimizer = &kmer[f_start..f_start+f_len];
-                    let minimizer_colex = self.sbwt.search(finimizer).unwrap().start;
-                    let minimizer_rank = self.minimizer_marks.rank(minimizer_colex);
-                    callback(SetElement { set_id: minimizer_rank, color: kmer_colex });
-                }
-            });
-        });
+        self.dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+            assert!(unitig_string.len() >= k);
+            for kmer_start in 0..unitig_string.len()-k+1 {
+                let kmer = &unitig_string[kmer_start..kmer_start+k];
+                let kmer_colex = nodes[kmer_start].id;
+                let (f_start, f_len) = (self.minimizer_fn)(kmer);
+                let finimizer = &kmer[f_start..f_start+f_len];
+                let minimizer_colex = self.sbwt.search(finimizer).unwrap().start;
+                let minimizer_rank = self.minimizer_marks.rank(minimizer_colex);
+                callback(SetElement { set_id: minimizer_rank, color: kmer_colex });
+            }
+            bar.inc((unitig_string.len()-k+1) as u64);
+        }, n_threads);
         bar.finish();
     }
 
@@ -241,28 +240,30 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
     log::info!("Computing class sizes and *inimizer lengths");
     let class_sizes = (0..n_minimizers).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let minimizer_lengths = (0..n_minimizers).map(|_| AtomicU8::new(0)).collect::<Vec<_>>();
+
     let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
-    (0..sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
-        if kmer_colex % 1000000 == 0 {
-            bar.inc(1000000);
-        }
-        let kmer = sbwt.access_kmer(kmer_colex);
-        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-            let (f_start, f_len) = minimizer_fn(&kmer);
+    dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+        assert!(unitig_string.len() >= k);
+        for kmer_start in 0..unitig_string.len()-k+1 {
+            let kmer = &unitig_string[kmer_start..kmer_start+k];
+            let (f_start, f_len) = minimizer_fn(kmer);
             let minimizer = &kmer[f_start..f_start+f_len];
             let minimizer_colex = sbwt.search(minimizer).unwrap().start;
             let minimizer_rank = minimizer_marks.rank(minimizer_colex);
             class_sizes[minimizer_rank].fetch_add(1, Release);
             minimizer_lengths[minimizer_rank].store(minimizer.len() as u8, Relaxed);
         }
-    });
+        bar.inc((unitig_string.len()-k+1) as u64);
+    }, n_threads);
     bar.finish();
+
     let class_sizes = class_sizes.into_iter().map(|x| x.load(Relaxed)).collect::<Vec::<usize>>();
 
     let element_gen = ElementGenerator{
         sbwt,
         minimizer_marks: &minimizer_marks,
         minimizer_fn: Box::new(minimizer_fn),
+        dbg: &dbg,
     };
     
     log::info!("Storing minimizer kmer classes");
