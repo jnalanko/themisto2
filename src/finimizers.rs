@@ -78,6 +78,7 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
 
         while let Some((depth, suffix_match, kmer_colex, selected_before)) = dfs_stack.pop() {
             if depth == k - minimizer.len() + 1 { continue } // Finimizer has fallen out of the k-mer
+            if kmer_colex_with_same_minimizer.contains(&kmer_colex) { continue } // Already been here
 
             let mut selected_here = false;
             if suffix_match.len() == k {
