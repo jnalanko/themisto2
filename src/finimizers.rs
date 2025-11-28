@@ -76,9 +76,11 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
         let mut dfs_stack = Vec::<(usize, Vec<u8>, usize, bool)>::new(); // Depth, k-mer, colex, selected
         dfs_stack.push((0, initial_suffix_match, minimizer_colex, false));
 
+        let mut visited = HashSet::<usize>::new();
         while let Some((depth, suffix_match, kmer_colex, selected_before)) = dfs_stack.pop() {
             if depth == k - minimizer.len() + 1 { continue } // Finimizer has fallen out of the k-mer
-            if kmer_colex_with_same_minimizer.contains(&kmer_colex) { continue } // Already been here
+            if visited.contains(&kmer_colex) { continue } // Already been here
+            visited.insert(kmer_colex);
 
             let mut selected_here = false;
             if suffix_match.len() == k {
