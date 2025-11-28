@@ -1219,7 +1219,7 @@ mod tests {
 
     use jseqio::seq_db::SeqDB;
     use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
-    use simple_sds_sbwt::ops::BitVec;
+    use simple_sds_sbwt::ops::{BitVec, Rank};
 
     use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, hash_and_encode_distinct_sets, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
 
@@ -1355,21 +1355,30 @@ mod tests {
             let sampled_ids_2: Vec<usize> = colex_to_id_2.iter().enumerate().filter(|(i, _)| key_kmers_2[*i]).map(|(_,x)| *x).collect();
             let sampled_ids_both: Vec<usize> = colex_to_id_both.iter().enumerate().filter(|(i, _)| key_kmers_both[*i]).map(|(_,x)| *x).collect();
 
+            assert!(key_kmers_1.count_ones() == sampled_ids_1.len());
+            let mut key_kmers_1 = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_1);
+            let mut key_kmers_2 = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_2);
+            let mut key_kmers_both = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_both);
+
+            key_kmers_1.enable_rank();
+            key_kmers_2.enable_rank();
+            key_kmers_both.enable_rank();
+
             let colex_map_1 = ColexToColorSetMap{
                 sbwt: sbwt1.clone(),
-                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_1),
+                sampling: key_kmers_1,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_1),
             };
 
             let colex_map_2 = ColexToColorSetMap{
                 sbwt: sbwt2.clone(),
-                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_2),
+                sampling: key_kmers_2,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_2),
             };
 
             let colex_map_both = ColexToColorSetMap{
                 sbwt: sbwt_both.clone(),
-                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_both),
+                sampling: key_kmers_both,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_both),
             };
 
