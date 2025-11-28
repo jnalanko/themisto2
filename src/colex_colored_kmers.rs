@@ -59,7 +59,7 @@ pub struct ColexToColorSetMap {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would neet to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
-fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) -> bitvec::vec::BitVec {
+pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) -> bitvec::vec::BitVec {
     let k = sbwt.k();
 
     log::info!("Initializing DBG");

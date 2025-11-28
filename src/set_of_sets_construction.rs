@@ -1,8 +1,10 @@
 use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
+use bitvec::order::Lsb0;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
-use simple_sds_sbwt::{ops::Rank, raw_vector::AccessRaw};
-use crate::{coloring_interface::ColorSetStorage, iterators::VecIterator};
+use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
+use simple_sds_sbwt::{ops::{BitVec, Rank, Select}, raw_vector::AccessRaw};
+use crate::{colex_colored_kmers::mark_key_kmers, coloring_interface::ColorSetStorage, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
@@ -73,30 +75,39 @@ pub trait ParallelElementGenerator {
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
 /// There must not be duplicate elements in the same set!
-/// Returns the CSS and a vector of length n_sets mapping original set ids to new set ids.
+/// Returns the CSS and a vector of length key_kmer_marks.count_ones() that gives the color set id for each key k-mer.
 pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
     mut gen: impl ParallelElementGenerator,
     mut gen_again: impl ParallelElementGenerator,
+    key_kmer_marks: bitvec::vec::BitVec::<u64, Lsb0>,
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
     -> (CSS, Vec<usize>) {
 
+    // Build rank support for key k-mer marks
+    log::info!("Building rank support for key k-mer marks");
+    let key_kmer_marks = crate::util::bitvec_to_simple_sds_raw_bitvec(key_kmer_marks);
+    let mut key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(key_kmer_marks);
+    key_kmer_marks.enable_rank();
+
+
+    log::info!("Building color set fingerprints");
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be
-    // updated atomically, so instead we use a pair of u64 values which can be updated atomically.
+    // updated atomically, so instead we use a pair of u64 values which can each be updated atomically.
     let mut rng = rand_chacha::ChaChaRng::seed_from_u64(random_seed as u64);
     let element_fingerprints: Vec<(u64,u64)> = (0..n_colors).map(|_i| (rng.next_u64(), rng.next_u64())).collect();
 
-    // 128-bit fingerprints for sets of elements. Again we split each u128 into
+    // 128-bit fingerprints for the color set of each key k-mer. Again we split each u128 into
     // two u64s.
     let mut set_fingerprints = Vec::<(AtomicU64, AtomicU64)>::new();
-    set_fingerprints.resize_with(n_sets, || (AtomicU64::new(0), AtomicU64::new(0)));
+    set_fingerprints.resize_with(key_kmer_marks.count_ones(), || (AtomicU64::new(0), AtomicU64::new(0)));
     let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
-    set_sizes.resize_with(n_sets, || AtomicU64::new(0));
+    set_sizes.resize_with(key_kmer_marks.count_ones(), || AtomicU64::new(0));
 
     let callback = |e: SetElement| {
         let (fp1, fp2) = element_fingerprints[e.color];
-        set_fingerprints[e.set_id].0.fetch_xor(fp1, Release);
-        set_fingerprints[e.set_id].1.fetch_xor(fp2, Release);
-        set_sizes[e.set_id].fetch_add(1, Release);
+        set_fingerprints[key_kmer_marks.rank(e.set_id)].0.fetch_xor(fp1, Release);
+        set_fingerprints[key_kmer_marks.rank(e.set_id)].1.fetch_xor(fp2, Release);
+        set_sizes[key_kmer_marks.rank(e.set_id)].fetch_add(1, Release);
     };
 
     gen.run(callback, n_threads);
@@ -112,56 +123,50 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
         |sz| sz.load(Acquire) as usize
     ).collect();
 
-    // Mark the lowest set id where each distinct fingerprint occurs 
+    // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
-    let mut marked_sets = simple_sds_sbwt::raw_vector::RawVector::with_len(n_sets, false);
-    let mut marked_set_sizes = Vec::<usize>::new();
-    let mut n_distinct_set_found = 0_usize;
+    let mut sparsified_key_kmer_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(key_kmer_marks.len(), false);
+    let mut sparsified_marked_set_sizes = Vec::<usize>::new();
+    let mut n_distinct_sets_found = 0_usize;
     let mut total_set_size = 0_usize;
-    for set_id in 0..n_sets {
-        let fp1 = set_fingerprints[set_id].0;
-        let fp2 = set_fingerprints[set_id].1;
+    for (key_kmer_idx, key_kmer_colex) in key_kmer_marks.one_iter() {
+        let fp1 = set_fingerprints[key_kmer_idx].0;
+        let fp2 = set_fingerprints[key_kmer_idx].1;
         let fp = (fp1, fp2);
 
         if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
-            e.insert(n_distinct_set_found);
-            n_distinct_set_found += 1;
-            marked_sets.set_bit(set_id, true);
-            marked_set_sizes.push(set_sizes[set_id]);
-            total_set_size += set_sizes[set_id];
+            e.insert(n_distinct_sets_found);
+            n_distinct_sets_found += 1;
+            sparsified_key_kmer_marks.set_bit(key_kmer_colex, true);
+            sparsified_marked_set_sizes.push(set_sizes[key_kmer_idx]);
+            total_set_size += set_sizes[key_kmer_idx];
         }
     }
+    sparsified_marked_set_sizes.shrink_to_fit();
 
-    log::info!("{} distinct color sets found", n_distinct_set_found);
-    log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_set_found as f64));
-
+    log::info!("{} distinct color sets found", n_distinct_sets_found);
+    log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_sets_found as f64));
 
     // Free memory
     drop(set_sizes);
     drop(element_fingerprints);
 
     // Build original set id -> new set id vector
-    let old_id_to_new_id: Vec<usize> = set_fingerprints.iter().map(
+    let key_kmer_idx_to_new_id: Vec<usize> = set_fingerprints.iter().map(
         |fingerprint| distinct_fingerprints[fingerprint])
         .collect();
 
     // Free memory
     drop(set_fingerprints);
 
-    // Build ran on marked sets
-    let mut marked_sets = simple_sds_sbwt::bit_vector::BitVector::from(marked_sets);
-    marked_sets.enable_rank();
+    // Build rank on marked sets
+    let mut sparsified_key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(sparsified_key_kmer_marks);
+    sparsified_key_kmer_marks.enable_rank();
 
-    // Filter the second element iterator and assign new color set ids for the distinct sets
-    gen_again.set_filter(marked_sets);
-    /*let new_element_generator = gen_again
-        .filter(|new| marked_sets.get(new.set_id))
-        .map(|new| {
-            let rank_in_sampled_sets = marked_sets.rank(new.set_id);
-            SetElement { set_id: rank_in_sampled_sets, color: new.color }
-        });
-    */
-    (*CSS::new_parallel(gen_again, n_colors, &marked_set_sizes, n_threads), old_id_to_new_id)
+    // Filter the second element iterator
+    gen_again.set_filter(sparsified_key_kmer_marks);
+
+    (*CSS::new_parallel(gen_again, n_colors, &sparsified_marked_set_sizes, n_threads), key_kmer_idx_to_new_id)
 }
 
 #[cfg(test)]

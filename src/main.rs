@@ -11,7 +11,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIn
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::mark_key_kmers, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 mod EM;
 mod bitmap_storage;
@@ -28,6 +28,7 @@ mod parallel_ms_iteration;
 mod atomic_bitmap;
 mod int_vec;
 mod finimizers;
+mod util;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -351,13 +352,14 @@ fn build_coloring_with_generators
     <CSS: ColorSetStorage + Send, 
     P1: ParallelElementGenerator, 
     P2: ParallelElementGenerator>
-    (element_gen_1: P1, element_gen_2: P2, n_sets: usize, n_colors: usize, n_threads: usize)
+    (element_gen_1: P1, element_gen_2: P2, key_kmer_marks: bitvec::vec::BitVec, n_sets: usize, n_colors: usize, n_threads: usize)
     -> (CSS,  Vec<usize>) {
 
     log::info!("Building distinct color sets");
     let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
         element_gen_2,
+        key_kmer_marks,
         n_sets,
         n_colors,
         n_threads,
@@ -373,14 +375,18 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
+    log::info!("Marking key k-mers");
+    let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
+    let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
+
     let (css, colex_to_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
         let element_gen_2 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks, sbwt.n_sets(), n_colors, n_threads)
     } else {
         let element_gen_1 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, sbwt.n_sets(), n_colors, n_threads)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks, sbwt.n_sets(), n_colors, n_threads)
     };
 
     log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
