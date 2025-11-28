@@ -286,7 +286,7 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
         n_finimizers_by_len: vec![0; sbwt.k()+1],
     };
 
-    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
+    let bar = indicatif::ProgressBar::new(n_minimizers as u64);
     for minimizer_id in 0..n_minimizers {
         let class: Vec<usize> = kmer_class_storage.get_set_view(minimizer_id).iter().collect();
         let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &class);
