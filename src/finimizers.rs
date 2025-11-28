@@ -1,4 +1,4 @@
-use std::{cmp::min, sync::{Arc, Mutex}};
+use std::{cmp::min, collections::HashSet, sync::{Arc, Mutex}};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq};
@@ -63,7 +63,8 @@ fn create_minimizer_function<'b>(m: usize) -> impl (for<'a> Fn(&'a [u8]) -> (usi
 fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, minimizer: &[u8], minimizer_fn: impl for<'a> Fn(&'a [u8]) -> (usize, usize)) -> Vec<usize> {
     let k = sbwt.k();
 
-    let mut kmer_colex_with_same_minimizer = Vec::<usize>::new();
+    // Duplicate k-mers can happen e.g. if the DBG loops back to itself before the dfs depth limit
+    let mut kmer_colex_with_same_minimizer = HashSet::<usize>::new();
     
     let minimizer_colex_range = sbwt.search(minimizer).unwrap();
     for minimizer_colex in minimizer_colex_range {
@@ -83,8 +84,11 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
                 let (f_start, f_len) = minimizer_fn(&suffix_match);
                 let new_minimizer  = &suffix_match[f_start..f_start+f_len];
                 if new_minimizer == minimizer {
-                    kmer_colex_with_same_minimizer.push(kmer_colex);
+                    kmer_colex_with_same_minimizer.insert(kmer_colex);
                     selected_here = true;
+                    if kmer_colex_with_same_minimizer.len() % 1000000 == 0 {
+                        log::warn!("Minimizer class of size at least {}", kmer_colex_with_same_minimizer.len());
+                    }
                 } else if selected_before {
                     // The minimizer with was selected in a previous
                     // k-mer, but is not selected anymore. This means that there is now
@@ -120,10 +124,9 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
         }
     }
 
-    // Duplicate k-mers can happen e.g. if the DBG loops back to itself before the dfs depth limit
-    kmer_colex_with_same_minimizer.sort();
-    kmer_colex_with_same_minimizer.dedup();
-    kmer_colex_with_same_minimizer
+    let mut ret: Vec<usize> = kmer_colex_with_same_minimizer.into_iter().collect();
+    ret.sort();
+    ret 
 }
 
 
