@@ -218,7 +218,7 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
                 let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &kmer_equivalence_class);
                 assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
 
-                // Signal to other threads that there k-mers do not need to be processed anymore
+                // Signal to other threads that these k-mers do not need to be processed anymore
                 for p in kmer_equivalence_class.iter() {
                     atomic_filter_bitmap.set(p, true);
                 }
