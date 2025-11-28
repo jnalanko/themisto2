@@ -51,6 +51,47 @@ pub struct ColexToColorSetMap {
     color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
 
+// key k-mers as defined in the Themisto Bioinformatics paper:
+// - Last k-mer of unitig or input sequence
+// - In-neighbors of first k-mer of unitig or input sequence
+// - Evenly space samples within unitigs
+// IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
+// If not, we would neet to search all of them and first the first and last k-mer of
+// each run of matches to the index. TODO.
+fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) {
+    let k = sbwt.k();
+
+    log::info!("Initializing DBG");
+    let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
+    let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
+    let mut marks = bitvec::bitvec![0; sbwt.n_sets()];
+
+    log::info!("Searching first and last k-mer of each input sequence");
+    while let Some(seq) = seqs.stream_next(){
+        if seq.len() < k { continue }
+
+        let first = sbwt.search(&seq[0..k]).unwrap_or_else(|| {
+            panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&seq[0..k]));     
+        });
+
+        assert!(first.len() == 1);
+
+        in_neighbor_buf.clear();
+        dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
+        for (in_node, _) in in_neighbor_buf.iter() {
+            marks.set(in_node.id, true);
+        }
+
+        let last = sbwt.search(&seq[seq.len()-k..]).unwrap_or_else(|| {
+            panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&seq[seq.len()-k..]));     
+        });
+
+        assert!(last.len() == 1);
+        marks.set(last.start);
+
+    }
+}
+
 impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
