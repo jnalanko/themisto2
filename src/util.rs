@@ -17,3 +17,26 @@ pub(crate) fn bitvec_to_simple_sds_raw_bitvec(bv: bitvec::vec::BitVec) -> simple
 
     simple_sds_sbwt::raw_vector::RawVector::load(&mut data_with_header).unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use simple_sds_sbwt::ops::BitVec;
+
+    use crate::util::bitvec_to_simple_sds_raw_bitvec;
+
+    #[test]
+    fn bitvec_to_simple_sds() {
+        let mut bv = bitvec::bitvec![0; 567];
+        for i in 0..bv.len() {
+            if i % 3 == 0 {
+                bv.set(i, true);
+            }
+        }
+
+        let sds = bitvec_to_simple_sds_raw_bitvec(bv.clone());
+        let sds = simple_sds_sbwt::bit_vector::BitVector::from(sds);
+        for i in 0..bv.len() {
+            assert_eq!(sds.get(i), bv[i]);
+        }
+    }
+}
