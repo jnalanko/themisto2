@@ -203,6 +203,27 @@ impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_
     }
 }
 
+struct Stats{
+    n_correct_by_finimizer_len: Vec<usize>,
+    n_wrong_by_finimizer_len: Vec<usize>,
+    class_size_by_finimizer_len: Vec<usize>,
+    sum_mean_jaccard_by_finimizer_len: Vec<f64>,
+    n_finimizers_by_len: Vec<usize>,
+}
+
+impl Stats {
+    fn new(k: usize) -> Self {
+        Stats {
+            n_correct_by_finimizer_len: vec![0; k+1],
+            n_wrong_by_finimizer_len: vec![0; k+1],
+            class_size_by_finimizer_len: vec![0; k+1],
+            sum_mean_jaccard_by_finimizer_len: vec![0.0; k+1],
+            n_finimizers_by_len: vec![0; k+1],
+        }
+    }
+}
+
+
 pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
     let lcs = index.lcs();
@@ -270,37 +291,38 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
     let kmer_class_storage = SparseDenseStorage::new_parallel(element_gen, sbwt.n_kmers(), &class_sizes, n_threads);
 
     log::info!("Computing stats");
-    struct Stats{
-        n_correct_by_finimizer_len: Vec<usize>,
-        n_wrong_by_finimizer_len: Vec<usize>,
-        class_size_by_finimizer_len: Vec<usize>,
-        sum_mean_jaccard_by_finimizer_len: Vec<f64>,
-        n_finimizers_by_len: Vec<usize>,
-    }
-    
-    let mut stats = Stats {
-        n_correct_by_finimizer_len: vec![0; sbwt.k()+1],
-        n_wrong_by_finimizer_len: vec![0; sbwt.k()+1],
-        class_size_by_finimizer_len: vec![0; sbwt.k()+1],
-        sum_mean_jaccard_by_finimizer_len: vec![0.0; sbwt.k()+1],
-        n_finimizers_by_len: vec![0; sbwt.k()+1],
-    };
-
     let bar = indicatif::ProgressBar::new(n_minimizers as u64);
-    for minimizer_id in 0..n_minimizers {
+    let par_fold = (0..n_minimizers).into_par_iter().fold(|| Stats::new(k), |mut acc: Stats, minimizer_id| {
         let class: Vec<usize> = kmer_class_storage.get_set_view(minimizer_id).iter().collect();
         let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &class);
         assert_eq!(n_correct + n_wrong, class.len());
 
         let f_len = minimizer_lengths[minimizer_id].load(Relaxed) as usize;
-        stats.n_correct_by_finimizer_len[f_len] += n_correct;
-        stats.n_wrong_by_finimizer_len[f_len] += n_wrong;
-        stats.class_size_by_finimizer_len[f_len] += class.len();
-        stats.sum_mean_jaccard_by_finimizer_len[f_len] += mean_jaccard;
-        stats.n_finimizers_by_len[f_len] += 1;
-        bar.inc(1);
-    }
+        acc.n_correct_by_finimizer_len[f_len] += n_correct;
+        acc.n_wrong_by_finimizer_len[f_len] += n_wrong;
+        acc.class_size_by_finimizer_len[f_len] += class.len();
+        acc.sum_mean_jaccard_by_finimizer_len[f_len] += mean_jaccard;
+        acc.n_finimizers_by_len[f_len] += 1;
+
+        if minimizer_id % 1000000 == 0 {
+            bar.inc(1000000);
+        }
+
+        acc
+    });
     bar.finish();
+
+    // Sum up stats from all threads
+    let stats = par_fold.reduce(|| Stats::new(k), |mut acc, s| {
+        for f_len in 0..=k {
+            acc.n_correct_by_finimizer_len[f_len] += s.n_correct_by_finimizer_len[f_len];
+            acc.n_wrong_by_finimizer_len[f_len] += s.n_wrong_by_finimizer_len[f_len];
+            acc.class_size_by_finimizer_len[f_len] += s.class_size_by_finimizer_len[f_len];
+            acc.sum_mean_jaccard_by_finimizer_len[f_len] += s.sum_mean_jaccard_by_finimizer_len[f_len];
+            acc.n_finimizers_by_len[f_len] += s.n_finimizers_by_len[f_len];
+        }
+        acc
+    });
 
     log::info!("Printing");
     let n_correct_total: usize = stats.n_correct_by_finimizer_len.iter().sum();
