@@ -244,7 +244,7 @@ mod tests{
         let (distinct_sets, old_id_to_new_id) = construct_from_generators_that_do_not_give_duplicates::<SparseDenseStorage>(
             VecVecGenerator::new(sets.clone()),
             VecVecGenerator::new(sets.clone()),
-            bitvec::bitvec![1; sets.len()], // TODO: test sparser marking
+            bitvec::bitvec![1,1,0,1,1,1], // Mark one of the duplicates as non-key
             sets.len(),
             5,
             3,
@@ -263,7 +263,7 @@ mod tests{
             eprintln!("{:?} {:?}", our_answers[i], correct_answers[i]);
         }
         assert_eq!(correct_answers, our_answers);
-        assert_eq!(old_id_to_new_id, vec![0,1,0,2,3,1]);
+        assert_eq!(old_id_to_new_id, vec![0,1,2,3,1]);
 
     }
 }
