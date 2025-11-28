@@ -1,7 +1,7 @@
 use std::{cmp::min, collections::HashSet, marker::PhantomData, sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering::{Acquire, Relaxed, Release, SeqCst}}}};
 
 use rayon::{iter::{IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
-use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq};
+use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq, dbg::Dbg};
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, int_vec::AtomicCompactIntVec, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
@@ -206,22 +206,26 @@ impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_
 
 pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
+    let lcs = index.lcs();
+    let k = sbwt.k();
+
+    log::info!("Initializing DBG");
+    let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
 
     log::info!("Marking *inimizers");
     let minimizer_marks = AtomicBitmap::new(sbwt.n_sets());
     let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
-    (0..sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
-        if kmer_colex % 1000000 == 0 {
-            bar.inc(1000000);
-        }
-        let kmer = sbwt.access_kmer(kmer_colex);
-        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
-            let (f_start, f_len) = minimizer_fn(&kmer);
-            let finimizer = &kmer[f_start..f_start+f_len];
-            let minimizer_colex = sbwt.search(finimizer).unwrap().start;
+    dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+        assert!(unitig_string.len() >= k);
+        for kmer_start in 0..unitig_string.len()-k+1 {
+            let kmer = &unitig_string[kmer_start..kmer_start+k];
+            let (f_start, f_len) = minimizer_fn(kmer);
+            let minimizer = &kmer[f_start..f_start+f_len];
+            let minimizer_colex = sbwt.search(minimizer).unwrap().start;
             minimizer_marks.set(minimizer_colex, true);
         }
-    });
+        bar.inc((unitig_string.len()-k+1) as u64);
+    }, n_threads);
     bar.finish();
 
     log::info!("Building rank support for *inimizer marks");
