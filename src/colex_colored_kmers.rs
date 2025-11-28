@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
 use std::hash::{Hash, Hasher};
 
+use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::CompactIntVec;
 use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
 use crate::index_import;
@@ -58,13 +59,22 @@ pub struct ColexToColorSetMap {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would neet to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
-fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) {
+fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) -> bitvec::vec::BitVec {
     let k = sbwt.k();
 
     log::info!("Initializing DBG");
     let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
     let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
-    let mut marks = bitvec::bitvec![0; sbwt.n_sets()];
+    let marks = AtomicBitmap::new(sbwt.n_sets());
+
+    log::info!("Sampling along unitigs");
+    dbg.iter_unitigs_with_callback(|nodes, _unitig| {
+        for (dist_from_end, node) in nodes.iter().rev().enumerate() {
+            if dist_from_end % sample_distance == 0 {
+                marks.set(node.id, true);
+            }
+        }
+    }, n_threads);
 
     log::info!("Searching first and last k-mer of each input sequence");
     while let Some(seq) = seqs.stream_next(){
@@ -87,9 +97,11 @@ fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distanc
         });
 
         assert!(last.len() == 1);
-        marks.set(last.start);
-
+        marks.set(last.start, true);
     }
+
+    marks.into_bitvec()
+
 }
 
 impl ColexToColorSetMap {
