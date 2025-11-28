@@ -32,6 +32,10 @@ impl AtomicBitmap {
         (self.data[word_idx].load(std::sync::atomic::Ordering::Acquire) & mask) != 0
     }
 
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
     pub fn into_bitvec(self) -> BitVec<usize, bitvec::order::Lsb0> {
         // This assumes that usize is an u64 in Lsb0 byte order. Let's hope for the best.
         // At least the answer will be really wrong if that is not the case, so it

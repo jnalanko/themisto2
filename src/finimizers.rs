@@ -1,9 +1,10 @@
-use std::{cmp::min, collections::HashSet, sync::{Arc, Mutex}};
+use std::{cmp::min, collections::HashSet, marker::PhantomData, sync::{Arc, Mutex, atomic::{AtomicU64, AtomicUsize, Ordering::{Acquire, Relaxed, Release, SeqCst}}}};
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::{iter::{IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq};
+use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, int_vec::AtomicCompactIntVec, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
 
 
 // Returns (len, colex, position in sfs slice)
@@ -168,6 +169,148 @@ fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexK
 pub enum MinimizerType {
     Finimizer,
     Minimizer(usize), // The usize is the minimizer length
+}
+
+struct ElementGenerator<'a, 'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> {
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
+    minimizer_marks: &'c simple_sds_sbwt::bit_vector::BitVector,
+    minimizer_fn: F,
+} 
+
+impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_of_sets_construction::ParallelElementGenerator for ElementGenerator<'a, 'c, F> {
+    fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+        pool.install(|| {
+            (0..self.sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
+                if kmer_colex % 1000000 == 0 {
+                    bar.inc(1000000);
+                }
+                let kmer = self.sbwt.access_kmer(kmer_colex);
+                if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+                    let (f_start, f_len) = (self.minimizer_fn)(kmer.as_slice());
+                    let finimizer = &kmer[f_start..f_start+f_len];
+                    let minimizer_colex = self.sbwt.search(finimizer).unwrap().start;
+                    let minimizer_rank = self.minimizer_marks.rank(minimizer_colex);
+                    callback(SetElement { set_id: minimizer_rank, color: kmer_colex });
+                }
+            });
+        });
+        bar.finish();
+    }
+
+    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+        unimplemented!()
+    }
+}
+
+pub fn generic_minimizer_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
+    let sbwt = index.sbwt();
+
+    log::info!("Marking *inimizers");
+    let minimizer_marks = AtomicBitmap::new(sbwt.n_sets());
+    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
+    (0..sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
+        if kmer_colex % 1000000 == 0 {
+            bar.inc(1000000);
+        }
+        let kmer = sbwt.access_kmer(kmer_colex);
+        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+            let (f_start, f_len) = minimizer_fn(&kmer);
+            let finimizer = &kmer[f_start..f_start+f_len];
+            let minimizer_colex = sbwt.search(finimizer).unwrap().start;
+            minimizer_marks.set(minimizer_colex, true);
+        }
+    });
+    bar.finish();
+
+    log::info!("Building rank support for *inimizer marks");
+    let minimizer_marks = minimizer_marks.into_bitvec();
+    let mut rv = simple_sds_sbwt::raw_vector::RawVector::with_len(minimizer_marks.len(), false);
+    for b in minimizer_marks.iter_ones() {
+        rv.set_bit(b, true);
+    }
+    let mut minimizer_marks = simple_sds_sbwt::bit_vector::BitVector::from(rv);
+    minimizer_marks.enable_rank();
+    let n_minimizers = minimizer_marks.rank(minimizer_marks.len());
+
+    log::info!("Computing class sizes");
+    let class_sizes = (0..n_minimizers).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
+    (0..sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
+        if kmer_colex % 1000000 == 0 {
+            bar.inc(1000000);
+        }
+        let kmer = sbwt.access_kmer(kmer_colex);
+        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+            let (f_start, f_len) = minimizer_fn(&kmer);
+            let finimizer = &kmer[f_start..f_start+f_len];
+            let minimizer_colex = sbwt.search(finimizer).unwrap().start;
+            let minimizer_rank = minimizer_marks.rank(minimizer_colex);
+            class_sizes[minimizer_rank].fetch_add(1, Release);
+        }
+    });
+    bar.finish();
+    let class_sizes = class_sizes.into_iter().map(|x| x.load(Relaxed)).collect::<Vec::<usize>>();
+
+    let element_gen = ElementGenerator{
+        sbwt,
+        minimizer_marks: &minimizer_marks,
+        minimizer_fn: Box::new(minimizer_fn),
+    };
+    
+    log::info!("Storing minimizer kmer classes");
+    let kmer_class_storage = SparseDenseStorage::new_parallel(element_gen, sbwt.n_kmers(), &class_sizes, n_threads);
+
+    /*/
+    log::info!("Computing classes");
+    let insertion_points: Vec<AtomicU64> = (0..n_minimizers).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
+    let mut concat_len_total = 0_usize;
+    for (i, s) in class_sizes.iter().enumerate() {
+        insertion_points[i].store(concat_len_total as u64, Release);
+        concat_len_total += s.load(Acquire); // Todo: is Relaxed good enough?
+    }
+    let concat = AtomicCompactIntVec::new_with_universe_size(concat_len_total, sbwt.n_sets());
+    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
+    (0..sbwt.n_sets()).into_par_iter().for_each(|kmer_colex| {
+        if kmer_colex % 1000000 == 0 {
+            bar.inc(1000000);
+        }
+        let kmer = sbwt.access_kmer(kmer_colex);
+        if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
+            let (f_start, f_len) = minimizer_fn(&kmer);
+            let finimizer = &kmer[f_start..f_start+f_len];
+            let minimizer_colex = sbwt.search(finimizer).unwrap().start;
+            let minimizer_rank = minimizer_marks.rank(minimizer_colex);
+            let insertion_point = insertion_points[minimizer_rank].fetch_add(1, SeqCst);
+            concat.set(insertion_point as usize, kmer_colex);
+        }
+    });
+    bar.finish();
+    log::info!("Computing stats");
+    let mut set_start = 0_usize;
+
+    // Data for the critical section
+    struct CriticalSectionData {
+        n_correct_by_finimizer_len: Vec<usize>,
+        n_wrong_by_finimizer_len: Vec<usize>,
+        class_size_by_finimizer_len: Vec<usize>,
+        sum_mean_jaccard_by_finimizer_len: Vec<f64>,
+        n_finimizers_by_len: Vec<usize>,
+    }
+    let crit = CriticalSectionData {
+        n_correct_by_finimizer_len: vec![0; sbwt.k()+1],
+        n_wrong_by_finimizer_len: vec![0; sbwt.k()+1],
+        class_size_by_finimizer_len: vec![0; sbwt.k()+1],
+        sum_mean_jaccard_by_finimizer_len: vec![0.0; sbwt.k()+1],
+        n_finimizers_by_len: vec![0; sbwt.k()+1],
+    };
+    let crit = Arc::new(Mutex::new(crit));
+
+    for minimizer_id in 0..n_minimizers {
+        
+    }
+    */
 }
 
 pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {

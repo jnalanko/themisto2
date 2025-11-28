@@ -138,6 +138,11 @@ impl AtomicCompactIntVec {
         Self {data, len, bit_width}
     }
 
+    pub fn new_with_universe_size(len: usize, universe_size: usize) -> Self {
+        let bit_width = universe_size.next_power_of_two().trailing_zeros() as usize;
+        Self::new(len, bit_width)
+    }
+
     /// This operation is not atomic in the sense that if some thread is writing to a
     /// value that is being read, the result could be mixed! It's atomic in the sense that
     /// it is safe to load a value even if another thread modifies a nearby value that is
