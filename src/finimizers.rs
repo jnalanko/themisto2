@@ -194,13 +194,10 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     };
     let crit = Arc::new(Mutex::new(crit));
 
-    let bar = indicatif::ProgressBar::new(sbwt.n_sets() as u64);
+    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
         (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
-            if colex % 10000 == 0 {
-                bar.inc(10000);
-            }
             if crit.lock().unwrap().visited_marks[colex] { return } // Already visited
             let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
@@ -229,6 +226,7 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
                         //assert!(!cr.visited_marks[p]);
                         cr.visited_marks.set(p, true);
                     }
+                    bar.inc(kmer_equivalence_class.len() as u64);
                 }
                 // End of critical section
             }
