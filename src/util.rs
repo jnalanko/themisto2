@@ -17,7 +17,9 @@ pub(crate) fn bitvec_to_simple_sds_raw_bitvec(mut bv: bitvec::vec::BitVec) -> si
     // depends on this, but the bitvec crate does not guarantee this!
     // The undefined padding bytes have broken my code before, so this is
     // crucial.
-    bv.resize(bv.len().next_multiple_of(64), false);
+    let original_len = bv.len();
+    bv.resize(original_len.next_multiple_of(64), false);
+    bv.resize(original_len, false);
 
     let raw_data = bytemuck::cast_slice(bv.as_raw_slice());
     let mut data_with_header = Cursor::new(header_bytes).chain(Cursor::new(raw_data));

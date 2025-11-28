@@ -86,9 +86,14 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     // Build rank support for key k-mer marks
     log::info!("Building rank support for key k-mer marks");
     let key_kmer_marks = crate::util::bitvec_to_simple_sds_raw_bitvec(key_kmer_marks);
+    /*let mut new_key_kmer_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(key_kmer_marks.len(), false);
+    for b in key_kmer_marks.iter_ones(){
+        new_key_kmer_marks.set_bit(b, true);
+    }
+    drop(key_kmer_marks);
+    */
     let mut key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(key_kmer_marks);
     key_kmer_marks.enable_rank();
-
 
     log::info!("Building color set fingerprints");
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be
@@ -102,12 +107,15 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     set_fingerprints.resize_with(key_kmer_marks.count_ones(), || (AtomicU64::new(0), AtomicU64::new(0)));
     let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
     set_sizes.resize_with(key_kmer_marks.count_ones(), || AtomicU64::new(0));
+    assert!(set_fingerprints.len() == key_kmer_marks.rank(key_kmer_marks.len()));
 
     let callback = |e: SetElement| {
-        let (fp1, fp2) = element_fingerprints[e.color];
-        set_fingerprints[key_kmer_marks.rank(e.set_id)].0.fetch_xor(fp1, Release);
-        set_fingerprints[key_kmer_marks.rank(e.set_id)].1.fetch_xor(fp2, Release);
-        set_sizes[key_kmer_marks.rank(e.set_id)].fetch_add(1, Release);
+        if key_kmer_marks.get(e.set_id) {
+            let (fp1, fp2) = element_fingerprints[e.color];
+            set_fingerprints[key_kmer_marks.rank(e.set_id)].0.fetch_xor(fp1, Release);
+            set_fingerprints[key_kmer_marks.rank(e.set_id)].1.fetch_xor(fp2, Release);
+            set_sizes[key_kmer_marks.rank(e.set_id)].fetch_add(1, Release);
+        }
     };
 
     gen.run(callback, n_threads);

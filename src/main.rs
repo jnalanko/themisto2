@@ -378,6 +378,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     log::info!("Marking key k-mers");
     let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
     let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
+    assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
     let (css, colex_to_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
