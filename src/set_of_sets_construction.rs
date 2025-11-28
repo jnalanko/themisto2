@@ -87,7 +87,6 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     log::info!("Building rank support for key k-mer marks");
     let key_kmer_marks = crate::util::bitvec_to_simple_sds_raw_bitvec(key_kmer_marks);
     let mut key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(key_kmer_marks);
-    dbg!(&key_kmer_marks);
     key_kmer_marks.enable_rank();
 
 
@@ -103,9 +102,6 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     set_fingerprints.resize_with(key_kmer_marks.count_ones(), || (AtomicU64::new(0), AtomicU64::new(0)));
     let mut set_sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
     set_sizes.resize_with(key_kmer_marks.count_ones(), || AtomicU64::new(0));
-
-    dbg!(&key_kmer_marks.len());
-    dbg!(&set_fingerprints.len());
 
     let callback = |e: SetElement| {
         let (fp1, fp2) = element_fingerprints[e.color];
