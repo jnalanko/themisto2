@@ -4,7 +4,7 @@ use bitvec::order::Lsb0;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
 use simple_sds_sbwt::{ops::{BitVec, Rank, Select}, raw_vector::AccessRaw};
-use crate::{colex_colored_kmers::mark_key_kmers, coloring_interface::ColorSetStorage, iterators::VecIterator};
+use crate::{colex_colored_kmers::mark_key_kmers, coloring_interface::ColorSetStorage, int_vec::CompactIntVec, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
@@ -81,7 +81,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     mut gen_again: impl ParallelElementGenerator,
     key_kmer_marks: bitvec::vec::BitVec,
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
-    -> (CSS, Vec<usize>) {
+    -> (CSS, CompactIntVec) {
 
     // Build rank support for key k-mer marks
     log::info!("Building rank support for key k-mer marks");
@@ -156,6 +156,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_sets_found as f64));
 
     // Free memory
+    drop(key_kmer_marks);
     drop(set_sizes);
     drop(element_fingerprints);
 
@@ -174,7 +175,8 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     // Filter the second element iterator
     gen_again.set_filter(sparsified_key_kmer_marks);
 
-    (*CSS::new_parallel(gen_again, n_colors, &sparsified_marked_set_sizes, n_threads), key_kmer_idx_to_new_id)
+    let css = *CSS::new_parallel(gen_again, n_colors, &sparsified_marked_set_sizes, n_threads);
+    (css, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
 }
 
 #[cfg(test)]
@@ -271,7 +273,7 @@ mod tests{
             eprintln!("{:?} {:?}", our_answers[i], correct_answers[i]);
         }
         assert_eq!(correct_answers, our_answers);
-        assert_eq!(old_id_to_new_id, vec![0,1,2,3,1]);
+        assert_eq!(old_id_to_new_id.to_vec(), vec![0,1,2,3,1]);
 
     }
 }

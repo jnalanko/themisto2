@@ -46,10 +46,10 @@ pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
 pub struct ColexToColorSetMap {
 
     // See the comments inside CompactcolexColoring
-    sbwt: Arc<SbwtIndex<SubsetMatrix>>,
+    pub sbwt: Arc<SbwtIndex<SubsetMatrix>>,
 
-    sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
-    color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
+    pub sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
+    pub color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
 
 // key k-mers as defined in the Themisto Bioinformatics paper:
@@ -1358,19 +1358,19 @@ mod tests {
             let colex_map_1 = ColexToColorSetMap{
                 sbwt: sbwt1.clone(),
                 sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_1),
-                color_set_ids: CompactIntVec::from_vec(sampled_ids_1, 40), // 40 bit width is enough
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_1),
             };
 
             let colex_map_2 = ColexToColorSetMap{
                 sbwt: sbwt2.clone(),
                 sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_2),
-                color_set_ids: CompactIntVec::from_vec(sampled_ids_2, 40), // 40 bit width is enough
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_2),
             };
 
             let colex_map_both = ColexToColorSetMap{
                 sbwt: sbwt_both.clone(),
                 sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_both),
-                color_set_ids: CompactIntVec::from_vec(sampled_ids_both, 40), // 40 bit width is enough
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_both),
             };
 
             let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_map_1, storage_1);

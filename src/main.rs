@@ -11,7 +11,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIn
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::mark_key_kmers, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, int_vec::CompactIntVec, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 mod EM;
 mod bitmap_storage;
@@ -353,10 +353,10 @@ fn build_coloring_with_generators
     P1: ParallelElementGenerator, 
     P2: ParallelElementGenerator>
     (element_gen_1: P1, element_gen_2: P2, key_kmer_marks: bitvec::vec::BitVec, n_sets: usize, n_colors: usize, n_threads: usize)
-    -> (CSS,  Vec<usize>) {
+    -> (CSS, CompactIntVec) {
 
     log::info!("Building distinct color sets");
-    let (css, colex_to_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
+    let (css, key_kmer_idx_to_color_set_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
         element_gen_1,
         element_gen_2,
         key_kmer_marks,
@@ -366,7 +366,7 @@ fn build_coloring_with_generators
         1232563, // Random seed. Todo: be more random
     );
 
-    (css, colex_to_id)
+    (css, key_kmer_idx_to_color_set_id)
 }
 
 fn build_coloring<CSS: ColorSetStorage + Send>(
@@ -380,18 +380,26 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
-    let (css, colex_to_id) = if from_unitigs {
+    let (css, key_kmer_idx_to_color_set_id) = if from_unitigs {
         let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
         let element_gen_2 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks, sbwt.n_sets(), n_colors, n_threads)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads)
     } else {
         let element_gen_1 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
         let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks, sbwt.n_sets(), n_colors, n_threads)
+        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads)
     };
 
-    log::info!("Compressing sets with unitig sampling distance {}", sample_distance);
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_to_id, css, n_colors, sample_distance, n_threads)
+    log::info!("Building rank support for key k-mer marks");
+    let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
+    key_kmer_marks.enable_rank();
+    let colex_map = ColexToColorSetMap {
+        sbwt: sbwt.clone(), // Clones just the Arc
+        sampling: key_kmer_marks, 
+        color_set_ids: key_kmer_idx_to_color_set_id,
+    };
+
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css)
 
 }
 
