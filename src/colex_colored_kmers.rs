@@ -67,15 +67,6 @@ fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distanc
     let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
     let marks = AtomicBitmap::new(sbwt.n_sets());
 
-    log::info!("Sampling along unitigs");
-    dbg.iter_unitigs_with_callback(|nodes, _unitig| {
-        for (dist_from_end, node) in nodes.iter().rev().enumerate() {
-            if dist_from_end % sample_distance == 0 {
-                marks.set(node.id, true);
-            }
-        }
-    }, n_threads);
-
     log::info!("Searching first and last k-mer of each input sequence");
     while let Some(seq) = seqs.stream_next(){
         if seq.len() < k { continue }
@@ -100,8 +91,16 @@ fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distanc
         marks.set(last.start, true);
     }
 
-    marks.into_bitvec()
+    log::info!("Sampling along unitigs");
+    dbg.iter_unitigs_with_callback(|nodes, _unitig| {
+        for (dist_from_end, node) in nodes.iter().rev().enumerate() {
+            if dist_from_end % sample_distance == 0 {
+                marks.set(node.id, true);
+            }
+        }
+    }, n_threads);
 
+    marks.into_bitvec()
 }
 
 impl ColexToColorSetMap {
