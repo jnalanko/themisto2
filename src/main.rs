@@ -491,7 +491,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout);
     let mut query_idx = 0_usize;
-    let n_colors = index.get_set_storage().get_full_set().iter().count(); // Todo len() for owned set
+    let n_colors = index.get_set_storage().get_full_set().len();
     let mut hit_counts = vec![0usize; n_colors];
     let mut nonzero_count_indices = vec![];
     log::info!("Performing threshold pseudoalignment for query sequences in {}", query_path.display());
