@@ -3,7 +3,7 @@ use std::{cmp::min, collections::HashSet, sync::{Arc, Mutex}};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
 
 // Returns (len, colex, position in sfs slice)
@@ -194,11 +194,20 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     };
     let crit = Arc::new(Mutex::new(crit));
 
+    // When some class is processed, all colex positions of k-mers in the class
+    // are marked here. If a bit is set, we know we do not have to process
+    // that k-mer anymore. If a bit is not set, it might mean that it's in the
+    // class of some k-mer that is currently being processed. So we *might* still
+    // need to process it. The visited marks in the critical section will then
+    // tell us whether we should record the result, or move on because some other
+    // thread already recorded this work.
+    let atomic_filter_bitmap = AtomicBitmap::new(sbwt.n_sets());
+
     let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
     let pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     pool.install(|| {
         (0..sbwt.n_sets()).into_par_iter().for_each(|colex| {
-            if crit.lock().unwrap().visited_marks[colex] { return } // Already visited
+            if atomic_filter_bitmap.get(colex) { return }
             let kmer = sbwt.access_kmer(colex);
             if kmer.iter().all(|&c| c != b'$') { // Not a dummy k-mer
                 let (f_start, f_len) = minimizer_fn(&kmer);
@@ -208,6 +217,11 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
                 assert!(kmer_equivalence_class.len() > 0); // At least the k-mer itself should be here
                 let (n_correct, n_wrong, mean_jaccard) = evaluate_equivalence_class(index, &kmer_equivalence_class);
                 assert_eq!(n_correct + n_wrong, kmer_equivalence_class.len());
+
+                // Signal to other threads that there k-mers do not need to be processed anymore
+                for p in kmer_equivalence_class.iter() {
+                    atomic_filter_bitmap.set(p, true);
+                }
 
                 // Critical section: we must make sure that each class is counted only once
                 let cr = &mut *crit.lock().unwrap();
