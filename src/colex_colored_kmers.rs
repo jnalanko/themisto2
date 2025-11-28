@@ -305,9 +305,8 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'stat
 impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     /// TODO: take CompactIntVec for colex_to_color_set_id instead of Vec<usize>
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_to_color_set_id: Vec<usize>, color_sets: CSS, n_colors: usize, sample_distance: usize, n_threads: usize)
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS)
     -> CompactColexKmers<CSS> {
-        let colex_map = ColexToColorSetMap::new(sbwt.clone(), Some(&lcs), sample_distance, colex_to_color_set_id, color_sets.n_sets(), n_threads);
         Self {sbwt, lcs, sets: color_sets, map: colex_map}
     }
 
@@ -1222,7 +1221,7 @@ mod tests {
     use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
     use simple_sds_sbwt::ops::BitVec;
 
-    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::hash_and_encode_distinct_sets, coloring_interface::{ColorSetStorage, ColorSetView}, sparse_dense_storage::SparseDenseStorage};
+    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, hash_and_encode_distinct_sets, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
 
     use super::{CompactColexKmers, merge_compact_colorings};
 
@@ -1277,6 +1276,8 @@ mod tests {
             let mut all_input_seq_slices = Vec::<&[u8]>::new();
             all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
             all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
+
+            let mut all_input_seqs: Vec<Vec<u8>> = all_input_seq_slices.iter().map(|s| s.to_vec()).collect();
 
             let mut dbs1 = Vec::<SeqDB>::new();
             let mut dbs2 = Vec::<SeqDB>::new();
@@ -1346,9 +1347,35 @@ mod tests {
             let (colex_to_id_2, storage_2) = build_color_sets::<SparseDenseStorage>(&sbwt2, &lcs2, dbs2, n_threads); 
             let (colex_to_id_both, storage_both)= build_color_sets::<SparseDenseStorage>(&sbwt_both, &lcs_both, dbs_both, n_threads); 
             
-            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_to_id_1, storage_1, input_seqs_1.len(), sample_distance, n_threads);
-            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_to_id_2, storage_2, input_seqs_2.len(), sample_distance, n_threads);
-            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_to_id_both, storage_both, input_seqs_1.len() + input_seqs_2.len(), sample_distance, n_threads);
+            let key_kmers_1 = mark_key_kmers(&sbwt1, &lcs1, sample_distance, VecVecSeqStream::new(input_seqs_1.clone()), n_threads);
+            let key_kmers_2 = mark_key_kmers(&sbwt2, &lcs2, sample_distance, VecVecSeqStream::new(input_seqs_2.clone()), n_threads);
+            let key_kmers_both = mark_key_kmers(&sbwt_both, &lcs_both, sample_distance, VecVecSeqStream::new(all_input_seqs.clone()), n_threads);
+
+            let sampled_ids_1: Vec<usize> = colex_to_id_1.iter().enumerate().filter(|(i, _)| key_kmers_1[*i]).map(|(_,x)| *x).collect();
+            let sampled_ids_2: Vec<usize> = colex_to_id_2.iter().enumerate().filter(|(i, _)| key_kmers_2[*i]).map(|(_,x)| *x).collect();
+            let sampled_ids_both: Vec<usize> = colex_to_id_both.iter().enumerate().filter(|(i, _)| key_kmers_both[*i]).map(|(_,x)| *x).collect();
+
+            let colex_map_1 = ColexToColorSetMap{
+                sbwt: sbwt1.clone(),
+                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_1),
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_1, 40), // 40 bit width is enough
+            };
+
+            let colex_map_2 = ColexToColorSetMap{
+                sbwt: sbwt2.clone(),
+                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_2),
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_2, 40), // 40 bit width is enough
+            };
+
+            let colex_map_both = ColexToColorSetMap{
+                sbwt: sbwt_both.clone(),
+                sampling: crate::util::bitvec_to_simple_sds_bitvec(key_kmers_both),
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_both, 40), // 40 bit width is enough
+            };
+
+            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_map_1, storage_1);
+            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2);
+            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;

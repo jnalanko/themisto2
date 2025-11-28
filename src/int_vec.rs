@@ -67,6 +67,17 @@ impl CompactIntVec {
         }
     }
 
+    pub fn from_vec(v: Vec::<usize>, bit_width: usize) -> Self {
+        if let Some(v_max) = v.iter().max() {
+            assert!(*v_max < (1_usize << bit_width));
+        }
+        let mut ret = Self::new(v.len(), bit_width);
+        for (i, x) in v.into_iter().enumerate() {
+            ret.set(i, x);
+        }
+        ret
+    }
+
     pub fn from_atomic(other: AtomicCompactIntVec) -> Self {
         let len = other.len;
         let bit_width = other.bit_width;

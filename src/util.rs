@@ -27,6 +27,33 @@ pub(crate) fn bitvec_to_simple_sds_raw_bitvec(mut bv: bitvec::vec::BitVec) -> si
     simple_sds_sbwt::raw_vector::RawVector::load(&mut data_with_header).unwrap()
 }
 
+pub(crate) fn bitvec_to_simple_sds_bitvec(bv: bitvec::vec::BitVec) -> simple_sds_sbwt::bit_vector::BitVector {
+    simple_sds_sbwt::bit_vector::BitVector::from(bitvec_to_simple_sds_raw_bitvec(bv))
+}
+
+pub struct VecVecSeqStream{
+    vv: Vec<Vec<u8>>,
+    pos: usize,
+}
+
+impl sbwt::SeqStream for VecVecSeqStream {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        if self.pos == self.vv.len() {
+            None
+        } else {
+            self.pos += 1;
+            Some(&self.vv[self.pos-1])
+        }
+    }
+}
+
+impl VecVecSeqStream {
+    pub fn new(seqs: Vec<Vec<u8>>) -> Self {
+        Self { vv: seqs, pos: 0 }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use simple_sds_sbwt::ops::BitVec;
