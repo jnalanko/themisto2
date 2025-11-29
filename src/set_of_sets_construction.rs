@@ -1,10 +1,8 @@
 use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
-use bitvec::order::Lsb0;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
-use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
-use simple_sds_sbwt::{ops::{BitVec, Rank, Select}, raw_vector::AccessRaw};
-use crate::{colex_colored_kmers::mark_key_kmers, coloring_interface::ColorSetStorage, int_vec::CompactIntVec, iterators::VecIterator};
+use simple_sds_sbwt::ops::{BitVec, Rank, Select};
+use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec, iterators::VecIterator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
@@ -75,23 +73,21 @@ pub trait ParallelElementGenerator {
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
 /// There must not be duplicate elements in the same set!
-/// Returns the CSS and a vector of length key_kmer_marks.count_ones() that gives the color set id for each key k-mer.
-pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorage + Send>(
+/// Returns three things:
+/// * A bit vector marking a subset of the key-kmers such that every marked k-mer has a distinct color
+///   set.
+/// * The sizes of the color sets of the marked k-mers, in colex order
+/// * A vector of length key_kmer_marks.count_ones() that gives the color set id for each key k-mer.
+///   The color set id is the rank of the 1-bit of the representative k-mer of the color set in the returned marks.
+pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(
     mut gen: impl ParallelElementGenerator,
-    mut gen_again: impl ParallelElementGenerator,
     key_kmer_marks: bitvec::vec::BitVec,
     n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
-    -> (CSS, CompactIntVec) {
+    -> (bitvec::vec::BitVec, Vec<usize>, CompactIntVec) {
 
     // Build rank support for key k-mer marks
     log::info!("Building rank support for key k-mer marks");
     let key_kmer_marks = crate::util::bitvec_to_simple_sds_raw_bitvec(key_kmer_marks);
-    /*let mut new_key_kmer_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(key_kmer_marks.len(), false);
-    for b in key_kmer_marks.iter_ones(){
-        new_key_kmer_marks.set_bit(b, true);
-    }
-    drop(key_kmer_marks);
-    */
     let mut key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(key_kmer_marks);
     key_kmer_marks.enable_rank();
 
@@ -133,7 +129,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
 
     // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
     let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
-    let mut sparsified_key_kmer_marks = simple_sds_sbwt::raw_vector::RawVector::with_len(key_kmer_marks.len(), false);
+    let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
     let mut sparsified_marked_set_sizes = Vec::<usize>::new();
     let mut n_distinct_sets_found = 0_usize;
     let mut total_set_size = 0_usize;
@@ -145,7 +141,7 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
         if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
             e.insert(n_distinct_sets_found);
             n_distinct_sets_found += 1;
-            sparsified_key_kmer_marks.set_bit(key_kmer_colex, true);
+            sparsified_key_kmer_marks.set(key_kmer_colex, true);
             sparsified_marked_set_sizes.push(set_sizes[key_kmer_idx]);
             total_set_size += set_sizes[key_kmer_idx];
         }
@@ -168,15 +164,20 @@ pub fn construct_from_generators_that_do_not_give_duplicates<CSS: ColorSetStorag
     // Free memory
     drop(set_fingerprints);
 
-    // Build rank on marked sets
-    let mut sparsified_key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(sparsified_key_kmer_marks);
-    sparsified_key_kmer_marks.enable_rank();
+    (sparsified_key_kmer_marks, sparsified_marked_set_sizes, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
+
+}
+
+// The generator must not provide duplicate elements! Otherwise the final data structure will be corrupted because
+// the sampled_set_sizes is not correct.
+pub fn build_color_set_storage<CSS: ColorSetStorage + Send>(n_colors: usize, colex_sample_marks: bitvec::vec::BitVec, sampled_set_sizes: Vec<usize>, mut gen: impl ParallelElementGenerator, n_threads: usize) -> CSS {
+    let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
+    colex_sample_marks.enable_rank();
 
     // Filter the second element iterator
-    gen_again.set_filter(sparsified_key_kmer_marks);
+    gen.set_filter(colex_sample_marks);
 
-    let css = *CSS::new_parallel(gen_again, n_colors, &sparsified_marked_set_sizes, n_threads);
-    (css, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
+    *CSS::new_parallel(gen, n_colors, &sampled_set_sizes, n_threads)
 }
 
 #[cfg(test)]
@@ -184,6 +185,7 @@ mod tests{
     use simple_sds_sbwt::ops::BitVec;
 
     use crate::{coloring_interface::ColorSetView, sparse_dense_storage::SparseDenseStorage};
+    use bitvec::prelude::*;
 
     use super::*;
 
@@ -251,8 +253,7 @@ mod tests{
 
         dbg!(&elements);
         
-        let (distinct_sets, old_id_to_new_id) = construct_from_generators_that_do_not_give_duplicates::<SparseDenseStorage>(
-            VecVecGenerator::new(sets.clone()),
+        let (new_marks, set_sizes, key_kmer_to_set_id) = find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(
             VecVecGenerator::new(sets.clone()),
             bitvec::bitvec![1,1,0,1,1,1], // Mark one of the duplicates as non-key
             sets.len(),
@@ -260,6 +261,7 @@ mod tests{
             3,
             123123
         );
+        let distinct_sets = build_color_set_storage::<SparseDenseStorage>(5, new_marks, set_sizes, VecVecGenerator::new(sets.clone()), 3);
 
         let mut correct_answers = vec![vec![0,1,2], vec![2,3], vec![4], vec![]];
         let mut our_answers: Vec<Vec<usize>> = 
@@ -273,7 +275,7 @@ mod tests{
             eprintln!("{:?} {:?}", our_answers[i], correct_answers[i]);
         }
         assert_eq!(correct_answers, our_answers);
-        assert_eq!(old_id_to_new_id.to_vec(), vec![0,1,2,3,1]);
+        assert_eq!(key_kmer_to_set_id.to_vec(), vec![0,1,2,3,1]);
 
     }
 }

@@ -347,61 +347,47 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
         self.filter = Some(filter)
     }
 }
-
-fn build_coloring_with_generators
-    <CSS: ColorSetStorage + Send, 
-    P1: ParallelElementGenerator, 
-    P2: ParallelElementGenerator>
-    (element_gen_1: P1, element_gen_2: P2, key_kmer_marks: bitvec::vec::BitVec, n_sets: usize, n_colors: usize, n_threads: usize)
-    -> (CSS, CompactIntVec) {
-
-    log::info!("Building distinct color sets");
-    let (css, key_kmer_idx_to_color_set_id) = set_of_sets_construction::construct_from_generators_that_do_not_give_duplicates::<CSS>(
-        element_gen_1,
-        element_gen_2,
-        key_kmer_marks,
-        n_sets,
-        n_colors,
-        n_threads,
-        1232563, // Random seed. Todo: be more random
-    );
-
-    (css, key_kmer_idx_to_color_set_id)
-}
-
 fn build_coloring<CSS: ColorSetStorage + Send>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool) -> CompactColexKmers<CSS> {
 
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
-    log::info!("Marking key k-mers");
+    log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
     let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
-    let (css, key_kmer_idx_to_color_set_id) = if from_unitigs {
-        let element_gen_1 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        let element_gen_2 = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads)
+    log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
+    let random_seed = 123123; // Todo: be more random
+    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
+        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
     } else {
-        let element_gen_1 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        let element_gen_2 = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
-        build_coloring_with_generators::<CSS, _, _>(element_gen_1, element_gen_2, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads)
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
+    };
+
+    log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
+    let css = if from_unitigs {
+        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+    } else {
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
     };
 
     log::info!("Building rank support for key k-mer marks");
     let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
     key_kmer_marks.enable_rank();
-    assert!(key_kmer_idx_to_color_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
+    assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
     let colex_map = ColexToColorSetMap {
         sbwt: sbwt.clone(), // Clones just the Arc
         sampling: key_kmer_marks, 
-        color_set_ids: key_kmer_idx_to_color_set_id,
+        color_set_ids: key_kmer_idx_to_set_id,
     };
 
     CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css)
-
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
