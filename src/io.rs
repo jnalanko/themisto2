@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use jseqio::{reader::DynamicFastXReader};
-use sbwt::SeqStream;
+use jseqio::{reader::DynamicFastXReader, reverse_complement};
+use sbwt::{reverse_complement_in_place, SeqStream};
 
 pub struct ChainedInputStream{
     paths: Vec<PathBuf>,
@@ -55,5 +55,48 @@ impl SeqStream for ChainedInputStream {
         } else {
             None    
         }
+    }
+}
+
+pub struct ChainedInputStreamWithRevComp{
+    inner: ChainedInputStream,
+    rev_comp_next: bool,
+}
+
+impl ChainedInputStreamWithRevComp {
+    pub fn new(filenames: Vec<PathBuf>) -> Self {
+        let inner = ChainedInputStream::new(filenames);
+        Self{inner, rev_comp_next: false}
+    }
+}
+
+impl SeqStream for ChainedInputStreamWithRevComp {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        if self.rev_comp_next {
+            reverse_complement_in_place(&mut self.inner.seq_buf); 
+            self.rev_comp_next = false;
+            Some(&self.inner.seq_buf)
+        } else {
+            self.rev_comp_next = true;
+            self.inner.stream_next()
+        }
+    }
+}
+
+impl ChainedInputStreamWithRevComp {
+    pub fn cur_file_idx(&self) -> usize {
+        self.inner.cur_file_idx
+    }
+
+    pub fn get_seq_buf(&self) -> &[u8] {
+        &self.inner.seq_buf
+    }
+
+    pub fn get_seq_buf_mut(&mut self) -> &mut [u8] {
+        &mut self.inner.seq_buf
+    }
+
+    pub fn done(&self) -> bool {
+        self.inner.cur_file_idx == self.inner.paths.len()
     }
 }

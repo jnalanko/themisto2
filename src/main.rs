@@ -7,6 +7,7 @@ use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
+use io::ChainedInputStreamWithRevComp;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
@@ -354,7 +355,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     log::info!("Building distinct color set structure");
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
-    let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
+    let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
     let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
