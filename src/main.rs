@@ -434,7 +434,7 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
 
 fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>) {
     for (id, name) in index.get_color_names().iter().enumerate() {
-        println!("{} {}", id, name);
+        println!("{}\t{}", id, name);
     }
 }
 
