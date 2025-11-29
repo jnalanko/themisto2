@@ -450,7 +450,18 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         self.sets.get_set_view(self.colex_to_set_id(colex))
     }
 
+    fn serialization_magic_string() -> &'static [u8; 4] {
+        b"CCKM" // Compact Colex Kmers
+    }
+
+    fn serialization_version() -> u64 {
+        1_u64
+    }
+
     pub fn serialize(&self, out: &mut impl std::io::Write) {
+        out.write_all(Self::serialization_magic_string()).unwrap();
+        out.write_all(&Self::serialization_version().to_le_bytes()).unwrap();
+
         self.sbwt.serialize(out).unwrap();
         self.lcs.serialize(out).unwrap();
         self.sets.serialize(out);
@@ -473,6 +484,19 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Unless we make it an Arc<Refcell<...>>, but that might have overhead because then
     /// it will do run-time borrow checking on every access if I understand correctly.
     pub fn load(input: &mut impl std::io::Read, enable_select: bool) -> Self {
+        // Read and verify magic string
+        let mut magic_string = [0_u8; 4];
+        input.read_exact(&mut magic_string).unwrap();
+        if magic_string != *Self::serialization_magic_string() {
+            panic!("Error loading CompactColexKmers: expected bytes {:?} but found {:?}", Self::serialization_magic_string(), magic_string);
+        }
+        let mut version_bytes = [0_u8; 8];
+        input.read_exact(&mut version_bytes).unwrap();
+        let version = u64::from_le_bytes(version_bytes);
+        if version != Self::serialization_version() {
+            panic!("Error loading CompactColexKmers: expected version {} but found {}", Self::serialization_version(), version);
+        }
+
         let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
         if enable_select {
             log::info!("Building select support");
