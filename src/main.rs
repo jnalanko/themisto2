@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use io::ChainedInputStreamWithRevComp;
+use parallel_ms_iteration::DeduplicatingColorElementGenerator;
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
@@ -252,109 +253,6 @@ impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
     }
 }
 
-struct DeduplicatingColorElementGenerator<'a> {
-    streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    input: ChainedInputStream,
-    cur_color: usize,
-    cur_color_set_ids: HashSet<usize>,
-    output_buf: (usize, Vec<usize>), // (Color, set ids)
-    filter: Option<simple_sds_sbwt::bit_vector::BitVector> // Bit vector with rank support
-}
-
-impl<'a> DeduplicatingColorElementGenerator<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
-        let streaming_index = StreamingIndex::new(sbwt, lcs); 
-        Self {
-            streaming_index,
-            input,
-            cur_color: 0,
-            cur_color_set_ids: HashSet::new(),
-            output_buf: (0, vec![]),
-            filter: None,
-        }
-    }
-
-    fn process_current_seq_in_input(&mut self) {
-        let seq = self.input.get_seq_buf_mut();
-        let k = self.streaming_index.k();
-
-        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
-        for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-            assert!(colex.len() == 1);
-            self.cur_color_set_ids.insert(colex.start);
-        }
-
-        reverse_complement_in_place(seq);
-
-        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
-        for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-            assert!(colex.len() == 1);
-            self.cur_color_set_ids.insert(colex.start);
-        }
-    }
-
-    fn hash_set_to_output_buf(&mut self) {
-        let mut hashset = HashSet::<usize>::new();
-        std::mem::swap(&mut hashset, &mut self.cur_color_set_ids);
-        let ids: Vec<usize> = hashset.into_iter().collect();
-        self.output_buf = (self.cur_color, ids);
-        log::info!("Searched color {}", self.cur_color);
-        self.cur_color += 1;
-    }
-}
-
-impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
-    type Item = SetElement;
-
-    fn next(&mut self) -> Option<Self::Item> {
-
-        if let Some(id) = self.output_buf.1.pop() {
-            return Some(SetElement { set_id: id, color: self.output_buf.0 });
-        }
-        if self.input.done() { return None }
-
-        // Read and process all sequences of the current color
-        loop {
-            if self.input.stream_next().is_some() {
-                let color = self.input.cur_file_idx();
-                if color == self.cur_color {
-                    self.process_current_seq_in_input();
-                } else {
-                    // Push to output buffer and start returning
-                    self.hash_set_to_output_buf();
-                    self.process_current_seq_in_input();
-                    return self.next();
-                }
-            } else {
-                // End of input. Push the set ids of the last color to the output buffer
-                self.hash_set_to_output_buf();
-                return self.next();
-            }
-        }
-    }
-}
-
-impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
-    fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        // TODO: make this multithreaded
-        while let Some(mut elem) = self.next() {
-            if let Some(filter) = &self.filter {
-                if !filter.get(elem.set_id) {
-                    continue; // This is filtered away
-                } else {
-                    // Keep and assign new id
-                    let new_id = filter.rank(elem.set_id);
-                    elem.set_id = new_id;
-                }
-            }
-            callback(elem);
-        }
-    }
-
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-        self.filter = Some(filter)
-    }
-}
 fn build_coloring<CSS: ColorSetStorage + Send>(
     sbwt: Arc<sbwt::SbwtIndex<SubsetMatrix>>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool) -> CompactColexKmers<CSS> {
 
