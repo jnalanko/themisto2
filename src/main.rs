@@ -150,8 +150,8 @@ pub enum Subcommands {
         print_kmers: bool,
     },
 
-    #[command(arg_required_else_help = true, name = "print-color-sets")]
-    PrintColorNames{
+    #[command(arg_required_else_help = true, name = "dump-color-names")]
+    DumpColorNames{
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
     },
@@ -707,7 +707,7 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
             };
         },
-        Subcommands::PrintColorNames{ index: index_path} => {
+        Subcommands::DumpColorNames{ index: index_path} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             match index {
