@@ -177,103 +177,81 @@ impl<'a> Iterator for DeduplicatingBufferIter {
 
 pub struct DeduplicatingColorElementGenerator<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    input: ChainedInputStream,
-    cur_color: usize,
-    cur_set_ids: DeduplicatingBuffer,
-    output_buf: (usize, DeduplicatingBufferIter), // (Color, set ids)
-    filter: Option<simple_sds_sbwt::bit_vector::BitVector> // Bit vector with rank support
+    input: jseqio::reader::DynamicFastXReader,
+    color: usize,
+    set_ids: DeduplicatingBuffer,
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: ChainedInputStream) -> Self {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader, color: usize) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
             streaming_index,
             input,
-            cur_color: 0,
-            cur_set_ids: DeduplicatingBuffer::new(sbwt.n_sets()),
-            output_buf: (0, DeduplicatingBuffer::new(sbwt.n_sets()).into_iter()), // Empty iterator
-            filter: None,
+            color,
+            set_ids: DeduplicatingBuffer::new(sbwt.n_sets()),
         }
     }
 
-    fn process_current_seq_in_input(&mut self) {
-        let seq = self.input.get_seq_buf_mut();
+    fn process_seq(&mut self, cur_seq: &[u8]) {
         let k = self.streaming_index.k();
 
-        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
+        let ms_iter = self.streaming_index.matching_statistics_iter(cur_seq);
         for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
             assert!(colex.len() == 1);
-            self.cur_set_ids.insert(colex.start);
-        }
-
-        reverse_complement_in_place(seq);
-
-        let ms_iter = self.streaming_index.matching_statistics_iter(seq);
-        for (_, colex) in ms_iter.skip(k-1).filter(|(len, _colex)| *len == k) {
-            assert!(colex.len() == 1);
-            self.cur_set_ids.insert(colex.start);
+            self.set_ids.insert(colex.start);
         }
     }
 
-    fn hash_set_to_output_buf(&mut self) {
-        let mut b = DeduplicatingBuffer::new(self.streaming_index.sbwt_len()); // Empty buffer
-        std::mem::swap(&mut self.cur_set_ids, &mut b); // cur_set_ids is now empty
-
-        self.output_buf.0 = self.cur_color;
-        self.output_buf.1 = b.into_iter();
-
-        log::info!("Searched color {}", self.cur_color);
-        self.cur_color += 1;
+    fn run(mut self) -> DeduplicatingBuffer {
+        let mut buf = Vec::<u8>::new();
+        while let Some(rec) = self.input.read_next_mut().unwrap() {
+            buf.clear();
+            buf.extend_from_slice(rec.seq);
+            self.process_seq(&buf);
+            reverse_complement_in_place(&mut buf);
+            self.process_seq(&buf);
+        }
+        self.set_ids
     }
 }
 
-impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
-    type Item = SetElement;
-
-    fn next(&mut self) -> Option<Self::Item> {
-
-        if let Some(id) = self.output_buf.1.next() {
-            return Some(SetElement { set_id: id, color: self.output_buf.0 });
-        }
-        if self.input.done() { return None }
-
-        // Read and process all sequences of the current color
-        loop {
-            if self.input.stream_next().is_some() {
-                let color = self.input.cur_file_idx();
-                if color == self.cur_color {
-                    self.process_current_seq_in_input();
-                } else {
-                    // Push to output buffer and start returning
-                    self.hash_set_to_output_buf();
-                    self.process_current_seq_in_input();
-                    return self.next();
-                }
-            } else {
-                // End of input. Push the set ids of the last color to the output buffer
-                self.hash_set_to_output_buf();
-                return self.next();
-            }
-        }
-    }
+pub struct NewDeduplicatingColorElementGenerator<'a> {
+    input_files: Vec<PathBuf>,
+    sbwt: SbwtIndex<SubsetMatrix>,
+    lcs: LcsArray,
+    filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
 }
 
-impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
+impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for NewDeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        // TODO: make this multithreaded
-        while let Some(mut elem) = self.next() {
-            if let Some(filter) = &self.filter {
-                if !filter.get(elem.set_id) {
-                    continue; // This is filtered away
-                } else {
-                    // Keep and assign new id
-                    let new_id = filter.rank(elem.set_id);
-                    elem.set_id = new_id;
+        let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+        thread_pool.install(|| {
+            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
+                log::info!("Processing color {}", color);
+                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
+                let gen = DeduplicatingColorElementGenerator::new(&self.sbwt, &self.lcs, reader, color);
+                let distinct_colex_positions = gen.run();
+                for colex in distinct_colex_positions.into_iter() {
+                    let set_id = if let Some(filter) = &self.filter {
+                        if !filter.get(colex) {
+                            continue; // Do not report this
+                        } else {
+                            // Assign new id
+                            filter.rank(colex)
+                        }
+                    } else {
+                        colex // No filter
+                    };
+
+                    callback(SetElement{
+                        set_id,
+                        color,
+                    });
                 }
-            }
-            callback(elem);
-        }
+            })
+        });
+
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
