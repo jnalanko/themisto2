@@ -39,6 +39,7 @@ pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
     lcs: LcsArray,
     sets: CSS, // Distinct color sets
     map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
+    color_names: Vec<String>, // User-provided names for the colors (e.g. accession numbers)
 }
 
 /// A data structure that stores the color set ids for a subset of sampled k-mers in the SBWT such that
@@ -311,10 +312,16 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'stat
 
 impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
-    /// TODO: take CompactIntVec for colex_to_color_set_id instead of Vec<usize>
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS)
+    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS, color_names: Option<&[String]>)
     -> CompactColexKmers<CSS> {
-        Self {sbwt, lcs, sets: color_sets, map: colex_map}
+        let color_names = if let Some(names) = color_names {
+            assert!(names.len() == color_sets.n_colors());
+            names.to_vec()
+        } else {
+            // Assign default color names
+            (0..color_sets.n_colors()).map(|x| format!("color_{}", x.to_string())).collect::<Vec<String>>()
+        };
+        Self {sbwt, lcs, sets: color_sets, map: colex_map, color_names}
     }
 
     pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
@@ -400,11 +407,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             color_set_ids: stored_color_set_ids,
         };
 
-        Self {sbwt, lcs, sets: distinct_css, map: colex_map}
+        let color_names: Vec<String> = (0..distinct_css.n_colors()).map(|x| x.to_string()).collect();
+        Self {sbwt, lcs, sets: distinct_css, map: colex_map, color_names}
     }
 
 
-    pub fn new_single_colored(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, sample_distance: usize, n_threads: usize) -> Self {
+    pub fn new_single_colored(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
         let n_colors = 1;
         let int_bitwidth = 1;
 
@@ -423,7 +431,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             sampling: unitig_samples,
             color_set_ids,
         };
-        Self {sbwt, lcs, sets: *sets, map: colex_map}
+        Self {sbwt, lcs, sets: *sets, map: colex_map, color_names: vec![color_name]}
     }
 
     pub fn colex_to_set_id(&self, colex: usize) -> usize {
@@ -443,6 +451,16 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         self.lcs.serialize(out).unwrap();
         self.sets.serialize(out);
         self.map.serialize(out);
+        
+        // Serialize color names: first the number of names, then each name length and name
+        let n_names = self.color_names.len() as u64;
+        out.write_all(&n_names.to_le_bytes()).unwrap();
+        for name in self.color_names.iter() {
+            let name_bytes = name.as_bytes();
+            let name_len = name_bytes.len() as u64;
+            out.write_all(&name_len.to_le_bytes()).unwrap();
+            out.write_all(name_bytes).unwrap();
+        }
     }
 
     /// If this struct is going to be merged with [crate::coloring::merge_colorings], it will
@@ -460,7 +478,24 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let lcs = LcsArray::load(input).unwrap();
         let sets = CSS::load(input);
         let map = ColexToColorSetMap::load(input, sbwt.clone());
-        CompactColexKmers{sbwt, lcs, sets, map}
+
+        // Load color names
+        let mut n_names_bytes = [0_u8; 8];
+        input.read_exact(&mut n_names_bytes).unwrap();
+        let n_names = u64::from_le_bytes(n_names_bytes) as usize;
+        assert_eq!(n_names, sets.n_colors());
+        let mut color_names = Vec::<String>::with_capacity(n_names);
+        for _ in 0..n_names {
+            let mut name_len_bytes = [0_u8; 8];
+            input.read_exact(&mut name_len_bytes).unwrap();
+            let name_len = u64::from_le_bytes(name_len_bytes) as usize;
+            let mut name_bytes = vec![0_u8; name_len];
+            input.read_exact(&mut name_bytes).unwrap();
+            let name = String::from_utf8(name_bytes).unwrap();
+            color_names.push(name);
+        }
+
+        CompactColexKmers{sbwt, lcs, sets, map, color_names}
     }
 
     pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
@@ -502,7 +537,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
-    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
+    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], _unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
         let mut subunitig_color_set_ids: Vec<usize> = vec![];
         let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
         let mut current_run_set_id: Option<usize> =  None;
@@ -1153,6 +1188,10 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexKmer
     log::info!("Interleaving SBWTs");
     let precalc_len = max(coloring1.map.sbwt.get_lookup_table().prefix_length, coloring2.map.sbwt.get_lookup_table().prefix_length);
 
+    // Collect old color names before dropping the structs
+    let mut new_color_names = coloring1.color_names.clone();
+    new_color_names.extend(coloring2.color_names.clone());
+
     let sbwt1 = (*coloring1.map.sbwt).clone(); // Todo: avoid clone. Currently unavoidable because we have just a reference to the SBWT, but the merge needs an owned value.
     drop(coloring1);
 
@@ -1173,7 +1212,8 @@ pub fn merge_compact_colorings<CSS: ColorSetStorage>(coloring1: CompactColexKmer
             sbwt: merged_sbwt.clone(), 
             sampling: color_set_sample_marks, 
             color_set_ids: sampled_ids 
-        }
+        },
+        color_names: new_color_names,
     };
 
     log::info!("Color merge finished");
@@ -1389,9 +1429,9 @@ mod tests {
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_both),
             };
 
-            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_map_1, storage_1);
-            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2);
-            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both);
+            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_map_1, storage_1, None);
+            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2, None);
+            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both, None);
 
             let ccc_merged = merge_compact_colorings(ccc1, ccc2, true, n_threads);
             let sbwt_merged = &ccc_merged.sbwt;

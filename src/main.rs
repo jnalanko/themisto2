@@ -388,7 +388,8 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
         color_set_ids: key_kmer_idx_to_set_id,
     };
 
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css)
+    let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names))
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
