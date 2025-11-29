@@ -393,6 +393,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     log::info!("Building rank support for key k-mer marks");
     let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
     key_kmer_marks.enable_rank();
+    assert!(key_kmer_idx_to_color_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
     let colex_map = ColexToColorSetMap {
         sbwt: sbwt.clone(), // Clones just the Arc
         sampling: key_kmer_marks, 
