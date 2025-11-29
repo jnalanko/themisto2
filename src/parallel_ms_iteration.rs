@@ -180,7 +180,7 @@ pub struct DeduplicatingColorElementGenerator<'a> {
     input: ChainedInputStream,
     cur_color: usize,
     cur_set_ids: DeduplicatingBuffer,
-    output_buf: (usize, DeduplicatingBuffer), // (Color, set ids)
+    output_buf: (usize, DeduplicatingBufferIter), // (Color, set ids)
     filter: Option<simple_sds_sbwt::bit_vector::BitVector> // Bit vector with rank support
 }
 
@@ -192,7 +192,7 @@ impl<'a> DeduplicatingColorElementGenerator<'a> {
             input,
             cur_color: 0,
             cur_set_ids: DeduplicatingBuffer::new(sbwt.n_sets()),
-            output_buf: (0, DeduplicatingBuffer::new(sbwt.n_sets())),
+            output_buf: (0, DeduplicatingBuffer::new(sbwt.n_sets()).into_iter()), // Empty iterator
             filter: None,
         }
     }
@@ -217,11 +217,12 @@ impl<'a> DeduplicatingColorElementGenerator<'a> {
     }
 
     fn hash_set_to_output_buf(&mut self) {
-        // Move the set ids to the out buffer
-        std::mem::swap(&mut self.cur_set_ids, &mut self.output_buf.1);
-        self.output_buf.0 = self.cur_color;
+        let mut b = DeduplicatingBuffer::new(self.streaming_index.sbwt_len()); // Empty buffer
+        std::mem::swap(&mut self.cur_set_ids, &mut b); // cur_set_ids is now empty
 
-        self.cur_set_ids = DeduplicatingBuffer::new(self.streaming_index.sbwt_len()); // Clear the buffer
+        self.output_buf.0 = self.cur_color;
+        self.output_buf.1 = b.into_iter();
+
         log::info!("Searched color {}", self.cur_color);
         self.cur_color += 1;
     }
@@ -232,10 +233,7 @@ impl<'a> Iterator for DeduplicatingColorElementGenerator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        if !self.output_buf.1.empty {
-            aaa
-        }
-        if let Some(id) = self.output_buf.1.pop() {
+        if let Some(id) = self.output_buf.1.next() {
             return Some(SetElement { set_id: id, color: self.output_buf.0 });
         }
         if self.input.done() { return None }
