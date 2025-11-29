@@ -150,6 +150,12 @@ pub enum Subcommands {
         print_kmers: bool,
     },
 
+    #[command(arg_required_else_help = true, name = "print-color-sets")]
+    PrintColorNames{
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+    },
+
     #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
     MergeCompressedIndexes {
         #[arg(long = "index-file-list", required = true)]
@@ -426,6 +432,12 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     }
 }
 
+fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>) {
+    for (id, name) in index.get_color_names().iter().enumerate() {
+        println!("{} {}", id, name);
+    }
+}
+
 
 fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
@@ -693,6 +705,14 @@ fn main() {
             match index {
                 IndexVariant::BitmapIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
                 IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
+            };
+        },
+        Subcommands::PrintColorNames{ index: index_path} => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, false); // No select support required
+            match index {
+                IndexVariant::BitmapIndex(idx) => print_color_names(&idx),
+                IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx),
             };
         },
         Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => {
