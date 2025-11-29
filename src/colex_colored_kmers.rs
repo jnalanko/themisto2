@@ -1,3 +1,4 @@
+use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
@@ -67,29 +68,35 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
     let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
     let marks = AtomicBitmap::new(sbwt.n_sets());
 
-    log::info!("Searching first and last k-mer of each input sequence");
+    // This bit vector of length 256 marks the ascii values of these characters: acgtACGT
+    const IS_DNA: BitArray<[u32; 8]> = bitvec::bitarr![const u32, Lsb0; 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+
+    log::info!("Searching first and last k-mer of every input sequence");
     while let Some(seq) = seqs.stream_next(){
-        if seq.len() < k { continue }
+        for ACGT_run in seq.split(|&c| !IS_DNA[c as usize]) {
+            if ACGT_run.len() < k { continue }
 
-        let first = sbwt.search(&seq[0..k]).unwrap_or_else(|| {
-            panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&seq[0..k]));     
-        });
+            let first = sbwt.search(&ACGT_run[0..k]).unwrap_or_else(|| {
+                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[0..k]));     
+            });
 
-        assert!(first.len() == 1);
+            assert!(first.len() == 1);
 
-        in_neighbor_buf.clear();
-        dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
-        for (in_node, _) in in_neighbor_buf.iter() {
-            marks.set(in_node.id, true);
+            in_neighbor_buf.clear();
+            dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
+            for (in_node, _) in in_neighbor_buf.iter() {
+                marks.set(in_node.id, true);
+            }
+
+            let last = sbwt.search(&ACGT_run[ACGT_run.len()-k..]).unwrap_or_else(|| {
+                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[ACGT_run.len()-k..]));     
+            });
+
+            assert!(last.len() == 1);
+            marks.set(last.start, true);
         }
-
-        let last = sbwt.search(&seq[seq.len()-k..]).unwrap_or_else(|| {
-            panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&seq[seq.len()-k..]));     
-        });
-
-        assert!(last.len() == 1);
-        marks.set(last.start, true);
     }
+
 
     log::info!("Sampling along unitigs");
     dbg.iter_unitigs_with_callback(|nodes, _unitig| {
