@@ -1,6 +1,5 @@
 use std::{collections::{hash_set::IntoIter, HashSet}, path::PathBuf};
 
-use bitvec::{order::Lsb0, slice::IterOnes};
 use rayon::iter::{ParallelBridge as _, ParallelIterator};
 use sbwt::{reverse_complement_in_place, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
@@ -175,14 +174,14 @@ impl<'a> Iterator for DeduplicatingBufferIter {
     }
 }
 
-pub struct DeduplicatingColorElementGenerator<'a> {
+pub struct DistinctColexComputation<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     input: jseqio::reader::DynamicFastXReader,
     color: usize,
     set_ids: DeduplicatingBuffer,
 }
 
-impl<'a> DeduplicatingColorElementGenerator<'a> {
+impl<'a> DistinctColexComputation<'a> {
     pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader, color: usize) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
@@ -216,21 +215,27 @@ impl<'a> DeduplicatingColorElementGenerator<'a> {
     }
 }
 
-pub struct NewDeduplicatingColorElementGenerator<'a> {
+pub struct DeduplicatingColorElementGenerator<'a> {
     input_files: Vec<PathBuf>,
-    sbwt: SbwtIndex<SubsetMatrix>,
-    lcs: LcsArray,
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
+    lcs: &'a LcsArray,
     filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
 }
 
-impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for NewDeduplicatingColorElementGenerator<'a> {
+impl<'a> DeduplicatingColorElementGenerator<'a> {
+    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>) -> Self {
+        Self { input_files, sbwt, lcs, filter: None }
+    }
+}
+
+impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
         let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
         thread_pool.install(|| {
             self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
                 log::info!("Processing color {}", color);
-                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                let gen = DeduplicatingColorElementGenerator::new(&self.sbwt, &self.lcs, reader, color);
+                let reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
+                let gen = DistinctColexComputation::new(&self.sbwt, &self.lcs, reader, color);
                 let distinct_colex_positions = gen.run();
                 for colex in distinct_colex_positions.into_iter() {
                     let set_id = if let Some(filter) = &self.filter {
@@ -251,7 +256,6 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for NewDedupl
                 }
             })
         });
-
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {

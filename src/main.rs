@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use io::ChainedInputStreamWithRevComp;
-use parallel_ms_iteration::DeduplicatingColorElementGenerator;
+use parallel_ms_iteration::{DeduplicatingColorElementGenerator, DistinctColexComputation};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
@@ -270,7 +270,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
         let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
     };
 
@@ -279,7 +279,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
         let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
         set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, ChainedInputStream::new(input_paths.to_owned()));
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
         set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
     };
 
