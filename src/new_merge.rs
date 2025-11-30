@@ -1,8 +1,9 @@
-use std::cmp::max;
+use std::{cmp::max, sync::Arc};
 
 use sbwt::{dbg::{Dbg, Node}, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
+use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage, parallel_ms_iteration::{MergedElementGenerator, MsElementGenerator}};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
 
 fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
 
@@ -78,7 +79,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let merged_dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
 
     log::info!("=== Phase 1/3: marking new key k-mers ===");
-    let new_key_kmer_marks = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_dbg, n_threads);
+    let (new_key_kmer_marks, dbg1, dbg2) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_dbg, n_threads);
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
@@ -86,33 +87,41 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
         merged_sbwt: &merged_sbwt,
         coloring1: &coloring1,
         coloring2: &coloring2,
-        dbg1: todo!(),
-        dbg2: todo!(),
-        filter: todo!(),
-    }
-    set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
-
-    log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
-    let css = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
-    } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
-        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+        dbg1: &dbg1,
+        dbg2: &dbg1,
+        filter: None,
     };
 
+    let n_colors = coloring1.get_set_storage().n_colors() + coloring2.get_set_storage().n_colors();
+    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, new_key_kmer_marks.clone(), merged_sbwt.n_sets(), n_colors, n_threads, random_seed);
+
+    log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
+    let gen = MergedElementGenerator {
+        merged_sbwt: &merged_sbwt,
+        coloring1: &coloring1,
+        coloring2: &coloring2,
+        dbg1: &dbg1,
+        dbg2: &dbg1,
+        filter: None,
+    };
+        
+    let css = build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads);
+
     log::info!("Building rank support for key k-mer marks");
-    let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
+    let mut key_kmer_marks = crate::util::bitvec_to_simple_sds_bitvec(new_key_kmer_marks);
     key_kmer_marks.enable_rank();
     assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
+
+    let merged_sbwt = Arc::new(merged_sbwt);
     let colex_map = ColexToColorSetMap {
-        sbwt: sbwt.clone(), // Clones just the Arc
+        sbwt: merged_sbwt.clone(), // Clones just the Arc
         sampling: key_kmer_marks, 
         color_set_ids: key_kmer_idx_to_set_id,
     };
 
-    let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names))
+    let mut color_names = Vec::<String>::new();
+    color_names.extend(coloring1.get_color_names().iter().cloned());
+    color_names.extend(coloring2.get_color_names().iter().cloned());
 
-    todo!();
+    CompactColexKmers::<CSS>::new(merged_sbwt, merged_sbwt_lcs, colex_map, css, Some(&color_names))
 }
