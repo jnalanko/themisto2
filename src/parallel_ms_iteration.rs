@@ -263,9 +263,8 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
     }
 }
 
-struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
+pub struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
     merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
-    merged_sbwt_lcs: &'a LcsArray,
     coloring1: &'a CompactColexKmers<CSS>,
     coloring2: &'a CompactColexKmers<CSS>,
     dbg1: &'a Dbg<'a, SubsetMatrix>,
@@ -278,6 +277,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
     fn process_dbg<'b>(&'b self, dbg: &Dbg<'a, SubsetMatrix>, coloring: &CompactColexKmers<CSS>, color_offset: usize, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
         let si = StreamingIndex::new(&coloring.sbwt(), coloring.lcs());
         let k = self.merged_sbwt.k();
+        assert!(self.merged_sbwt.k() == k);
         dbg.iter_unitigs_with_callback(|nodes, unitig| {
             let mut merged_colexes_iter = si.matching_statistics_iter(&unitig)
             .skip(k-1)
@@ -318,7 +318,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Merged
 
     fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
         self.process_dbg(self.dbg1, self.coloring1, 0, &callback, n_threads);
-        self.process_dbg(self.dbg1, self.coloring1, self.coloring1.get_set_storage().n_colors(), &callback, n_threads);
+        self.process_dbg(self.dbg2, self.coloring2, self.coloring1.get_set_storage().n_colors(), &callback, n_threads);
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
