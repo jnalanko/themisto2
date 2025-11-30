@@ -70,9 +70,12 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             // (s,e) = (start of first k-mer, start of the k-mer after the last k-mer)
             let (s,e) = (subunitig_range.start, subunitig_range.end); 
             assert!(s < e);
+
             let last_kmer = &unitig[e-1..e-1+k];
+            mark_kmer(last_kmer, &merged_sbwt, &key_kmer_marks);
 
             let first_kmer = &unitig[s..s+k];
+            mark_in_neighbors(first_kmer, &merged_sbwt, &merged_dbg, &key_kmer_marks);
         }
     }, n_threads);
 
