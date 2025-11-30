@@ -289,7 +289,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 
             for node in nodes {
                 let colex = node.id;
-                let merged_colex = merged_colexes_iter.next().expect("Programming mistake: merged colex iter has fewer elements than DBG notes");
+                let merged_colex = merged_colexes_iter.next().expect("Programming mistake: merged colex iter has fewer elements than DBG nodes");
 
                 let set_id = if let Some(filter) = &self.filter {
                     if !filter.get(merged_colex) {
@@ -317,9 +317,11 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for MergedElementGenerator<'a, CSS> {
 
     fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
+        self.process_dbg(self.dbg1, self.coloring1, 0, &callback, n_threads);
+        self.process_dbg(self.dbg1, self.coloring1, self.coloring1.get_set_storage().n_colors(), &callback, n_threads);
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-        todo!()
+        self.filter = Some(filter);
     }
 }
