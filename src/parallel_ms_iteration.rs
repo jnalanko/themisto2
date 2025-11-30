@@ -264,12 +264,12 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
 }
 
 pub struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
-    merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
-    coloring1: &'a CompactColexKmers<CSS>,
-    coloring2: &'a CompactColexKmers<CSS>,
-    dbg1: &'a Dbg<'a, SubsetMatrix>,
-    dbg2: &'a Dbg<'a, SubsetMatrix>,
-    filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
+    pub merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
+    pub coloring1: &'a CompactColexKmers<CSS>,
+    pub coloring2: &'a CompactColexKmers<CSS>,
+    pub dbg1: &'a Dbg<'a, SubsetMatrix>,
+    pub dbg2: &'a Dbg<'a, SubsetMatrix>,
+    pub filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
 }
 
 impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
@@ -305,7 +305,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 
                 let cs = coloring.colex_to_set(colex);
                 for color in cs.iter() {
-                    callback(SetElement{set_id: set_id, color: color + color_offset}) 
+                    callback(SetElement{set_id, color: color + color_offset}) 
                 }
             }
         }, n_threads);
