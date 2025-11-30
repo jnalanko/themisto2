@@ -183,7 +183,12 @@ fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(color
         NotSampled,
         Absent,
     }
+
+    let bar = indicatif::ProgressBar::new(merged_len as u64);
     for merged_colex in 0..merged_len {
+        if merged_colex % 10000 == 0 {
+            bar.inc(merged_colex as u64);
+        }
         if !merge_plan.is_dummy[merged_colex] {
             let c1 = if !merge_plan.s1[merged_colex] {
                 Case::Absent
@@ -282,6 +287,7 @@ fn compute_color_id_pairs_and_merged_unitig_sampling<CSS: ColorSetStorage>(color
         colex1 += merge_plan.s1[merged_colex] as usize;
         colex2 += merge_plan.s2[merged_colex] as usize;
     }
+    bar.finish();
 
     (PartitionedReadOnlyIdMap::new(new_id_map), color_set_sample_marks)
 
