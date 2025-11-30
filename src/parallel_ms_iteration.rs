@@ -1,4 +1,4 @@
-use std::{collections::{hash_set::IntoIter, HashSet}, path::PathBuf};
+use std::{collections::{hash_set::IntoIter, HashSet}, ops::Sub, path::PathBuf};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
 use sbwt::{dbg::Dbg, reverse_complement_in_place, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
@@ -273,12 +273,13 @@ struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
     filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
 }
 
-impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for MergedElementGenerator<'a, CSS> {
-    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        let si1 = StreamingIndex::new(&self.coloring1.sbwt(), self.coloring1.lcs());
+impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
+
+    fn process_dbg<'b>(&'b self, dbg: &Dbg<'a, SubsetMatrix>, coloring: &CompactColexKmers<CSS>, color_offset: usize, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
+        let si = StreamingIndex::new(&coloring.sbwt(), coloring.lcs());
         let k = self.merged_sbwt.k();
-        self.dbg1.iter_unitigs_with_callback(|nodes1, unitig1| {
-            let mut merged_colexes_iter = si1.matching_statistics_iter(&unitig1)
+        dbg.iter_unitigs_with_callback(|nodes, unitig| {
+            let mut merged_colexes_iter = si.matching_statistics_iter(&unitig)
             .skip(k-1)
             .map(|(match_len, range)| {
                 assert!(match_len == k, "k-mer not found in merged sbwt"); // TODO: print which k-mer it is
@@ -286,8 +287,8 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Merged
                 range.start
             });
 
-            for node1 in nodes1 {
-                let colex1 = node1.id;
+            for node in nodes {
+                let colex = node.id;
                 let merged_colex = merged_colexes_iter.next().expect("Programming mistake: merged colex iter has fewer elements than DBG notes");
 
                 let set_id = if let Some(filter) = &self.filter {
@@ -302,12 +303,20 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Merged
                     merged_colex // No filter
                 };
 
-                let cs = self.coloring1.colex_to_set(colex1);
+                let cs = coloring.colex_to_set(colex);
                 for color in cs.iter() {
-                    callback(SetElement{ set_id: set_id, color }) 
+                    callback(SetElement{set_id: set_id, color: color + color_offset}) 
                 }
             }
         }, n_threads);
+
+    }
+
+}
+
+impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for MergedElementGenerator<'a, CSS> {
+
+    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
