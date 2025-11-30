@@ -125,3 +125,199 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
 
     CompactColexKmers::<CSS>::new(merged_sbwt, merged_sbwt_lcs, colex_map, css, Some(&color_names))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use jseqio::seq_db::SeqDB;
+    use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
+    use simple_sds_sbwt::ops::{BitVec, Rank};
+
+    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, hash_and_encode_distinct_sets, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
+
+    use super::CompactColexKmers;
+
+
+    #[cfg(test)]
+    pub(crate) fn gen_random_dna_string(len: usize, seed: u64) -> Vec<u8> {
+        use rand_chacha::rand_core::{RngCore, SeedableRng};
+
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(seed);
+        (0..len).map(|_| { 
+            match rng.next_u64() % 4 {
+                0 => b'A',
+                1 => b'C',
+                2 => b'G',
+                3 => b'T',
+                _ => panic!("Impossible")
+            }
+        }).collect()
+    }
+
+    fn build_color_sets<CSS: ColorSetStorage>(sbwt1: &SbwtIndex<SubsetMatrix>, lcs1: &LcsArray, dbs1: Vec<SeqDB>, n_threads: usize) 
+    -> (Vec<usize>, CSS){
+        let n_colors_1 = dbs1.len();
+        let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
+
+        let iter_of_iters_1 = (0..sbwt1.n_sets()).into_iter().map(|colex| bms1.get_set_view(colex).iter());
+        let colex_to_css_1 = *CSS::new_from_iter_of_iters(iter_of_iters_1, n_colors_1);
+
+        let (distinct_css_1, set_to_id_1) = hash_and_encode_distinct_sets(&colex_to_css_1, n_colors_1);
+        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(|colex| {
+            set_to_id_1[&colex_to_css_1.get_set_view(colex)]
+        }).collect(); 
+
+        (colex_to_id, distinct_css_1)
+    }
+
+    #[test]
+    fn test_merge() {
+
+        if std::env::var("RUST_LOG").is_err() {
+            std::env::set_var("RUST_LOG", "info")
+        }
+        env_logger::init();
+
+        let n_threads = 3;
+
+        for k in 3_usize..10_usize { // k < 3 does not work because construction uses 3-mer binning.
+
+            let input_seqs_1: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (i + k.pow(4)) as u64)).collect();
+            let input_seqs_2: Vec<Vec<u8>> = (0..10).map(|i| gen_random_dna_string(20, (123456 + i + k.pow(4)) as u64)).collect();
+
+            let mut all_input_seq_slices = Vec::<&[u8]>::new();
+            all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
+            all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
+
+            let mut all_input_seqs: Vec<Vec<u8>> = all_input_seq_slices.iter().map(|s| s.to_vec()).collect();
+
+            let mut dbs1 = Vec::<SeqDB>::new();
+            let mut dbs2 = Vec::<SeqDB>::new();
+            let mut dbs_both = Vec::<SeqDB>::new();
+            for seq in input_seqs_1.iter() {
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs1.push(db);
+
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs_both.push(db);
+            }
+            for seq in input_seqs_2.iter() {
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs2.push(db);
+
+                let mut db = SeqDB::new();
+                db.push_seq(seq);
+                dbs_both.push(db);
+            }
+
+            let (mut sbwt1, lcs1) = sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(false)
+                .k(k)
+                .build_lcs(true)
+                .n_threads(3)
+                .precalc_length(5)
+                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
+            .run_from_vecs(&input_seqs_1);
+
+            let (mut sbwt2, lcs2) = sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(false)
+                .k(k)
+                .build_lcs(true)
+                .n_threads(3)
+                .precalc_length(5)
+                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
+            .run_from_vecs(&input_seqs_2);
+
+            let (mut sbwt_both, lcs_both) = sbwt::SbwtIndexBuilder::new()
+                .add_rev_comp(false)
+                .k(k)
+                .build_lcs(true)
+                .n_threads(3)
+                .precalc_length(5)
+                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
+            .run_from_slices(&all_input_seq_slices);
+
+            sbwt1.build_select();
+            sbwt2.build_select();
+            sbwt_both.build_select();
+
+            let sbwt1 = Arc::new(sbwt1);
+            let sbwt2 = Arc::new(sbwt2);
+            let sbwt_both = Arc::new(sbwt_both);
+
+            let lcs1 = lcs1.unwrap();
+            let lcs2 = lcs2.unwrap();
+            let lcs_both = lcs_both.unwrap();
+
+
+            let sample_distance = 3;
+
+            let (colex_to_id_1, storage_1) = build_color_sets::<SparseDenseStorage>(&sbwt1, &lcs1, dbs1, n_threads); 
+            let (colex_to_id_2, storage_2) = build_color_sets::<SparseDenseStorage>(&sbwt2, &lcs2, dbs2, n_threads); 
+            let (colex_to_id_both, storage_both)= build_color_sets::<SparseDenseStorage>(&sbwt_both, &lcs_both, dbs_both, n_threads); 
+            
+            let key_kmers_1 = mark_key_kmers(&sbwt1, &lcs1, sample_distance, VecVecSeqStream::new(input_seqs_1.clone()), n_threads);
+            let key_kmers_2 = mark_key_kmers(&sbwt2, &lcs2, sample_distance, VecVecSeqStream::new(input_seqs_2.clone()), n_threads);
+            let key_kmers_both = mark_key_kmers(&sbwt_both, &lcs_both, sample_distance, VecVecSeqStream::new(all_input_seqs.clone()), n_threads);
+
+            let sampled_ids_1: Vec<usize> = colex_to_id_1.iter().enumerate().filter(|(i, _)| key_kmers_1[*i]).map(|(_,x)| *x).collect();
+            let sampled_ids_2: Vec<usize> = colex_to_id_2.iter().enumerate().filter(|(i, _)| key_kmers_2[*i]).map(|(_,x)| *x).collect();
+            let sampled_ids_both: Vec<usize> = colex_to_id_both.iter().enumerate().filter(|(i, _)| key_kmers_both[*i]).map(|(_,x)| *x).collect();
+
+            assert!(key_kmers_1.count_ones() == sampled_ids_1.len());
+            let mut key_kmers_1 = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_1);
+            let mut key_kmers_2 = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_2);
+            let mut key_kmers_both = crate::util::bitvec_to_simple_sds_bitvec(key_kmers_both);
+
+            key_kmers_1.enable_rank();
+            key_kmers_2.enable_rank();
+            key_kmers_both.enable_rank();
+
+            let colex_map_1 = ColexToColorSetMap{
+                sbwt: sbwt1.clone(),
+                sampling: key_kmers_1,
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_1),
+            };
+
+            let colex_map_2 = ColexToColorSetMap{
+                sbwt: sbwt2.clone(),
+                sampling: key_kmers_2,
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_2),
+            };
+
+            let colex_map_both = ColexToColorSetMap{
+                sbwt: sbwt_both.clone(),
+                sampling: key_kmers_both,
+                color_set_ids: CompactIntVec::from_vec(sampled_ids_both),
+            };
+
+            let ccc1 = CompactColexKmers::new(sbwt1, lcs1, colex_map_1, storage_1, None);
+            let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2, None);
+            let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both, None);
+
+            let ccc_merged = super::new_merge(ccc1, ccc2, true, n_threads);
+            let sbwt_merged = &ccc_merged.sbwt();
+
+            for colex in 0..ccc_both.sbwt().n_sets() {
+                let kmer = ccc_both.sbwt().access_kmer(colex);
+
+                if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
+                    let true_colors: Vec<usize> = ccc_both.colex_to_set(colex).iter().collect();
+                    let range = sbwt_merged.search(&kmer).unwrap();
+                    assert_eq!(range.len(), 1);
+                    let colex_merged = range.start;
+                    //let merged_colors = ccc_merged.colex_to_set(colex_merged).as_bitvec(ccc_both.n_colors);
+                    let merged_colors: Vec<usize> = ccc_merged.colex_to_set(colex_merged).iter().collect();
+
+                    eprintln!("{} {} {:?} {:?} {} {}", colex, String::from_utf8_lossy(&kmer), true_colors, sbwt_merged.search(&kmer), ccc_merged.get_map().sampling.get(colex_merged), ccc_merged.colex_to_set_id(colex_merged));
+                    assert_eq!(true_colors, merged_colors);
+                }
+
+            }
+        }
+    }
+}
