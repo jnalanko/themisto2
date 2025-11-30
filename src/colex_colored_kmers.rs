@@ -569,7 +569,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.color_names
     }
 
-    fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], _unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
+    pub fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], _unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
         let mut subunitig_color_set_ids: Vec<usize> = vec![];
         let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
         let mut current_run_set_id: Option<usize> =  None;

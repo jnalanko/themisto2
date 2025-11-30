@@ -4,31 +4,43 @@ use sbwt::{dbg::Dbg, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
 
-fn mark_new_key_kmers<CSS: ColorSetStorage>(coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_sbwt_lcs: &LcsArray, n_threads: usize){
-    let si = StreamingIndex::new(&merged_sbwt, &merged_sbwt_lcs);
+fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, key_kmer_marks: &AtomicBitmap, n_threads: usize) {
 
+    let k = merged_sbwt.k();
+    assert_eq!(k, coloring.get_k());
+
+    log::info!("Initializing DBG 1");
+    let dbg = Dbg::new(&coloring.sbwt(), Some(&coloring.lcs()), n_threads);
+
+    log::info!("Iterating unitigs");
+    dbg.iter_unitigs_with_callback(|nodes, unitig|{
+        assert!(unitig.len() >= k);
+        let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
+        let (_, subunitig_ranges) = coloring.break_to_colored_subunitigs(&unitig_colex_ranks, unitig);
+
+        for subunitig_range in subunitig_ranges {
+            // (s,e) = (start of first k-mer, start of the k-mer after the last k-mer)
+            let (s,e) = (subunitig_range.start, subunitig_range.end); 
+            assert!(s < e);
+            let last_kmer = &unitig[e-1..e-1+k];
+            let merged_colex = merged_sbwt.search(last_kmer);
+            let merged_colex = merged_colex.unwrap_or_else(|| panic!("k-mer from DBG1 not found in merged SBWT: {:?}", String::from_utf8_lossy(last_kmer)));
+            assert!(merged_colex.len() == 1);
+            key_kmer_marks.set(merged_colex.start, true);
+        }
+    }, n_threads);
+}
+
+fn mark_new_key_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, n_threads: usize) -> bitvec::vec::BitVec {
     let k = merged_sbwt.k();
     assert_eq!(k, coloring1.get_k());
     assert_eq!(k, coloring2.get_k());
 
-    log::info!("Initializing DBG 1");
-    let dbg1 = Dbg::new(&coloring1.sbwt(), Some(&coloring1.lcs()), n_threads);
-
-    log::info!("Initializing DBG 2");
-    let dbg2 = Dbg::new(&coloring2.sbwt(), Some(&coloring2.lcs()), n_threads);
-
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
+    mark_key_kmers_for(&coloring1, &merged_sbwt, &key_kmer_marks, n_threads);
+    mark_key_kmers_for(&coloring2, &merged_sbwt, &key_kmer_marks, n_threads);
 
-    log::info!("Iterating unitigs 1");
-    dbg1.iter_unitigs_with_callback(|_nodes, unitig|{
-        assert!(unitig.len() >= k);
-        let last_kmer = &unitig[unitig.len()-k..];
-        let merged_colex = merged_sbwt.search(last_kmer);
-        let merged_colex = merged_colex.unwrap_or_else(|| panic!("k-mer from DBG1 not found in merged SBWT: {:?}", String::from_utf8_lossy(last_kmer)));
-        assert!(merged_colex.len() == 1);
-        key_kmer_marks.set(merged_colex.start, true);
-    }, n_threads);
-
+    key_kmer_marks.into_bitvec()
 }
 
 pub fn new_merge<CSS: ColorSetStorage>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, n_threads: usize) -> CompactColexKmers<CSS> {
