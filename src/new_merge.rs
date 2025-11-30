@@ -72,9 +72,9 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
 
     log::info!("Initializing DBG for the merged SBWT");
-    let dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
+    let merged_dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
 
-    let new_key_kmer_marks = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, n_threads);
+    let new_key_kmer_marks = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_dbg, n_threads);
 
     todo!();
 }
