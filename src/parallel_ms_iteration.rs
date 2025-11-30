@@ -265,6 +265,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
 
 pub struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
     pub merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
+    pub merged_lcs: &'a LcsArray,
     pub coloring1: &'a CompactColexKmers<CSS>,
     pub coloring2: &'a CompactColexKmers<CSS>,
     pub dbg1: &'a Dbg<'a, SubsetMatrix>,
@@ -275,7 +276,7 @@ pub struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
 impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 
     fn process_dbg<'b>(&'b self, dbg: &Dbg<'a, SubsetMatrix>, coloring: &CompactColexKmers<CSS>, color_offset: usize, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        let si = StreamingIndex::new(&coloring.sbwt(), coloring.lcs());
+        let si = StreamingIndex::new(&self.merged_sbwt, &self.merged_lcs);
         let k = self.merged_sbwt.k();
         assert!(self.merged_sbwt.k() == k);
         dbg.iter_unitigs_with_callback(|nodes, unitig| {

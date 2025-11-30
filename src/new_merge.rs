@@ -86,6 +86,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let random_seed = 123123; // Todo: be more random
     let gen = MergedElementGenerator {
         merged_sbwt: &merged_sbwt,
+        merged_lcs: &merged_sbwt_lcs,
         coloring1: &coloring1,
         coloring2: &coloring2,
         dbg1: &dbg1,
@@ -99,6 +100,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
     let gen = MergedElementGenerator {
         merged_sbwt: &merged_sbwt,
+        merged_lcs: &merged_sbwt_lcs,
         coloring1: &coloring1,
         coloring2: &coloring2,
         dbg1: &dbg1,
