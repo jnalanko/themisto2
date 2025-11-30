@@ -5,47 +5,80 @@ use simple_sds_sbwt::ops::{BitVec, Rank};
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
 
-fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
+fn mark_kmer(kmer: &[u8], sbwt: &SbwtIndex<SubsetMatrix>, marks: &AtomicBitmap) {
+    let colex = sbwt.search(kmer);
+    let colex = colex.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(kmer)));
+    assert!(colex.len() == 1);
+    marks.set(colex.start, true);
+}
+
+fn mark_in_neighbors<'a>(kmer: &[u8], sbwt: &'a SbwtIndex<SubsetMatrix>, dbg: &Dbg<'a, SubsetMatrix>, marks: &AtomicBitmap) {
+    let colex = sbwt.search(kmer);
+    let colex = colex.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(kmer)));
+    assert!(colex.len() == 1);
+    let colex = colex.start;
+
+    let mut in_neighbor_buf = Vec::<(Node, u8)>::new(); // TODO: avoid this allocation
+    dbg.push_in_neighbors(Node{id: colex}, &mut in_neighbor_buf);
+    for (in_node, _) in in_neighbor_buf.iter() {
+        marks.set(in_node.id, true);
+    }
+}
+
+fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_kmers_before: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
 
     let k = merged_sbwt.k();
     assert_eq!(k, coloring.get_k());
 
     log::info!("Initializing DBG");
     let dbg = Dbg::new(&coloring.sbwt(), Some(&coloring.lcs()), n_threads);
+    let visited_kmers_now = AtomicBitmap::new(merged_sbwt.n_sets());
 
     log::info!("Iterating unitigs");
     dbg.iter_unitigs_with_callback(|nodes, unitig|{
         assert!(unitig.len() >= k);
         let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
         let (_, subunitig_ranges) = coloring.break_to_colored_subunitigs(&unitig_colex_ranks, unitig);
-        let mut in_neighbor_buf = Vec::<(Node, u8)>::new(); // TODO: avoid this allocation
+
+        let mut prev_was_visited = false;
+
+        for kmer_start in 0..nodes.len() {
+            let kmer_colex = nodes[kmer_start].id;
+            let visited = visited_kmers_before.get(kmer_colex);
+            if visited {
+                if !prev_was_visited {
+                    // Start of a new colored subunitig
+                    // -> Mark all in-neighbors for sampling
+                    todo!();
+                } else {
+                    // Extending the colored subunitig -> no need to mark
+                }
+            } else { // Not visited
+                if prev_was_visited {
+                    // One past the end of a color subunitig
+                    // -> mark previous node for sampling
+                    todo!();
+                } else{
+                    // Extending a colored subunitig without interference 
+                    // from previous colors -> no need to mark
+                }
+            }
+            prev_was_visited = visited;
+        }
 
         for subunitig_range in subunitig_ranges {
             // (s,e) = (start of first k-mer, start of the k-mer after the last k-mer)
             let (s,e) = (subunitig_range.start, subunitig_range.end); 
             assert!(s < e);
             let last_kmer = &unitig[e-1..e-1+k];
-            let merged_colex_last = merged_sbwt.search(last_kmer);
-            let merged_colex_last = merged_colex_last.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(last_kmer)));
-            assert!(merged_colex_last.len() == 1);
-            key_kmer_marks.set(merged_colex_last.start, true);
 
             let first_kmer = &unitig[s..s+k];
-            let merged_colex_first = merged_sbwt.search(first_kmer);
-            let merged_colex_first = merged_colex_first.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(first_kmer)));
-            assert!(merged_colex_first.len() == 1);
-            let merged_colex_first = merged_colex_first.start;
-
-            in_neighbor_buf.clear();
-            merged_dbg.push_in_neighbors(Node{id: merged_colex_first}, &mut in_neighbor_buf);
-            for (in_node, _) in in_neighbor_buf.iter() {
-               key_kmer_marks.set(in_node.id, true);
-            }
         }
     }, n_threads);
 
-    dbg
+    todo!(); // Update visited marks
 
+    dbg
 }
 
 fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a CompactColexKmers<CSS>, coloring2: &'b CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, n_threads: usize) -> (bitvec::vec::BitVec, Dbg<'a, SubsetMatrix>, Dbg<'b, SubsetMatrix>) {
@@ -258,6 +291,7 @@ mod tests {
 
 
             let sample_distance = 3;
+            //let sample_distance = 1;
 
             let (colex_to_id_1, storage_1) = build_color_sets::<SparseDenseStorage>(&sbwt1, &lcs1, dbs1, n_threads); 
             let (colex_to_id_2, storage_2) = build_color_sets::<SparseDenseStorage>(&sbwt2, &lcs2, dbs2, n_threads); 

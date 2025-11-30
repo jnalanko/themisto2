@@ -306,7 +306,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 
                 let cs = coloring.colex_to_set(colex);
                 for color in cs.iter() {
-                    println!("Callback {} {}", set_id, color + color_offset);
+//                    println!("Callback {} {}", set_id, color + color_offset);
                     callback(SetElement{set_id, color: color + color_offset}) 
                 }
             }
