@@ -100,7 +100,7 @@ pub enum Subcommands {
         #[arg(short, required = true)]
         k: usize,
 
-        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
         sample_distance: usize,
 
         #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
@@ -170,6 +170,9 @@ pub enum Subcommands {
         #[arg(long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
+        sample_distance: usize,
+
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
 
@@ -188,7 +191,7 @@ pub enum Subcommands {
         #[arg(long = "index-type")]
         index_type: ColoringType,
 
-        #[arg(long = "sample-distance", short = 'd', default_value = "1")]
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
         sample_distance: usize,
 
         #[arg(long = "temp-dir", required = true)]
@@ -458,7 +461,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS
     }
 }
 
-fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool) {
+fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool, sample_distance: usize) {
     let n_rounds = (infiles.len().next_power_of_two()).trailing_zeros() as usize;
     let mut current_files: Vec<PathBuf> = infiles.to_vec();
     for round in 0..n_rounds {
@@ -479,13 +482,13 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 match (colors1, colors2) {
                     (IndexVariant::BitmapIndex(c1), IndexVariant::BitmapIndex(c2)) => {
                         log::info!("Merging bitmap indexes");
-                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, n_threads);
+                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, sample_distance, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::BitmapIndex(merged_colored_kmers), &mut out);
                     },
                     (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
                         log::info!("Merging sparse-dense indexes");
-                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, n_threads);
+                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, sample_distance, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
                     },
@@ -615,9 +618,9 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx),
             };
         },
-        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode } => {
+        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode);
+            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode, sample_distance);
         },
         Subcommands::Import { sbwt: sbwt_path, color_dump_prefix, out: out_path, n_threads, temp_dir, index_type, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());

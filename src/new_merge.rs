@@ -1,5 +1,6 @@
 use std::{cmp::max, sync::Arc};
 
+use rand::seq::index::sample;
 use sbwt::{dbg::{Dbg, Node}, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
@@ -91,7 +92,7 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
     dbg
 }
 
-fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a CompactColexKmers<CSS>, coloring2: &'b CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_lcs: &LcsArray, merged_dbg: &Dbg<'_, SubsetMatrix>, n_threads: usize) -> (bitvec::vec::BitVec, Dbg<'a, SubsetMatrix>, Dbg<'b, SubsetMatrix>) {
+fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a CompactColexKmers<CSS>, coloring2: &'b CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_lcs: &LcsArray, merged_dbg: &Dbg<'_, SubsetMatrix>, sample_distance: usize, n_threads: usize) -> (bitvec::vec::BitVec, Dbg<'a, SubsetMatrix>, Dbg<'b, SubsetMatrix>) {
     let k = merged_sbwt.k();
     assert_eq!(k, coloring1.get_k());
     assert_eq!(k, coloring2.get_k());
@@ -99,9 +100,13 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
 
     // Mark kmers around branches in the DBG. This part is independent of coloring
-    merged_dbg.iter_unitigs_with_callback(|_nodes, unitig|{
+    merged_dbg.iter_unitigs_with_callback(|nodes, unitig|{
         mark_in_neighbors(&unitig[0..k], merged_sbwt, &merged_dbg, &key_kmer_marks);
         mark_kmer(&unitig[unitig.len()-k..], merged_sbwt, &key_kmer_marks);
+
+        for v in nodes.iter().rev().step_by(sample_distance) {
+            key_kmer_marks.set(v.id,  true);
+        }
     }, n_threads);
     
     // Mark around starts and ends of colored subunitigs
@@ -114,7 +119,7 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     (key_kmer_marks.into_bitvec(), dbg1, dbg2)
 }
 
-pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::MergeInterleaving::new(&(*coloring1.sbwt()), &(*coloring2.sbwt()), optimize_peak_ram, n_threads);
@@ -134,7 +139,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let merged_dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
 
     log::info!("=== Phase 1/3: marking new key k-mers ===");
-    let (new_key_kmer_marks, dbg1, dbg2) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_sbwt_lcs, &merged_dbg, n_threads);
+    let (new_key_kmer_marks, dbg1, dbg2) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_sbwt_lcs, &merged_dbg, sample_distance, n_threads);
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
@@ -357,7 +362,7 @@ mod tests {
             let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2, None);
             let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both, None);
 
-            let ccc_merged = super::new_merge(ccc1, ccc2, true, n_threads);
+            let ccc_merged = super::new_merge(ccc1, ccc2, true, 5, n_threads);
             let sbwt_merged = &ccc_merged.sbwt();
 
             for colex in 0..ccc_both.sbwt().n_sets() {
