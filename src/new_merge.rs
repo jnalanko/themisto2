@@ -70,7 +70,8 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let sbwt1 = (*coloring1.sbwt()).clone(); // Todo: avoid clone. Currently unavoidable because we have just an Arc to the SBWT, but the merge needs an owned value.
     let sbwt2 = (*coloring2.sbwt()).clone(); // Todo: avoid clone. Currently unavoidable because we have just an Arc to the SBWT, but the merge needs an owned value.
     let precalc_len = max(coloring1.sbwt().get_lookup_table().prefix_length, coloring2.sbwt().get_lookup_table().prefix_length);
-    let merged_sbwt = sbwt::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
+    let mut merged_sbwt = sbwt::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
+    merged_sbwt.build_select();
 
     log::info!("Building the LCS array for the merged SBWT");
     let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
