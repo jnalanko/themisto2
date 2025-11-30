@@ -40,32 +40,8 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
         let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
         let (_, subunitig_ranges) = coloring.break_to_colored_subunitigs(&unitig_colex_ranks, unitig);
 
-        let mut prev_was_visited = false;
-
-        for kmer_start in 0..nodes.len() {
-            let kmer_colex = nodes[kmer_start].id;
-            let visited = visited_kmers_before.get(kmer_colex);
-            if visited {
-                if !prev_was_visited {
-                    // Start of a new colored subunitig
-                    // -> Mark all in-neighbors for sampling
-                    todo!();
-                } else {
-                    // Extending the colored subunitig -> no need to mark
-                }
-            } else { // Not visited
-                if prev_was_visited {
-                    // One past the end of a color subunitig
-                    // -> mark previous node for sampling
-                    todo!();
-                } else{
-                    // Extending a colored subunitig without interference 
-                    // from previous colors -> no need to mark
-                }
-            }
-            prev_was_visited = visited;
-        }
-
+        // Mark last k-mer of each colored subunitig, and the in-neighbors of
+        // the first k-mer of each colored subunitig.
         for subunitig_range in subunitig_ranges {
             // (s,e) = (start of first k-mer, start of the k-mer after the last k-mer)
             let (s,e) = (subunitig_range.start, subunitig_range.end); 
@@ -77,6 +53,28 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             let first_kmer = &unitig[s..s+k];
             mark_in_neighbors(first_kmer, &merged_sbwt, &merged_dbg, &key_kmer_marks);
         }
+
+        // Mark last k-mer of every run of k-mers that were visited before, and
+        // the in-neighbors of the first k-mer of every run of k-mers that were
+        // visited before.
+        let mut prev_was_visited = false;
+        for kmer_start in 0..nodes.len() {
+            let kmer_colex = nodes[kmer_start].id;
+            let visited = visited_kmers_before.get(kmer_colex);
+            if visited & !prev_was_visited {
+                // Start of a new colored subunitig
+                // -> Mark all in-neighbors for sampling
+                mark_in_neighbors(&unitig[kmer_start..kmer_start+k], &merged_sbwt, &merged_dbg, &key_kmer_marks);
+            } else if !visited && prev_was_visited {
+                // One past the end of a color subunitig
+                // -> mark previous node for sampling
+                assert!(kmer_start > 0);
+                mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], &merged_sbwt, &key_kmer_marks);
+            }
+            prev_was_visited = visited;
+        }
+
+
     }, n_threads);
 
     todo!(); // Update visited marks
