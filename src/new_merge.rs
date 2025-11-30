@@ -9,7 +9,7 @@ fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactCole
     let k = merged_sbwt.k();
     assert_eq!(k, coloring.get_k());
 
-    log::info!("Initializing DBG 1");
+    log::info!("Initializing DBG");
     let dbg = Dbg::new(&coloring.sbwt(), Some(&coloring.lcs()), n_threads);
 
     log::info!("Iterating unitigs");
