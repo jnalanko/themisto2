@@ -32,6 +32,7 @@ mod int_vec;
 mod finimizers;
 mod util;
 mod merge;
+mod new_merge;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
