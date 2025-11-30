@@ -1,10 +1,10 @@
 use std::{collections::{hash_set::IntoIter, HashSet}, path::PathBuf};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
-use sbwt::{reverse_complement_in_place, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
+use sbwt::{dbg::Dbg, reverse_complement_in_place, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage, io::ChainedInputStream, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::ChainedInputStream, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
@@ -263,15 +263,51 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
     }
 }
 
-struct ElementGeneratorFromColoring<'a, CSS: ColorSetStorage + Sync + Send> {
-    coloring: &'a CompactColexKmers<CSS>,
+struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
+    merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
+    merged_sbwt_lcs: &'a LcsArray,
+    coloring1: &'a CompactColexKmers<CSS>,
+    coloring2: &'a CompactColexKmers<CSS>,
+    dbg1: &'a Dbg<'a, SubsetMatrix>,
+    dbg2: &'a Dbg<'a, SubsetMatrix>,
+    filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
 }
 
-impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for ElementGeneratorFromColoring<'a, CSS> {
+impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for MergedElementGenerator<'a, CSS> {
     fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        (0..self.coloring.sbwt().n_sets()).into_par_iter().for_each(|colex| {
-            todo!();
-        });
+        let si1 = StreamingIndex::new(&self.coloring1.sbwt(), self.coloring1.lcs());
+        let k = self.merged_sbwt.k();
+        self.dbg1.iter_unitigs_with_callback(|nodes1, unitig1| {
+            let mut merged_colexes_iter = si1.matching_statistics_iter(&unitig1)
+            .skip(k-1)
+            .map(|(match_len, range)| {
+                assert!(match_len == k, "k-mer not found in merged sbwt"); // TODO: print which k-mer it is
+                assert!(range.len() == 1);
+                range.start
+            });
+
+            for node1 in nodes1 {
+                let colex1 = node1.id;
+                let merged_colex = merged_colexes_iter.next().expect("Programming mistake: merged colex iter has fewer elements than DBG notes");
+
+                let set_id = if let Some(filter) = &self.filter {
+                    if !filter.get(merged_colex) {
+                        continue // Do not report this
+                    } else {
+                        // Assign new id
+                        let new_id = filter.rank(merged_colex);
+                        new_id
+                    }
+                } else {
+                    merged_colex // No filter
+                };
+
+                let cs = self.coloring1.colex_to_set(colex1);
+                for color in cs.iter() {
+                    callback(SetElement{ set_id: set_id, color }) 
+                }
+            }
+        }, n_threads);
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
