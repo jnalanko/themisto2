@@ -694,6 +694,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         log::info!("Computing unitigs");
 
+        let bar = indicatif::ProgressBar::new(self.sbwt.n_sets() as u64);
         let n_unitigs = std::thread::scope(|scope| {
 
             // Channels of tuples of with these fields: 
@@ -707,6 +708,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
             // Create unitig search threads 
             let mut worker_handles = Vec::<_>::new();
+            let bar_ref = &bar;
             for thread_id in 0..n_threads { 
                 let worker_out_clone = worker_out.clone();
                 let handle = scope.spawn(move || {
@@ -718,6 +720,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                             worker_out_clone.send(self.search_unitig_from(v, dbg_ref)).unwrap();
                         }
                         colex += n_threads;
+                        if ((colex - thread_id)/n_threads) % 10000 == 0 {
+                            bar_ref.inc(10000);
+                        }
                     }
                     log::info!("Thread {} finished", thread_id);
                 });
@@ -773,10 +778,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             #[allow(clippy::let_and_return)] // It's renaming of the variable. Clearer this way.
             n_unitigs
         });
+        bar.finish();
 
         log::info!("Wrote {} unitigs", n_unitigs);
         n_unitigs
     }
+
 
     /// Same format as [crate::index_import].
     /// Select support must be built before calling this!
