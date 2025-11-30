@@ -109,9 +109,6 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     let dbg1 = mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
     let dbg2 = mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
 
-    for colex in 0..merged_sbwt.n_sets() {
-        eprintln!("{} {} {}", colex, String::from_utf8_lossy(&merged_sbwt.access_kmer(colex)), visited_marks.get(colex));
-    }
     assert_eq!(visited_marks.into_bitvec().count_ones(), merged_sbwt.n_kmers());
 
     (key_kmer_marks.into_bitvec(), dbg1, dbg2)
