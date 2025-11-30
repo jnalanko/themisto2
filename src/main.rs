@@ -479,13 +479,13 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 match (colors1, colors2) {
                     (IndexVariant::BitmapIndex(c1), IndexVariant::BitmapIndex(c2)) => {
                         log::info!("Merging bitmap indexes");
-                        let merged_colored_kmers = merge::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
+                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::BitmapIndex(merged_colored_kmers), &mut out);
                     },
                     (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
                         log::info!("Merging sparse-dense indexes");
-                        let merged_colored_kmers = merge::merge_compact_colorings(c1, c2, low_ram_mode, n_threads);
+                        let merged_colored_kmers = new_merge::new_merge(c1, c2, low_ram_mode, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
                     },
