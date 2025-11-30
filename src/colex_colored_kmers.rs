@@ -623,6 +623,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
         let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+        assert_eq!(fw_colex.len(), rc_colex.len());
 
         // Figure out color set id runs in the forward strand 
         let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
