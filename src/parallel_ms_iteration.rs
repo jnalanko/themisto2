@@ -1,10 +1,10 @@
 use std::{collections::{hash_set::IntoIter, HashSet}, path::PathBuf};
 
-use rayon::iter::{ParallelBridge as _, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
 use sbwt::{reverse_complement_in_place, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{io::ChainedInputStream, set_of_sets_construction::SetElement};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage, io::ChainedInputStream, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
@@ -260,5 +260,21 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
         self.filter = Some(filter)
+    }
+}
+
+struct ElementGeneratorFromColoring<'a, CSS: ColorSetStorage + Sync + Send> {
+    coloring: &'a CompactColexKmers<CSS>,
+}
+
+impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for ElementGeneratorFromColoring<'a, CSS> {
+    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
+        (0..self.coloring.sbwt().n_sets()).into_par_iter().for_each(|colex| {
+            todo!();
+        });
+    }
+
+    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+        todo!()
     }
 }
