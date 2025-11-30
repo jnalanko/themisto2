@@ -25,14 +25,13 @@ fn mark_in_neighbors<'a>(kmer: &[u8], sbwt: &'a SbwtIndex<SubsetMatrix>, dbg: &D
     }
 }
 
-fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_kmers_before: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
+fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
 
     let k = merged_sbwt.k();
     assert_eq!(k, coloring.get_k());
 
     log::info!("Initializing DBG");
     let dbg = Dbg::new(&coloring.sbwt(), Some(&coloring.lcs()), n_threads);
-    let visited_kmers_now = AtomicBitmap::new(merged_sbwt.n_sets());
 
     log::info!("Iterating unitigs");
     dbg.iter_unitigs_with_callback(|nodes, unitig|{
@@ -60,7 +59,9 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
         let mut prev_was_visited = false;
         for kmer_start in 0..nodes.len() {
             let kmer_colex = nodes[kmer_start].id;
-            let visited = visited_kmers_before.get(kmer_colex);
+            let visited = visited_marks.get(kmer_colex);
+            // Visited is true iff the k-mers was visited while processing some earlier coloring.
+
             if visited & !prev_was_visited {
                 // Start of a new colored subunitig
                 // -> Mark all in-neighbors for sampling
@@ -72,12 +73,15 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
                 mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], &merged_sbwt, &key_kmer_marks);
             }
             prev_was_visited = visited;
+
+            // Mark this k-mer as visited. Here we are modifying the same bitmap that we are accessing,
+            // but that is alright because we are iterating unitigs and hence this k-mer will not be
+            // encountered a second time while processing this coloring. So in the future if we find
+            // a visited-bit that is set to 1, then it must have been set during the processing of
+            // some previous coloring.
+            visited_marks.set(kmer_colex, true);
         }
-
-
     }, n_threads);
-
-    todo!(); // Update visited marks
 
     dbg
 }
@@ -88,8 +92,9 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     assert_eq!(k, coloring2.get_k());
 
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
-    let dbg1 = mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_dbg, &key_kmer_marks, n_threads);
-    let dbg2 = mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_dbg, &key_kmer_marks, n_threads);
+    let visited_marks = AtomicBitmap::new(merged_sbwt.n_sets());
+    let dbg1 = mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
+    let dbg2 = mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
 
     (key_kmer_marks.into_bitvec(), dbg1, dbg2)
 }
