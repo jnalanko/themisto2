@@ -104,7 +104,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
         coloring1: &coloring1,
         coloring2: &coloring2,
         dbg1: &dbg1,
-        dbg2: &dbg1,
+        dbg2: &dbg2,
         filter: None,
     };
         
