@@ -4,7 +4,7 @@ use sbwt::{dbg::{Dbg, Node}, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetM
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
 
-fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, n_threads: usize) {
+fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, n_threads: usize) {
 
     let k = merged_sbwt.k();
     assert_eq!(k, coloring.get_k());
@@ -36,7 +36,7 @@ fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactCole
             let merged_colex_first = merged_colex_first.start;
 
             in_neighbor_buf.clear();
-            dbg.push_in_neighbors(Node{id: merged_colex_first}, &mut in_neighbor_buf);
+            merged_dbg.push_in_neighbors(Node{id: merged_colex_first}, &mut in_neighbor_buf);
             for (in_node, _) in in_neighbor_buf.iter() {
                key_kmer_marks.set(in_node.id, true);
             }
@@ -44,14 +44,14 @@ fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactCole
     }, n_threads);
 }
 
-fn mark_new_key_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, n_threads: usize) -> bitvec::vec::BitVec {
+fn mark_new_key_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: &CompactColexKmers<CSS>, coloring2: &CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_dbg: &Dbg<'_, SubsetMatrix>, n_threads: usize) -> bitvec::vec::BitVec {
     let k = merged_sbwt.k();
     assert_eq!(k, coloring1.get_k());
     assert_eq!(k, coloring2.get_k());
 
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
-    mark_key_kmers_for(&coloring1, &merged_sbwt, &key_kmer_marks, n_threads);
-    mark_key_kmers_for(&coloring2, &merged_sbwt, &key_kmer_marks, n_threads);
+    mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_dbg, &key_kmer_marks, n_threads);
+    mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_dbg, &key_kmer_marks, n_threads);
 
     key_kmer_marks.into_bitvec()
 }
@@ -68,7 +68,11 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let precalc_len = max(coloring1.sbwt().get_lookup_table().prefix_length, coloring2.sbwt().get_lookup_table().prefix_length);
     let merged_sbwt = sbwt::merge(sbwt1, sbwt2, merge_plan, precalc_len, n_threads);
 
-    let merged_sbwt_len = LcsArray::from_sbwt(&merged_sbwt, n_threads);
+    log::info!("Building the LCS array for the merged SBWT");
+    let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
+
+    log::info!("Initializing DBG for the merged SBWT");
+    let dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
 
     let new_key_kmer_marks = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, n_threads);
 
