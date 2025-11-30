@@ -85,6 +85,9 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             // a visited-bit that is set to 1, then it must have been set during the processing of
             // some previous coloring.
             visited_marks.set(kmer_colex, true);
+
+            // DEBUG!!
+            //mark_kmer(&unitig[kmer_start..kmer_start+k], &merged_sbwt, &key_kmer_marks);
         }
     }, n_threads);
 
@@ -97,6 +100,12 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     assert_eq!(k, coloring2.get_k());
 
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
+    merged_dbg.iter_unitigs_with_callback(|_nodes, unitig|{
+        mark_in_neighbors(&unitig[0..k], merged_sbwt, &merged_dbg, &key_kmer_marks);
+        mark_kmer(&unitig[unitig.len()-k..], merged_sbwt, &key_kmer_marks);
+    }, n_threads);
+    
+    // Mark around starts and ends of colored subunitigs
     let visited_marks = AtomicBitmap::new(merged_sbwt.n_sets());
     let dbg1 = mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
     let dbg2 = mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
