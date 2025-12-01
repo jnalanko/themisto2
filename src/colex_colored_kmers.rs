@@ -693,6 +693,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let k = self.get_k();
 
         log::info!("Computing unitigs");
+        let n_unitig_searches = std::sync::atomic::AtomicUsize::new(0);
+        let n_unitig_searches_ref = &n_unitig_searches;
 
         let bar = indicatif::ProgressBar::new(self.sbwt.n_sets() as u64);
         let n_unitigs = std::thread::scope(|scope| {
@@ -717,11 +719,13 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     while colex < self.sbwt.n_sets() {
                         let v = Node { id: colex };
                         if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
+                            n_unitig_searches_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             worker_out_clone.send(self.search_unitig_from(v, dbg_ref)).unwrap();
                         }
                         colex += n_threads;
                         if ((colex - thread_id)/n_threads) % 10000 == 0 {
                             bar_ref.inc(10000);
+                            //eprintln!("number of unitig searches: {}", n_unitig_searches_ref.load(std::sync::atomic::Ordering::Relaxed));
                         }
                     }
                     log::info!("Thread {} finished", thread_id);
