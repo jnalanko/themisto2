@@ -266,6 +266,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
     let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
+    log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
