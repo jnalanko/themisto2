@@ -398,6 +398,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         }
         let mut sample_marks = simple_sds_sbwt::bit_vector::BitVector::from(sample_marks);
         sample_marks.enable_rank();
+        log::info!("Marked {:.2} % of all k-mers", sample_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
 
         log::info!("Reading distinct color sets");
         let color_set_stream = index_import::ColorSetDumpIterGenerator::new(color_dump);
