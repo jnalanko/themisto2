@@ -28,13 +28,13 @@ fn mark_in_neighbors<'a>(kmer: &[u8], sbwt: &'a SbwtIndex<SubsetMatrix>, dbg: &D
 
 fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_lcs: &LcsArray, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
 
-    let merged_si = StreamingIndex::new(&merged_sbwt, &merged_lcs);
+    let merged_si = StreamingIndex::new(merged_sbwt, merged_lcs);
 
     let k = merged_sbwt.k();
     assert_eq!(k, coloring.get_k());
 
     log::info!("Initializing DBG");
-    let dbg = Dbg::new(&coloring.sbwt(), Some(&coloring.lcs()), n_threads);
+    let dbg = Dbg::new(coloring.sbwt(), Some(coloring.lcs()), n_threads);
 
     log::info!("Iterating unitigs");
     dbg.iter_unitigs_with_callback(|nodes, unitig|{
@@ -50,17 +50,17 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             assert!(s < e);
 
             let last_kmer = &unitig[e-1..e-1+k];
-            mark_kmer(last_kmer, &merged_sbwt, &key_kmer_marks);
+            mark_kmer(last_kmer, merged_sbwt, key_kmer_marks);
 
             let first_kmer = &unitig[s..s+k];
-            mark_in_neighbors(first_kmer, &merged_sbwt, &merged_dbg, &key_kmer_marks);
+            mark_in_neighbors(first_kmer, merged_sbwt, merged_dbg, key_kmer_marks);
         }
 
         // Mark last k-mer of every run of k-mers that were visited before, and
         // the in-neighbors of the first k-mer of every run of k-mers that were
         // visited before.
         let mut prev_was_visited = false;
-        for (kmer_start, (match_len, colex_range)) in merged_si.matching_statistics_iter(&unitig).skip(k-1).enumerate() {
+        for (kmer_start, (match_len, colex_range)) in merged_si.matching_statistics_iter(unitig).skip(k-1).enumerate() {
             assert!(match_len == k);
             assert!(colex_range.len() == 1);
 
@@ -71,12 +71,12 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             if visited & !prev_was_visited {
                 // Start of a new colored subunitig
                 // -> Mark all in-neighbors for sampling
-                mark_in_neighbors(&unitig[kmer_start..kmer_start+k], &merged_sbwt, &merged_dbg, &key_kmer_marks);
+                mark_in_neighbors(&unitig[kmer_start..kmer_start+k], merged_sbwt, merged_dbg, key_kmer_marks);
             } else if !visited && prev_was_visited {
                 // One past the end of a colored subunitig
                 // -> mark previous node for sampling
                 assert!(kmer_start > 0);
-                mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], &merged_sbwt, &key_kmer_marks);
+                mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], merged_sbwt, key_kmer_marks);
             }
             prev_was_visited = visited;
 
@@ -101,7 +101,7 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
 
     // Mark kmers around branches in the DBG. This part is independent of coloring
     merged_dbg.iter_unitigs_with_callback(|nodes, unitig|{
-        mark_in_neighbors(&unitig[0..k], merged_sbwt, &merged_dbg, &key_kmer_marks);
+        mark_in_neighbors(&unitig[0..k], merged_sbwt, merged_dbg, &key_kmer_marks);
         mark_kmer(&unitig[unitig.len()-k..], merged_sbwt, &key_kmer_marks);
 
         for v in nodes.iter().rev().step_by(sample_distance) {
@@ -111,8 +111,8 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     
     // Mark around starts and ends of colored subunitigs
     let visited_marks = AtomicBitmap::new(merged_sbwt.n_sets());
-    let dbg1 = mark_key_kmers_for(&coloring1, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
-    let dbg2 = mark_key_kmers_for(&coloring2, &merged_sbwt, &merged_lcs, &merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
+    let dbg1 = mark_key_kmers_for(coloring1, merged_sbwt, merged_lcs, merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
+    let dbg2 = mark_key_kmers_for(coloring2, merged_sbwt, merged_lcs, merged_dbg, &key_kmer_marks, &visited_marks, n_threads);
 
     assert_eq!(visited_marks.into_bitvec().count_ones(), merged_sbwt.n_kmers());
 
@@ -122,7 +122,7 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
 pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
 
     log::info!("Computing the sbwt merge plan");
-    let merge_plan = sbwt::MergeInterleaving::new(&(*coloring1.sbwt()), &(*coloring2.sbwt()), optimize_peak_ram, n_threads);
+    let merge_plan = sbwt::MergeInterleaving::new(coloring1.sbwt(), coloring2.sbwt(), optimize_peak_ram, n_threads);
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
 
     log::info!("Merging SBWTs");
@@ -140,6 +140,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
 
     log::info!("=== Phase 1/3: marking new key k-mers ===");
     let (new_key_kmer_marks, dbg1, dbg2) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_sbwt_lcs, &merged_dbg, sample_distance, n_threads);
+    log::info!("Marked {:.2} % of all k-mers", new_key_kmer_marks.count_ones() as f64 / merged_sbwt.n_kmers() as f64 * 100.0);
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
