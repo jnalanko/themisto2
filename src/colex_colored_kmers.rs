@@ -528,14 +528,20 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
+        let mut buffer = Vec::<Option<usize>>::new();
+        self.push_color_set_ids_to_buffer(seq, &mut buffer);
+        buffer.into_iter().map(|opt| opt.map(|x| self.set_id_to_set(x))).collect()
+    }
+
+    // Does not clear the buffer
+    pub fn push_color_set_ids_to_buffer(&self, seq: &[u8], buffer: &mut Vec<Option<usize>>) {
         let k = self.sbwt.k();
         if seq.len() < k {
-            return vec![];
+            return;
         }
 
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
-        let mut set_views = Vec::<Option<CSS::SetView<'_>>>::with_capacity(seq.len()-k+1);
         let mut prev_set_id: Option<usize> = None;
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
             if len == k {
@@ -544,18 +550,16 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 let set_id = self.colex_to_set_id(colex);
                 if prev_set_id.is_some_and(|p| p == set_id) {
                     // Same as previous
-                    let prev = set_views.last().unwrap();
-                    set_views.push(prev.clone());
+                    let prev = buffer.last().unwrap();
+                    buffer.push(*prev);
                 } else {
-                    set_views.push(Some(self.set_id_to_set(set_id)));
+                    buffer.push(Some(set_id));
                 }
                 prev_set_id = Some(set_id);
             } else {
                 prev_set_id = None;
             }
         }
-
-        set_views
     }
 
     pub fn get_k(&self) -> usize {
@@ -570,7 +574,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.color_names
     }
 
-    pub fn break_to_colored_subunitigs<'a>(&self, unitig_colex_ranks: &[usize], _unitig_string: &'a [u8]) -> (Vec<usize>, Vec<Range<usize>>){
+    pub fn break_to_colored_subunitigs(&self, unitig_colex_ranks: &[usize], _unitig_string: &[u8]) -> (Vec<usize>, Vec<Range<usize>>){
         let mut subunitig_color_set_ids: Vec<usize> = vec![];
         let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
         let mut current_run_set_id: Option<usize> =  None;
