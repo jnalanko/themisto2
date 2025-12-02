@@ -173,7 +173,7 @@ impl ColexToColorSetMap {
     }
 
     fn colex_to_color_set_id(&self, colex: usize) -> usize {
-        let pos = self.walk_to_next_sample(colex);
+        let pos = self.walk_to_next_sample(colex).0;
         self.color_set_ids.get(self.sampling.rank(pos))
     }
 
