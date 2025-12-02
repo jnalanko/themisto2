@@ -214,7 +214,6 @@ fn kmers_in_nmer(k: usize, n: usize) -> usize {
 
 fn checksum_unitig_db(unitigs: &SeqDB, k: usize) -> ([u8; 20], usize) {
     let bar = indicatif::ProgressBar::new(unitigs.sequence_count() as u64);
-
     let par_fold = (0..unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
         let (unitig_checksum, _) = unitig_checksum(unitigs.get(i).seq, k);
         xor_into(&mut acc, &unitig_checksum);
@@ -225,7 +224,6 @@ fn checksum_unitig_db(unitigs: &SeqDB, k: usize) -> ([u8; 20], usize) {
         xor_into(&mut a, &b);
         a
     });
-
     bar.finish();
 
     let total_kmer_count: usize = (0..unitigs.sequence_count())
@@ -284,28 +282,37 @@ fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_sets: &[Vec<
     eprintln!("Hashing B color sets...");
     let B_color_set_hashes = B_color_sets.par_iter().map(|color_set| hash_color_set(color_set)).collect::<Vec<_>>();
 
-    let mut A_checksum = [0_u8; 20];
-    let mut B_checksum = [0_u8; 20];
-
     eprintln!("Computing A checksum...");
-    let A_bar = indicatif::ProgressBar::new(A_unitigs.sequence_count() as u64);
-    for rec in A_unitigs.iter() {
+    let bar = indicatif::ProgressBar::new(A_unitigs.sequence_count() as u64);
+    let par_fold = (0..A_unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let rec = A_unitigs.get(i);
         let color_set_hash = A_color_set_hashes[get_color_set_id(rec.head)];
         let checksum = checksum_unitig_kmers_and_colorsets(rec.seq, &color_set_hash, k);
-        xor_into(&mut A_checksum, &checksum);
-        A_bar.inc(1);
-    }
-    A_bar.finish();
+        xor_into(&mut acc, &checksum);
+        bar.inc(1);
+        acc
+    });
+    let A_checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+    bar.finish();
 
     eprintln!("Computing B checksum...");
-    let B_bar = indicatif::ProgressBar::new(B_unitigs.sequence_count() as u64);
-    for rec in B_unitigs.iter() {
+    let bar = indicatif::ProgressBar::new(B_unitigs.sequence_count() as u64);
+    let par_fold = (0..B_unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let rec = B_unitigs.get(i);
         let color_set_hash = B_color_set_hashes[get_color_set_id(rec.head)];
         let checksum = checksum_unitig_kmers_and_colorsets(rec.seq, &color_set_hash, k);
-        xor_into(&mut B_checksum, &checksum);
-        B_bar.inc(1);
-    }
-    B_bar.finish();
+        xor_into(&mut acc, &checksum);
+        bar.inc(1);
+        acc
+    });
+    let B_checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+    bar.finish();
 
     assert_eq!(A_checksum, B_checksum);
     println!("Checksums match: {:?}", A_checksum);
