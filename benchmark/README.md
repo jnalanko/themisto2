@@ -8,7 +8,9 @@ Three datasets:
 
 TODO: put the data somewhere, Zenodo?
 
-There is one subdirectory per testcase. The sequences go into the subsubdirectory seqs.
+There is one subdirectory per testcase. The genomes go into the subsubdirectory seqs.
+The number of genomes must be divisible by 2 because I'm splitting into parts with
+floor(n/2) files each at `setup.bash`.
 
 There is a script `setup.bash` which will build unitigs with ggcat, and create the
 required file-of-files. You should run the script so that the working directory
