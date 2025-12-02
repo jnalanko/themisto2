@@ -1,3 +1,12 @@
+mkdir -p export
+mkdir -p fof
+mkdir -p index
+mkdir -p logs
+mkdir -p sbwt  
+mkdir -p seqs  
+mkdir -p temp
+mkdir -p unitigs
+
 ls seqs/ | xargs --verbose -P 16 -I {} ggcat build -p -s 1 -m 2 --temp-dir temp -j 2 -k 31 seqs/{} -o unitigs/{}.unitigs.fna
 
 SEQ_COUNT=$(find seqs -maxdepth 1 -type f | wc -l)
