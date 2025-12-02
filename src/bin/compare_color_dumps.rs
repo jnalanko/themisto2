@@ -205,20 +205,34 @@ fn unitig_checksum(unitig: &[u8], k: usize) -> ([u8; 20], usize) {
     (checksum, n_hashes)
 }
 
-fn checksum_unitig_db(unitigs: &SeqDB, k: usize) -> ([u8; 20], usize) {
-    let mut checksum = [0_u8; 20];
-    let mut n_hashed = 0_usize;
+fn kmers_in_nmer(k: usize, n: usize) -> usize {
+    let k = k as isize;
+    let n = n as isize;
+    let ans = std::cmp::max(n - k + 1, 0);
+    ans as usize
+}
 
+fn checksum_unitig_db(unitigs: &SeqDB, k: usize) -> ([u8; 20], usize) {
     let bar = indicatif::ProgressBar::new(unitigs.sequence_count() as u64);
-    for unitig in unitigs.iter() {
+
+    let par_fold = (0..unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let (unitig_checksum, _) = unitig_checksum(unitigs.get(i).seq, k);
+        xor_into(&mut acc, &unitig_checksum);
         bar.inc(1);
-        let (unitig_checksum, hash_count) = unitig_checksum(&unitig.seq, k);
-        xor_into(&mut checksum, &unitig_checksum);
-        n_hashed += hash_count;
-    }
+        acc
+    });
+    let checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+
     bar.finish();
 
-    (checksum, n_hashed)
+    let total_kmer_count: usize = (0..unitigs.sequence_count())
+        .into_par_iter()
+        .map(|i| kmers_in_nmer(k, unitigs.get(i).seq.len()))
+        .sum();
+    (checksum, total_kmer_count)
 }
 
 fn hash_color_set(color_set: &[usize]) -> [u8; 20] {
@@ -323,10 +337,10 @@ fn main() {
     let (B_checksum, B_kmer_count) = &checksum_unitig_db(&B_unitigs, B_metadata.k);
 
     assert_eq!(A_kmer_count, B_kmer_count);
-    eprintln!("Canonical k-mer counts match: {}", A_kmer_count);
+    eprintln!("k-mer counts match: {}", A_kmer_count);
 
     assert_eq!(A_checksum, B_checksum);
-    eprintln!("Canonical k-mer checksums match: {:?}", A_checksum);
+    eprintln!("k-mer checksums match: {:?}", A_checksum);
 
     eprintln!("Reading color sets...");
     let A_color_sets = read_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets);
