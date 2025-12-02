@@ -320,11 +320,18 @@ fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_sets: &[Vec<
 fn main() {
     let cli = clap::Command::new("compare_unitig_dumps")
         .arg(clap::Arg::new("first_dump_prefix").required(true))
-        .arg(clap::Arg::new("second_dump_prefix").required(true));
+        .arg(clap::Arg::new("second_dump_prefix").required(true))
+        .arg(clap::Arg::new("n_threads").short('t').value_parser(clap::value_parser!(usize)).default_value("4"));
 
     let args = cli.get_matches();
     let dump_A_file_prefix = args.get_one::<String>("first_dump_prefix").unwrap();
     let dump_B_file_prefix = args.get_one::<String>("second_dump_prefix").unwrap();
+    let n_threads = *args.get_one::<usize>("n_threads").unwrap();
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(n_threads)       // customize number of threads
+        .build_global()
+        .unwrap();
 
     eprintln!("Reading metadata...");
     let A_metadata = read_metadata(format!("{}.metadata.txt", dump_A_file_prefix));
