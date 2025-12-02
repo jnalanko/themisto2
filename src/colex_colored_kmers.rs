@@ -135,26 +135,46 @@ impl ColexToColorSetMap {
         Self{sbwt, sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
     }
 
-    fn colex_to_color_set_id(&self, mut colex: usize) -> usize {
-        if self.sampling.get(colex) {
-            // This set is stored
-            self.color_set_ids.get(self.sampling.rank(colex)) as usize
-        } else {
-            // This set is not stored -> walk forward in the de Bruijn graph
-            loop {
-                for char_idx in 0..self.sbwt.alphabet().len() {
-                    if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
-                        // Found the outedge label
-                        let new_colex = self.sbwt.lf_step(colex, char_idx);
-                        return self.colex_to_color_set_id(new_colex); // Todo: no recursion
-                    }
+    // We don't have the suffix group leader marks or the LCS array stored, so
+    // we can't detect if there is an out-neighbor, but assuming there is, we
+    // can find it. If the assumption does not hold, this function will still return
+    // something but it will be wrong.
+    // TODO: if we had a borrow to the LCS array, we could do this faster, and also
+    // detect whether the node is a sink. That would mean wrapping the LCS array in
+    // an Arc to avoid a self-reference in ColexColoredKmers.
+    fn dbg_outneighbor_assuming_there_is_one(&self, mut colex: usize) -> usize {
+        loop {
+            for char_idx in 0..self.sbwt.alphabet().len() {
+                if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
+                    // Found the outedge label
+                    let new_colex = self.sbwt.lf_step(colex, char_idx);
+                    return new_colex;
                 }
+            }
+            // No outedges found -> colex is not a suffix group leader position
+            assert!(colex > 0);
+            colex -= 1;
+        }
+    }
 
-                // No outedges found -> colex is not a suffix group leader position
-                assert!(colex > 0);
-                colex -= 1;
+    // Returns the colex rank of the next sampled node from here, and
+    // the number of nodes walked (0 means the starting point was already marked).
+    fn walk_to_next_sample(&self, mut colex: usize) -> (usize, usize) {
+        let mut depth = 0;
+        loop {
+            if self.sampling.get(colex) {
+                return (colex, depth)
+            } else {
+                // This set is not stored -> walk forward in the de Bruijn graph
+                colex = self.dbg_outneighbor_assuming_there_is_one(colex);
+                depth += 1;
             }
         }
+    }
+
+    fn colex_to_color_set_id(&self, colex: usize) -> usize {
+        let pos = self.walk_to_next_sample(colex);
+        self.color_set_ids.get(self.sampling.rank(pos))
     }
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
