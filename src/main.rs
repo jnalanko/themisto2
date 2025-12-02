@@ -31,7 +31,7 @@ mod atomic_bitmap;
 mod int_vec;
 mod finimizers;
 mod util;
-mod merge;
+mod old_merge;
 mod new_merge;
 
 #[derive(Parser)]
