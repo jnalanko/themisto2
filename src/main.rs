@@ -159,8 +159,8 @@ pub enum Subcommands {
         index: PathBuf,
     },
 
-    #[command(arg_required_else_help = true, name = "merge-compressed-indexes")]
-    MergeCompressedIndexes {
+    #[command(arg_required_else_help = true, name = "merge")]
+    Merge {
         #[arg(long = "index-file-list", required = true)]
         index_file_list: PathBuf,
 
@@ -619,7 +619,7 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx),
             };
         },
-        Subcommands::MergeCompressedIndexes { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
+        Subcommands::Merge { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode, sample_distance);
         },
