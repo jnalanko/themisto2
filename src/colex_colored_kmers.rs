@@ -100,7 +100,7 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
 
 
     log::info!("Sampling along unitigs");
-    dbg.iter_unitigs_with_callback(|nodes, _unitig| {
+    dbg.iter_unitigs_with_callback(|nodes| {
         for (dist_from_end, node) in nodes.iter().rev().enumerate() {
             if dist_from_end % sample_distance == 0 {
                 marks.set(node.id, true);
@@ -201,7 +201,7 @@ impl ColexToColorSetMap {
         let marks_mutex = Mutex::new(marks); // Need thread-safe modifications
         let marks_mutex_borrow = &marks_mutex; // Passed into the callback
 
-        let callback = |nodes: &[Node], _: &[u8]| {
+        let callback = |nodes: &[Node]| {
             let mut marks = marks_mutex_borrow.lock().unwrap();
 
             let mut prev_set: Option<usize> = None;
@@ -645,8 +645,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         // Walk the unitig in forward orientation, and then backwards
         let k = self.sbwt.k();
         let mut workspace = Vec::<u8>::new();
-        let (nodes, unitig_string) = dbg.walk_unitig_from(v, &mut workspace);
+        let nodes = dbg.walk_unitig_from(v, &mut workspace);
         workspace.clear();
+        let mut unitig_string = Vec::<u8>::new();
+        dbg.push_unitig_string(&nodes, &mut unitig_string);
 
         let string_len = unitig_string.len();
         assert!(string_len >= k);
@@ -656,7 +658,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             "Reverse complement of k-mer {} not found in index", 
             String::from_utf8_lossy(last_kmer))
         ).start;
-        let (rc_nodes, _rc_unitig_string) = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
+        let rc_nodes = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
 
         let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
         let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();

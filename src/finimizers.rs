@@ -182,7 +182,9 @@ impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
         let k = self.sbwt.k();
         let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
-        self.dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+        self.dbg.iter_unitigs_with_callback(|nodes| {
+            let mut unitig_string = Vec::<u8>::with_capacity(nodes.len());
+            self.dbg.push_unitig_string(nodes, &mut unitig_string);
             assert!(unitig_string.len() >= k);
             for kmer_start in 0..unitig_string.len()-k+1 {
                 let kmer = &unitig_string[kmer_start..kmer_start+k];
@@ -235,7 +237,9 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
     log::info!("Marking *inimizers");
     let minimizer_marks = AtomicBitmap::new(sbwt.n_sets());
     let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
-    dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+    dbg.iter_unitigs_with_callback(|nodes| {
+        let mut unitig_string = Vec::<u8>::with_capacity(nodes.len());
+        dbg.push_unitig_string(nodes, &mut unitig_string);
         assert!(unitig_string.len() >= k);
         for kmer_start in 0..unitig_string.len()-k+1 {
             let kmer = &unitig_string[kmer_start..kmer_start+k];
@@ -263,7 +267,9 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
     let minimizer_lengths = (0..n_minimizers).map(|_| AtomicU8::new(0)).collect::<Vec<_>>();
 
     let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
-    dbg.iter_unitigs_with_callback(|nodes, unitig_string| {
+    dbg.iter_unitigs_with_callback(|nodes| {
+        let mut unitig_string = Vec::<u8>::with_capacity(nodes.len());
+        dbg.push_unitig_string(nodes, &mut unitig_string);
         assert!(unitig_string.len() >= k);
         for kmer_start in 0..unitig_string.len()-k+1 {
             let kmer = &unitig_string[kmer_start..kmer_start+k];

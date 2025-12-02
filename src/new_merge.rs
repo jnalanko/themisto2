@@ -6,24 +6,34 @@ use simple_sds_sbwt::ops::{BitVec, Rank};
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
 
-fn mark_kmer(kmer: &[u8], sbwt: &SbwtIndex<SubsetMatrix>, marks: &AtomicBitmap) {
-    let colex = sbwt.search(kmer);
-    let colex = colex.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(kmer)));
-    assert!(colex.len() == 1);
-    marks.set(colex.start, true);
+fn mark_kmer(colex: usize, marks: &AtomicBitmap) {
+    marks.set(colex, true);
 }
 
-fn mark_in_neighbors<'a>(kmer: &[u8], sbwt: &'a SbwtIndex<SubsetMatrix>, dbg: &Dbg<'a, SubsetMatrix>, marks: &AtomicBitmap) {
+fn search_and_mark_kmer(kmer: &[u8], sbwt: &SbwtIndex<SubsetMatrix>, marks: &AtomicBitmap) {
     let colex = sbwt.search(kmer);
     let colex = colex.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(kmer)));
     assert!(colex.len() == 1);
     let colex = colex.start;
 
+    mark_kmer(colex, marks);
+}
+
+fn mark_in_neighbors<'a>(colex: usize, dbg: &Dbg<'a, SubsetMatrix>, marks: &AtomicBitmap) {
     let mut in_neighbor_buf = Vec::<(Node, u8)>::new(); // TODO: avoid this allocation
     dbg.push_in_neighbors(Node{id: colex}, &mut in_neighbor_buf);
     for (in_node, _) in in_neighbor_buf.iter() {
         marks.set(in_node.id, true);
     }
+}
+
+fn search_and_mark_in_neighbors<'a>(kmer: &[u8], sbwt: &SbwtIndex<SubsetMatrix>, dbg: &Dbg<'a, SubsetMatrix>, marks: &AtomicBitmap) {
+    let colex = sbwt.search(kmer);
+    let colex = colex.unwrap_or_else(|| panic!("k-mer not found in merged SBWT: {:?}", String::from_utf8_lossy(kmer)));
+    assert!(colex.len() == 1);
+    let colex = colex.start;
+
+    mark_in_neighbors(colex, dbg, marks);
 }
 
 fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a CompactColexKmers<CSS>, merged_sbwt: &SbwtIndex<SubsetMatrix>, merged_lcs: &LcsArray, merged_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: &AtomicBitmap, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
@@ -38,10 +48,13 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
 
     log::info!("Iterating unitigs");
     let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
-    dbg.iter_unitigs_with_callback(|nodes, unitig|{
+    dbg.iter_unitigs_with_callback(|nodes|{
+        let mut unitig = Vec::<u8>::with_capacity(nodes.len());
+        dbg.push_unitig_string(nodes, &mut unitig);
         assert!(unitig.len() >= k);
+
         let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
-        let (_, subunitig_ranges) = coloring.break_to_colored_subunitigs(&unitig_colex_ranks, unitig);
+        let (_, subunitig_ranges) = coloring.break_to_colored_subunitigs(&unitig_colex_ranks, &unitig);
 
         // Mark last k-mer of each colored subunitig, and the in-neighbors of
         // the first k-mer of each colored subunitig.
@@ -51,17 +64,17 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             assert!(s < e);
 
             let last_kmer = &unitig[e-1..e-1+k];
-            mark_kmer(last_kmer, merged_sbwt, key_kmer_marks);
+            search_and_mark_kmer(last_kmer, merged_sbwt, key_kmer_marks);
 
             let first_kmer = &unitig[s..s+k];
-            mark_in_neighbors(first_kmer, merged_sbwt, merged_dbg, key_kmer_marks);
+            search_and_mark_in_neighbors(first_kmer, merged_sbwt, merged_dbg, key_kmer_marks);
         }
 
         // Mark last k-mer of every run of k-mers that were visited before, and
         // the in-neighbors of the first k-mer of every run of k-mers that were
         // visited before.
         let mut prev_was_visited = false;
-        for (kmer_start, (match_len, colex_range)) in merged_si.matching_statistics_iter(unitig).skip(k-1).enumerate() {
+        for (kmer_start, (match_len, colex_range)) in merged_si.matching_statistics_iter(&unitig).skip(k-1).enumerate() {
             assert!(match_len == k);
             assert!(colex_range.len() == 1);
 
@@ -72,12 +85,14 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             if visited & !prev_was_visited {
                 // Start of a new colored subunitig
                 // -> Mark all in-neighbors for sampling
-                mark_in_neighbors(&unitig[kmer_start..kmer_start+k], merged_sbwt, merged_dbg, key_kmer_marks);
+                // TODO: here we don't have to search again since we get the colex ranks for the MS iterator
+                search_and_mark_in_neighbors(&unitig[kmer_start..kmer_start+k], merged_sbwt, merged_dbg, key_kmer_marks);
             } else if !visited && prev_was_visited {
                 // One past the end of a colored subunitig
                 // -> mark previous node for sampling
+                // TODO: here we don't have to search again since we get the colex ranks for the MS iterator
                 assert!(kmer_start > 0);
-                mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], merged_sbwt, key_kmer_marks);
+                search_and_mark_kmer(&unitig[kmer_start-1..kmer_start-1+k], merged_sbwt, key_kmer_marks);
             }
             prev_was_visited = visited;
 
@@ -104,9 +119,9 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
 
     // Mark kmers around branches in the DBG. This part is independent of coloring
     let bar = indicatif::ProgressBar::new(merged_sbwt.n_kmers() as u64);
-    merged_dbg.iter_unitigs_with_callback(|nodes, unitig|{
-        mark_in_neighbors(&unitig[0..k], merged_sbwt, merged_dbg, &key_kmer_marks);
-        mark_kmer(&unitig[unitig.len()-k..], merged_sbwt, &key_kmer_marks);
+    merged_dbg.iter_unitigs_with_callback(|nodes|{
+        mark_in_neighbors(nodes.first().unwrap().id, merged_dbg, &key_kmer_marks);
+        mark_kmer(nodes.last().unwrap().id, &key_kmer_marks);
 
         for v in nodes.iter().rev().step_by(sample_distance) {
             key_kmer_marks.set(v.id,  true);

@@ -280,7 +280,10 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
         let k = self.merged_sbwt.k();
         assert!(self.merged_sbwt.k() == k);
         let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
-        dbg.iter_unitigs_with_callback(|nodes, unitig| {
+        dbg.iter_unitigs_with_callback(|nodes| {
+            let mut unitig = Vec::<u8>::with_capacity(nodes.len());
+            dbg.push_unitig_string(nodes, &mut unitig);
+
             let mut merged_colexes_iter = si.matching_statistics_iter(&unitig)
             .skip(k-1)
             .map(|(match_len, range)| {
