@@ -298,10 +298,13 @@ fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_sets: &[Vec<
 }
 
 fn main() {
-    let mut args = std::env::args();
-    args.next().unwrap(); // Program name
-    let dump_A_file_prefix = args.next().unwrap();
-    let dump_B_file_prefix = args.next().unwrap();
+    let cli = clap::Command::new("compare_unitig_dumps")
+        .arg(clap::Arg::new("first_dump_prefix").required(true))
+        .arg(clap::Arg::new("second_dump_prefix").required(true));
+
+    let args = cli.get_matches();
+    let dump_A_file_prefix = args.get_one::<String>("first_dump_prefix").unwrap();
+    let dump_B_file_prefix = args.get_one::<String>("second_dump_prefix").unwrap();
 
     eprintln!("Reading metadata...");
     let A_metadata = read_metadata(format!("{}.metadata.txt", dump_A_file_prefix));
