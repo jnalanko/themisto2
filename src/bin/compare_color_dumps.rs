@@ -21,11 +21,11 @@ fn get_color_set_id(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
-fn read_color_sets(filename: impl AsRef<Path>, num_color_sets: usize) -> Vec<Vec<usize>> {
+fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize) -> Vec<[u8; 20]> {
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 
-    let mut color_sets = vec![vec![]; num_color_sets];
+    let mut hashes = vec![[0_u8; 20]; num_color_sets];
 
     let mut reader = BufReader::new(File::open(filename).unwrap());
     let mut line = String::new();
@@ -44,15 +44,18 @@ fn read_color_sets(filename: impl AsRef<Path>, num_color_sets: usize) -> Vec<Vec
         assert_eq!(&second_token[0..5], b"size=");
         let list_len = ascii_to_int(&second_token[5..]);
 
-        color_sets[color_set_id] = tokens.map(ascii_to_int).collect();
-        assert_eq!(color_sets[color_set_id].len(), list_len);
+        let color_set: Vec<usize> = tokens.map(ascii_to_int).collect();
+        assert_eq!(color_set.len(), list_len);
+
+        assert!(hashes[color_set_id] == [0_u8; 20]);
+        hashes[color_set_id] = hash_color_set(&color_set);
 
         line.clear();
         bar.inc(1);
     }
     bar.finish();
 
-    color_sets
+    hashes
 }
 
 fn canonicalize_rotation_of_cyclic_unitig(unitig: &mut Vec<u8>, k: usize) {
@@ -274,12 +277,7 @@ fn checksum_unitig_kmers_and_colorsets(unitig: &[u8], color_set_hash: &[u8; 20],
     checksum
 }
 
-fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_sets: &[Vec<usize>], B_color_sets: &[Vec<usize>], k: usize) {
-    eprintln!("Hashing A color sets...");
-    let A_color_set_hashes = A_color_sets.par_iter().map(|color_set| hash_color_set(color_set)).collect::<Vec<_>>();
-
-    eprintln!("Hashing B color sets...");
-    let B_color_set_hashes = B_color_sets.par_iter().map(|color_set| hash_color_set(color_set)).collect::<Vec<_>>();
+fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_set_hashes: &[[u8; 20]], B_color_set_hashes: &[[u8; 20]], k: usize) {
 
     eprintln!("Computing A checksum...");
     let bar = indicatif::ProgressBar::new(A_unitigs.sequence_count() as u64);
@@ -356,11 +354,11 @@ fn main() {
     eprintln!("k-mer checksums match: {:?}", A_checksum);
 
     eprintln!("Reading color sets...");
-    let A_color_sets = read_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets);
-    let B_color_sets = read_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets);
+    let A_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets);
+    let B_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets);
 
     eprintln!("Comparing k-mer color sets...");
-    compare_color_sets(&A_unitigs, &B_unitigs, &A_color_sets, &B_color_sets, k);
+    compare_color_sets(&A_unitigs, &B_unitigs, &A_color_set_hashes, &B_color_set_hashes, k);
 
 }
 
