@@ -1,4 +1,4 @@
-set -xueo pipefail
+set -xue
 
 mkdir -p export
 mkdir -p fof
@@ -17,6 +17,7 @@ HALF_COUNT=$(( SEQ_COUNT / 2 ))
 find seqs -type f | grep ".fna$" | sort > fof/seqs.txt
 
 find unitigs/ -type f | grep ".fna$" | sort > fof/unitigs.txt
+
 find unitigs/ -type f | grep ".fna$" | sort | head -n $HALF_COUNT > fof/unitigs-half1.txt
 find unitigs/ -type f | grep ".fna$" | sort | tail -n $HALF_COUNT > fof/unitigs-half2.txt
 
