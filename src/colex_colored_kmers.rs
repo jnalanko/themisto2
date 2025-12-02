@@ -661,7 +661,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let rc_nodes = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
 
         let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
-        let rc_colex: Vec<usize> = rc_nodes.into_iter().map(|v| v.id).collect();
+        let rc_colex: Vec<usize> = rc_nodes.into_iter().rev().map(|v| v.id).collect();
         assert_eq!(fw_colex.len(), rc_colex.len());
 
         // Figure out color set id runs in the forward strand 
@@ -695,7 +695,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         subsubunitig_start = Some(kmer_idx);
                     }
                     visited.set(fw_colex_slice[kmer_idx], true);
-                    visited.set(rc_colex_slice[rc_colex_slice.len()-1-kmer_idx], true);
+                    visited.set(rc_colex_slice[kmer_idx], true);
                 } else {
                     // Already visited! Output the current subunitig
                     if let Some(s) = subsubunitig_start {
