@@ -37,6 +37,7 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
     let dbg = Dbg::new(coloring.sbwt(), Some(coloring.lcs()), n_threads);
 
     log::info!("Iterating unitigs");
+    let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
     dbg.iter_unitigs_with_callback(|nodes, unitig|{
         assert!(unitig.len() >= k);
         let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
@@ -87,7 +88,9 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             // some previous coloring.
             visited_marks.set(kmer_colex, true);
         }
+        bar.inc(nodes.len() as u64);
     }, n_threads);
+    bar.finish();
 
     dbg
 }
@@ -100,6 +103,7 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     let key_kmer_marks = AtomicBitmap::new(merged_sbwt.n_sets());
 
     // Mark kmers around branches in the DBG. This part is independent of coloring
+    let bar = indicatif::ProgressBar::new(merged_sbwt.n_kmers() as u64);
     merged_dbg.iter_unitigs_with_callback(|nodes, unitig|{
         mark_in_neighbors(&unitig[0..k], merged_sbwt, merged_dbg, &key_kmer_marks);
         mark_kmer(&unitig[unitig.len()-k..], merged_sbwt, &key_kmer_marks);
@@ -107,7 +111,9 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
         for v in nodes.iter().rev().step_by(sample_distance) {
             key_kmer_marks.set(v.id,  true);
         }
+        bar.inc(nodes.len() as u64);
     }, n_threads);
+    bar.finish();
     
     // Mark around starts and ends of colored subunitigs
     let visited_marks = AtomicBitmap::new(merged_sbwt.n_sets());
