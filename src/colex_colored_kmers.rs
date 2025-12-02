@@ -166,6 +166,7 @@ impl ColexToColorSetMap {
                 return (colex, depth)
             } else {
                 // This set is not stored -> walk forward in the de Bruijn graph
+                // Since this is not sampled,  this can not be a sink.
                 colex = self.dbg_outneighbor_assuming_there_is_one(colex);
                 depth += 1;
             }
@@ -622,10 +623,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     if current_run_end > start { // Active run exists
                         subunitigs.push(start..current_run_end);
                         subunitig_color_set_ids.push(current_run_set_id);
+                        current_run_end = pos + 1;
                     }
                 }
                 current_run_set_id = new_set_id;
-                current_run_end = pos + 1;
             }
         }
 
