@@ -20,5 +20,5 @@ find unitigs/ -type f | grep ".fna$" | sort > fof/unitigs.txt
 find unitigs/ -type f | grep ".fna$" | sort | head -n $HALF_COUNT > fof/unitigs-half1.txt
 find unitigs/ -type f | grep ".fna$" | sort | tail -n $HALF_COUNT > fof/unitigs-half2.txt
 
-echo "index/half1.thm2" > fof/merge_fof.txt
-echo "index/half2.thm2" >> fof/merge_fof.txt
+echo "index/half1.thm2" > fof/merge.txt
+echo "index/half2.thm2" >> fof/merge.txt
