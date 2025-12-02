@@ -389,11 +389,15 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
             n_bits_s2 += s2[range.clone()].count_ones();
         }
 
+        let bar = indicatif::ProgressBar::new(n as u64);
         thread_inputs.into_par_iter().for_each(|input| {
             let mut s1_colex = input.s1_start_rank;
             let mut s2_colex = input.s2_start_rank;
             let offset_for_colors_from_2 = self.coloring1.get_set_storage().n_colors();
             for merged_colex in input.merged_range {
+                if merged_colex > 0 && merged_colex % 10000 == 0 {
+                    bar.inc(10000);
+                }
                 if self.merged_key_kmer_marks[merged_colex] {
                     if self.interleaving.s1[merged_colex] {
                         for color in self.coloring1.colex_to_set(s1_colex).iter() {
@@ -415,7 +419,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
                 s2_colex += self.interleaving.s2[merged_colex] as usize;
             }
         });
-
+        bar.finish();
     }
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
