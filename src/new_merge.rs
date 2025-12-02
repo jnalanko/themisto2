@@ -163,7 +163,7 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
     let merged_dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
 
     log::info!("=== Phase 1/3: marking new key k-mers ===");
-    let (new_key_kmer_marks, dbg1, dbg2) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_sbwt_lcs, &merged_dbg, sample_distance, n_threads);
+    let (new_key_kmer_marks, _, _) = mark_new_key_kmers(&coloring1, &coloring2, &merged_sbwt, &merged_sbwt_lcs, &merged_dbg, sample_distance, n_threads);
     log::info!("Marked {:.2} % of all k-mers", new_key_kmer_marks.count_ones() as f64 / merged_sbwt.n_kmers() as f64 * 100.0);
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
