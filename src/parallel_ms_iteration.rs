@@ -334,10 +334,10 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Merged
 }
 
 pub struct ElementGeneratorFromMergeInterleaving<'a, CSS: ColorSetStorage + Sync + Send> {
-    pub interleaving: MergeInterleaving,
+    pub interleaving: &'a MergeInterleaving,
     pub coloring1: &'a CompactColexKmers<CSS>,
     pub coloring2: &'a CompactColexKmers<CSS>,
-    pub merged_key_kmer_marks: bitvec::vec::BitVec, // Only reporting set elements for these
+    pub merged_key_kmer_marks: &'a bitvec::vec::BitVec, // Only reporting set elements for these
     pub filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
 }
 

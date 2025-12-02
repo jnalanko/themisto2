@@ -4,7 +4,7 @@ use rand::seq::index::sample;
 use sbwt::{dbg::{Dbg, Node}, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{ElementGeneratorFromMergeInterleaving, MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
 
 fn mark_kmer(colex: usize, marks: &AtomicBitmap) {
     marks.set(colex, true);
@@ -168,29 +168,25 @@ pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmer
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
-    let gen = MergedElementGenerator {
-        merged_sbwt: &merged_sbwt,
-        merged_lcs: &merged_sbwt_lcs,
+    let gen = ElementGeneratorFromMergeInterleaving {
+        interleaving: &merge_plan,
         coloring1: &coloring1,
         coloring2: &coloring2,
-        dbg1: &dbg1,
-        dbg2: &dbg2,
+        merged_key_kmer_marks: &new_key_kmer_marks,
         filter: None,
-    };
+    } ;
 
     let n_colors = coloring1.get_set_storage().n_colors() + coloring2.get_set_storage().n_colors();
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, new_key_kmer_marks.clone(), merged_sbwt.n_sets(), n_colors, n_threads, random_seed);
 
-    log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
-    let gen = MergedElementGenerator {
-        merged_sbwt: &merged_sbwt,
-        merged_lcs: &merged_sbwt_lcs,
+    let gen = ElementGeneratorFromMergeInterleaving {
+        interleaving: &merge_plan,
         coloring1: &coloring1,
         coloring2: &coloring2,
-        dbg1: &dbg1,
-        dbg2: &dbg2,
+        merged_key_kmer_marks: &new_key_kmer_marks,
         filter: None,
-    };
+    } ;
+    log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
         
     let css = build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads);
 
