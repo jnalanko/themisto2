@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read};
+use std::{cmp::min, io::{Cursor, Read}, ops::Range};
 
 use bitvec::order::Lsb0;
 use simple_sds_sbwt::serialize::Serialize;
@@ -53,6 +53,20 @@ impl VecVecSeqStream {
     }
 }
 
+pub fn segment_range(range: Range<usize>, n_pieces: usize) -> Vec<Range<usize>> {
+    let segment_len = range.len().div_ceil(n_pieces);
+    let mut pieces: Vec<Range<usize>> = vec![];
+    for t in 0..n_pieces{
+        let mut s = range.start + t*segment_len;
+        let mut e = range.start + min((t+1)*segment_len, range.len());
+        if s >= range.end { // Happens e.g. if range.len() == 1 and n_pieces == 10
+            s = range.end;
+            e = range.end;
+        }
+        pieces.push(s..e); // Final segments may be empty. Is ok.
+    }
+    pieces
+}
 
 #[cfg(test)]
 mod tests {

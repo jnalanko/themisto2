@@ -72,7 +72,8 @@ pub trait ParallelElementGenerator {
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
-/// There must not be duplicate elements in the same set!
+/// There must not be duplicate elements in the same set! The callback only has to return ids for
+/// sets that are marked in the key_kmer_marks bitvector.
 /// Returns three things:
 /// * A bit vector marking a subset of the key-kmers such that every marked k-mer has a distinct color
 ///   set.
