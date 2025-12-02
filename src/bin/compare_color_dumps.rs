@@ -274,7 +274,6 @@ fn checksum_unitig_kmers_and_colorsets(unitig: &[u8], color_set_hash: &[u8; 20],
     checksum
 }
 
-// Non-canonical ignored in A
 fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_sets: &[Vec<usize>], B_color_sets: &[Vec<usize>], k: usize) {
     eprintln!("Hashing A color sets...");
     let A_color_set_hashes = A_color_sets.par_iter().map(|color_set| hash_color_set(color_set)).collect::<Vec<_>>();
