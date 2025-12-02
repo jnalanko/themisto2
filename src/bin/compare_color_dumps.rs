@@ -355,7 +355,6 @@ fn main() {
 
     eprintln!("Reading and hashing distinct color sets...");
     let A_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets);
-    eprintln!("Reading and hashing distinct color sets...");
     let B_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets);
 
     eprintln!("Comparing k-mer color sets...");
