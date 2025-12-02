@@ -1,4 +1,4 @@
-set -xue
+set -xueo pipefail
 
 mkdir -p export
 mkdir -p fof

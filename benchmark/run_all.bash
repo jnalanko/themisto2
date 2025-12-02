@@ -1,4 +1,4 @@
-set -xue
+set -xueo pipefail
 
 /usr/bin/time -v sbwt build --input-list fof/unitigs.txt -v -o sbwt/unitigs --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory 2>&1 | tee logs/sbwt.log
 /usr/bin/time -v sbwt build --input-list fof/unitigs-half1.txt -v -o sbwt/unitigs-half1 --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory 2>&1 | tee logs/sbwt-half1.log
