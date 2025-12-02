@@ -395,14 +395,19 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
             let offset_for_colors_from_2 = self.coloring1.get_set_storage().n_colors();
             for merged_colex in input.merged_range {
                 if self.merged_key_kmer_marks[merged_colex] {
-                    for color in self.coloring1.colex_to_set(s1_colex).iter() {
-                        if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
-                            callback(SetElement{set_id: new_set_id, color});
+                    if self.interleaving.s1[merged_colex] {
+                        for color in self.coloring1.colex_to_set(s1_colex).iter() {
+                            if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
+                                callback(SetElement{set_id: new_set_id, color});
+                            }
                         }
                     }
-                    for color in self.coloring2.colex_to_set(s2_colex).iter() {
-                        if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
-                            callback(SetElement{set_id: new_set_id, color: color + offset_for_colors_from_2});
+
+                    if self.interleaving.s2[merged_colex] {
+                        for color in self.coloring2.colex_to_set(s2_colex).iter() {
+                            if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
+                                callback(SetElement{set_id: new_set_id, color: color + offset_for_colors_from_2});
+                            }
                         }
                     }
                 }
