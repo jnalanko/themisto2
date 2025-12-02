@@ -83,7 +83,7 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
 
             let kmer_colex = colex_range.start;
             let visited = visited_marks.get(kmer_colex);
-            // Visited is true iff the k-mers was visited while processing some earlier coloring.
+            // Visited is true iff the k-mer was visited while processing some earlier coloring.
 
             if visited & !prev_was_visited {
                 // Start of a new colored subunitig
