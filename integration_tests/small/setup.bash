@@ -1,0 +1,13 @@
+ls seqs/ | xargs --verbose -P 16 -I {} ggcat build -p -s 1 -m 2 --temp-dir temp -j 2 -k 31 seqs/{} -o unitigs/{}.unitigs.fna
+
+SEQ_COUNT=$(find seqs -maxdepth 1 -type f | wc -l)
+HALF_COUNT=$(( n / 2 ))
+
+find seqs -type f | grep ".fna$" | sort > fof/seqs.txt
+
+find unitigs/ -type f | grep ".fna$" | sort > fof/unitigs.txt
+find unitigs/ -type f | grep ".fna$" | sort | head -n $HALF_COUNT > fof/unitigs-half1.txt
+find unitigs/ -type f | grep ".fna$" | sort | tail -n $HALF_COUNT > fof/unitigs-half2.txt
+
+echo "index/half1.thm2" > fof/merge_fof.txt
+echo "index/half2.thm2" >> fof/merge_fof.txt
