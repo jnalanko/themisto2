@@ -595,36 +595,47 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     pub fn break_to_colored_subunitigs(&self, unitig_colex_ranks: &[usize], _unitig_string: &[u8]) -> (Vec<usize>, Vec<Range<usize>>){
+        if unitig_colex_ranks.len() == 0 {
+            // Make this a special case to ensure that there is always at least
+            // one run to avoid a special case at the end.
+            return (vec![], vec![]);
+        }
         let mut subunitig_color_set_ids: Vec<usize> = vec![];
         let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
-        let mut current_run_set_id: Option<usize> =  None;
-        let mut current_run_start: Option<usize> =  None;
-        for (pos, &colex) in unitig_colex_ranks.iter().enumerate() {
-            let set_id = self.colex_to_set_id(colex); // Todo: do not need to do a full lookup like this every time
-            match current_run_set_id {
-                None => {
-                    // Open a new run
-                    current_run_set_id = Some(set_id);
-                    current_run_start = Some(pos);
-                },
-                Some(cur_run_id) => {
-                    if cur_run_id == set_id {
-                        // Extend current run
-                    } else {
-                        // Close the current run and start a new one
-                        subunitigs.push(current_run_start.unwrap()..pos);
-                        subunitig_color_set_ids.push(cur_run_id);
-                        current_run_set_id = Some(set_id);
-                        current_run_start = Some(pos);
+        let mut current_run_set_id = usize::MAX; // Will be set at the start of the first iteration
+        let mut current_run_end = unitig_colex_ranks.len(); 
+
+        // Iterate from end to start, updating the color set when the current
+        // node is marked.
+        for (pos, &colex) in unitig_colex_ranks.iter().enumerate().rev() {
+            if pos == unitig_colex_ranks.len()-1 {
+                assert!(self.map.sampling.get(colex)); // Last position of a unitig should always be marked
+            }
+
+            if self.map.sampling.get(colex) {
+                // Update the set id
+                let new_set_id = self.colex_to_set_id(colex);
+
+                if new_set_id != current_run_set_id {
+                    // Close the active run (if exists)
+                    let start = pos + 1;
+                    if current_run_end > start { // Active run exists
+                        subunitigs.push(start..current_run_end);
+                        subunitig_color_set_ids.push(current_run_set_id);
                     }
                 }
+                current_run_set_id = new_set_id;
+                current_run_end = pos + 1;
             }
         }
 
-        // Close the last run
-        assert!(current_run_set_id.is_some());
-        subunitigs.push(current_run_start.unwrap()..unitig_colex_ranks.len());
-        subunitig_color_set_ids.push(current_run_set_id.unwrap());
+        // Close the active run (exists because of the assert at the start)
+        assert!(current_run_set_id != usize::MAX);
+        subunitigs.push(0..current_run_end);
+        subunitig_color_set_ids.push(current_run_set_id);
+
+        subunitigs.reverse();
+        subunitig_color_set_ids.reverse();
 
         (subunitig_color_set_ids, subunitigs)
     }
