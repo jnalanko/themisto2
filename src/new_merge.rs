@@ -63,6 +63,9 @@ fn mark_key_kmers_for<'a, CSS: ColorSetStorage + Send + Sync>(coloring: &'a Comp
             let (s,e) = (subunitig_range.start, subunitig_range.end); 
             assert!(s < e);
 
+            // TODO: If we had access to the merge plan here we would not have to search
+            // these kmers.
+
             let last_kmer = &unitig[e-1..e-1+k];
             search_and_mark_kmer(last_kmer, merged_sbwt, key_kmer_marks);
 
