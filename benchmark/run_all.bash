@@ -1,8 +1,8 @@
 set -xueo pipefail
 
-/usr/bin/time -v sbwt build --input-list fof/unitigs.txt -v -o sbwt/unitigs --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory 2>&1 | tee logs/sbwt.log
-/usr/bin/time -v sbwt build --input-list fof/unitigs-half1.txt -v -o sbwt/unitigs-half1 --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory 2>&1 | tee logs/sbwt-half1.log
-/usr/bin/time -v sbwt build --input-list fof/unitigs-half2.txt -v -o sbwt/unitigs-half2 --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory 2>&1 | tee logs/sbwt-half2.log
+/usr/bin/time -v sbwt build --input-list fof/unitigs.txt -v -o sbwt/unitigs --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory --dedup-batches 2>&1 | tee logs/sbwt.log
+/usr/bin/time -v sbwt build --input-list fof/unitigs-half1.txt -v -o sbwt/unitigs-half1 --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory --dedup-batches 2>&1 | tee logs/sbwt-half1.log
+/usr/bin/time -v sbwt build --input-list fof/unitigs-half2.txt -v -o sbwt/unitigs-half2 --temp-dir temp -l -k 31 -m 50 -t 32 -r --in-memory --dedup-batches 2>&1 | tee logs/sbwt-half2.log
 
 /usr/bin/time -v themisto2 build -s sbwt/unitigs.sbwt -i fof/seqs.txt -o index/seqs.thm2 --temp-dir temp -k 31 -d 30 -t 32 --index-type sparse-dense 2>&1 | tee logs/seqs.log
 
