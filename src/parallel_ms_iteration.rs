@@ -279,6 +279,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
         let si = StreamingIndex::new(&self.merged_sbwt, &self.merged_lcs);
         let k = self.merged_sbwt.k();
         assert!(self.merged_sbwt.k() == k);
+        let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
         dbg.iter_unitigs_with_callback(|nodes, unitig| {
             let mut merged_colexes_iter = si.matching_statistics_iter(&unitig)
             .skip(k-1)
@@ -306,11 +307,12 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
 
                 let cs = coloring.colex_to_set(colex);
                 for color in cs.iter() {
-//                    println!("Callback {} {}", set_id, color + color_offset);
                     callback(SetElement{set_id, color: color + color_offset}) 
                 }
             }
+            bar.inc(nodes.len() as u64);
         }, n_threads);
+        bar.finish();
 
     }
 
