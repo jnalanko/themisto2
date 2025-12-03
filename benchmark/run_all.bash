@@ -17,7 +17,7 @@ set -xueo pipefail
 # Export
 /usr/bin/time -v themisto2 export -i index/seqs.thm2 -o export/seqs -t 32 2>&1 | tee logs/seqs-export.log
 /usr/bin/time -v themisto2 export -i index/unitigs.thm2 -o export/unitigs -t 32 2>&1 | tee logs/unitigs-export.log
-/usr/bin/time -v themisto2 export -i index/merge.thm2 -o export/merge-t 32 2>&1 | tee logs/merged-export.log
+/usr/bin/time -v themisto2 export -i index/merge.thm2 -o export/merge -t 32 2>&1 | tee logs/merged-export.log
 
 # Fulgor
 # ~/code/fulgor/build/fulgor build -l fof/unitigs.txt -o index/unitigs -k 31 -m 20 -d temp -g 48 -t 32 --verbose
