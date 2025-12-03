@@ -17,22 +17,26 @@ pub trait USizeIteratorGenerator {
     fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>>;
 }
 
+#[allow(dead_code)]
 pub struct VecVecUsizeIteratorGenerator {
     pub(crate) sets: Vec<Vec<usize>>,
     pub(crate) pos: usize,
 }
 
 impl VecVecUsizeIteratorGenerator {
+    #[allow(dead_code)]
     pub fn new(vecs: Vec<Vec<usize>>) -> Self {
         Self {sets: vecs, pos: 0}
     }
 }
 
+#[allow(dead_code)]
 pub struct VecIterator<'a> {
     inner: std::slice::Iter<'a, usize>,
 }
 
 impl<'a> VecIterator<'a> {
+    #[allow(dead_code)]
     pub fn new(vec: &'a Vec<usize>) -> Self {
         Self { inner: vec.as_slice().iter() }
     }
@@ -74,7 +78,7 @@ mod tests {
         }
     }
 
-    //fn print_all_generic<'a, 'b, Inner: USizeIterator<'a>, IterGenerator: USizeIteratorGenerator<Iter<'a> = Inner> + 'a>(mut gen: IterGenerator){
+    #[allow(dead_code)]
     fn print_all_generic(mut gen: impl USizeIteratorGenerator){
         while let Some(mut iter) = gen.next() {
             while let Some(x) = iter.next() {
