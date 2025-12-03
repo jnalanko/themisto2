@@ -8,6 +8,7 @@ pub struct CompactIntVec {
 }
 
 impl CompactIntVec {
+    #[allow(clippy::manual_div_ceil)] // I don't want to touch it
     pub fn new(len: usize, bit_width: usize) -> Self {
         assert!(bit_width <= 64);
         let n_words = (len * bit_width + 63) / 64;
@@ -79,6 +80,7 @@ impl CompactIntVec {
         ret
     }
 
+    #[allow(dead_code)]
     pub fn to_vec(&self) -> Vec<usize> {
         let mut ret: Vec<usize> = vec![0; self.len];
         for i in 0..self.len {
@@ -128,6 +130,7 @@ impl CompactIntVec {
         self.bit_width
     }
 
+    #[allow(dead_code)]
     pub fn into_parts(self) -> (Vec<u64>, usize, usize) {
         (self.data, self.len, self.bit_width)
     }
@@ -151,6 +154,7 @@ pub struct AtomicCompactIntVec {
 }
 
 impl AtomicCompactIntVec {
+    #[allow(clippy::manual_div_ceil)] // I don't want to touch it
     pub fn new(len: usize, bit_width: usize) -> Self {
         assert!(bit_width <= 64);
         let n_words = (len * bit_width + 63) / 64;
@@ -158,6 +162,7 @@ impl AtomicCompactIntVec {
         Self {data, len, bit_width}
     }
 
+    #[allow(dead_code)]
     pub fn new_with_universe_size(len: usize, universe_size: usize) -> Self {
         let bit_width = universe_size.next_power_of_two().trailing_zeros() as usize;
         Self::new(len, bit_width)
@@ -167,6 +172,7 @@ impl AtomicCompactIntVec {
     /// value that is being read, the result could be mixed! It's atomic in the sense that
     /// it is safe to load a value even if another thread modifies a nearby value that is
     /// stored in the same word.
+    #[allow(dead_code)]
     pub fn get(&self, i: usize) -> usize {
         assert!(i < self.len);
         let bit_idx = i * self.bit_width; 
@@ -224,6 +230,7 @@ impl AtomicCompactIntVec {
     }
 
     // Returns the underlying data, length and bit width
+    #[allow(dead_code)]
     pub fn into_parts(self) -> (Vec<usize>, usize, usize) {
         let data = self.data.into_iter().map(
             |x| x.load(Acquire) as usize
