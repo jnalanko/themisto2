@@ -188,6 +188,7 @@ struct InputStream {
 }
 
 impl InputStream {
+    #[allow(dead_code)]
     fn new<P: AsRef<Path>>(filenames: &[P]) -> InputStream {
         let mut dbs: Vec<jseqio::seq_db::SeqDB> = vec![];
         for path in filenames {
@@ -230,6 +231,7 @@ impl SeqStream for InputStream {
     } 
 }
 
+#[allow(dead_code)]
 fn mark_bits(bv: &mut BitVec, color: usize, num_colors: usize, to_mark: Vec<usize>) {
     for i in to_mark {
         bv.set(i*num_colors + color, true);
@@ -237,6 +239,7 @@ fn mark_bits(bv: &mut BitVec, color: usize, num_colors: usize, to_mark: Vec<usiz
 
 }
 
+#[allow(dead_code)]
 fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize, seq: &[u8], k: usize, mark_buffer_size: usize, index: &StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>){
     // Search all k-mers
     let mut marking_buffer: Vec<usize> = Vec::new(); // These bits should be marked
@@ -259,6 +262,7 @@ fn mark_all_kmers_of_seq(bv: Arc<Mutex<BitVec>>, num_colors: usize, color: usize
 } 
 
 /// Note: reverse complements are not added, so if you want them, include them in the dbs.
+#[allow(dead_code)]
 pub fn build_from_seq_dbs(dbs: Vec<jseqio::seq_db::SeqDB>, sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, n_threads: usize) -> BitmapStorage {
     let dbs = Arc::new(dbs);
     let input_stream = InputStream {
@@ -331,7 +335,7 @@ pub fn build_from_seq_dbs(dbs: Vec<jseqio::seq_db::SeqDB>, sbwt: &SbwtIndex<Subs
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 pub fn build_from_files<P: AsRef<Path> + Send + Sync>(filenames: &[P], sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, n_threads: usize) -> BitmapStorage {
 
     log::info!("Loading {} sequence files (colors) into memory", filenames.len());
