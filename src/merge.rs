@@ -1,7 +1,6 @@
 use std::{cmp::max, sync::Arc};
 
-use rand::seq::index::sample;
-use sbwt::{dbg::{Dbg, Node}, merge, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
+use sbwt::{dbg::{Dbg, Node}, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
 use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, parallel_ms_iteration::{ElementGeneratorFromMergeInterleaving, MergedElementGenerator, MsElementGenerator}, set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates}};
@@ -241,13 +240,13 @@ mod tests {
     fn build_color_sets<CSS: ColorSetStorage>(sbwt1: &SbwtIndex<SubsetMatrix>, lcs1: &LcsArray, dbs1: Vec<SeqDB>, n_threads: usize) 
     -> (Vec<usize>, CSS){
         let n_colors_1 = dbs1.len();
-        let bms1 = build_from_seq_dbs(dbs1, &sbwt1, &lcs1, n_threads);
+        let bms1 = build_from_seq_dbs(dbs1, sbwt1, lcs1, n_threads);
 
-        let iter_of_iters_1 = (0..sbwt1.n_sets()).into_iter().map(|colex| bms1.get_set_view(colex).iter());
+        let iter_of_iters_1 = (0..sbwt1.n_sets()).map(|colex| bms1.get_set_view(colex).iter());
         let colex_to_css_1 = *CSS::new_from_iter_of_iters(iter_of_iters_1, n_colors_1);
 
         let (distinct_css_1, set_to_id_1) = hash_and_encode_distinct_sets(&colex_to_css_1, n_colors_1);
-        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).into_iter().map(|colex| {
+        let colex_to_id: Vec<usize> = (0..sbwt1.n_sets()).map(|colex| {
             set_to_id_1[&colex_to_css_1.get_set_view(colex)]
         }).collect(); 
 
@@ -273,7 +272,7 @@ mod tests {
             all_input_seq_slices.extend(input_seqs_1.iter().map(|s| s.as_slice()));
             all_input_seq_slices.extend(input_seqs_2.iter().map(|s| s.as_slice()));
 
-            let mut all_input_seqs: Vec<Vec<u8>> = all_input_seq_slices.iter().map(|s| s.to_vec()).collect();
+            let all_input_seqs: Vec<Vec<u8>> = all_input_seq_slices.iter().map(|s| s.to_vec()).collect();
 
             let mut dbs1 = Vec::<SeqDB>::new();
             let mut dbs2 = Vec::<SeqDB>::new();
