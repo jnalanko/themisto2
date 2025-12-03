@@ -2,64 +2,12 @@ use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Re
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use simple_sds_sbwt::ops::{BitVec, Rank, Select};
-use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec, iterators::VecIterator};
+use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
     pub set_id: usize,
     pub color: usize,
-}
-
-struct MyTransposedColorSetStream<T : Iterator<Item = SetElement>> {
-    element_generator: T,
-    buf: Vec<usize>,
-    leftover_element: Option<SetElement>,
-    current_color: usize,
-    n_colors: usize,
-}
-
-
-impl<T : Iterator<Item = SetElement>> crate::iterators::USizeIteratorGenerator for MyTransposedColorSetStream<T> {
-
-    type Iter<'a> = VecIterator<'a> where Self: 'a;
-
-    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
-        self.buf.clear();
-        dbg!(&self.current_color, &self.n_colors);
-        if self.current_color == self.n_colors {
-            return None;
-        }
-
-        // If there is a leftover element from the previous round, consider that.
-        if let Some(x) = &self.leftover_element {
-            if x.color < self.current_color {
-                // No set ids in this color
-                self.current_color += 1;
-                return Some(VecIterator::new(&self.buf));
-            } else if x.color == self.current_color {
-                self.buf.push(x.set_id);
-                self.leftover_element = None;
-            } else {
-                panic!("Programming error: color set element iterator is not in the right order");
-            }
-        }
-
-        // Read new elements from the generator
-        // Todo: can we not store all in a buffer and return and iterator instead?
-        while let Some(x) = self.element_generator.next() {
-            if x.color == self.current_color {
-                self.buf.push(x.set_id);
-            } else {
-                self.leftover_element = Some(x);
-                break;
-            }
-        }
-
-        self.current_color += 1;
-
-        Some(VecIterator::new(&self.buf))
-    }
-    
 }
 
 pub trait ParallelElementGenerator {
@@ -83,7 +31,7 @@ pub trait ParallelElementGenerator {
 pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(
     mut gen: impl ParallelElementGenerator,
     key_kmer_marks: bitvec::vec::BitVec,
-    n_sets: usize, n_colors: usize, n_threads: usize, random_seed: usize)
+    n_colors: usize, n_threads: usize, random_seed: usize)
     -> (bitvec::vec::BitVec, Vec<usize>, CompactIntVec) {
 
     // Build rank support for key k-mer marks
@@ -258,7 +206,6 @@ mod tests{
             VecVecGenerator::new(sets.clone()),
             bitvec::bitvec![1,1,0,1,1,1], // Mark one of the duplicates as non-key
             sets.len(),
-            5,
             3,
             123123
         );

@@ -176,7 +176,7 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
     } ;
 
     let n_colors = coloring1.get_set_storage().n_colors() + coloring2.get_set_storage().n_colors();
-    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, new_key_kmer_marks.clone(), merged_sbwt.n_sets(), n_colors, n_threads, random_seed);
+    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, new_key_kmer_marks.clone(), n_colors, n_threads, random_seed);
 
     let gen = ElementGeneratorFromMergeInterleaving {
         interleaving: &merge_plan,

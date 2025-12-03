@@ -242,10 +242,10 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     let random_seed = 123123; // Todo: be more random
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
         let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
-        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     } else {
         let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
-        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), sbwt.n_sets(), n_colors, n_threads, random_seed)
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     };
 
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
