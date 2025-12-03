@@ -2,18 +2,18 @@
 #![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 #![allow(clippy::manual_is_multiple_of)] // Oh please
 
-use std::{collections::HashSet, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use io::ChainedInputStreamWithRevComp;
-use parallel_ms_iteration::{DeduplicatingColorElementGenerator, DistinctColexComputation};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
+use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, int_vec::CompactIntVec, io::ChainedInputStream, iterators::VecIterator, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator};
 
 mod EM;
 mod bitmap_storage;
@@ -62,21 +62,6 @@ impl ColoringType {
         }
     }
 }
-
-/*
-impl FromStr for Denominator {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "all" => Ok(Denominator::All),
-            "relevant" => Ok(Denominator::Relevant),
-            "maxhits" => Ok(Denominator::MaxHits),
-            _ => Err(format!("Invalid denominator value: {}", s)),
-        }
-    }
-}
-*/
 
 #[derive(Subcommand)]
 pub enum Subcommands {
@@ -240,27 +225,6 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
-}
-
-struct MyBitmapStream {
-    bs: BitmapStorage,
-    pos: usize,
-    buf: Vec<usize>,
-}
-
-impl crate::iterators::USizeIteratorGenerator for MyBitmapStream {
-    type Iter<'a> = VecIterator<'a> where Self: 'a;
-    
-    fn next<'b>(&'b mut self) -> Option<Self::Iter<'b>> {
-        if self.pos == self.bs.n_sets() {
-            None
-        } else {
-            self.buf.clear(); 
-            self.buf.extend(self.bs.get_set_view(self.pos).iter());
-            self.pos += 1;
-            Some(VecIterator::new(&self.buf))
-        }
-    }
 }
 
 fn build_coloring<CSS: ColorSetStorage + Send>(
@@ -588,7 +552,7 @@ fn main() {
             }
 
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let mut input_stream = io::ChainedInputStream::new(input_paths.clone());
+            let input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
             let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
@@ -710,48 +674,5 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
             };
         },
-            }
-/*
-        Subcommands::BuildFromSbwt{ sbwt_file, outfile, n_threads, sample_distance} => {
-            let mut out = BufWriter::new(File::create(&outfile).unwrap()); // Open early to fail early if there is a problem
-            log::info!("Loading SBWT");
-            let mut input = BufReader::new(File::open(sbwt_file).unwrap());
-            let SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut input).unwrap();
-            log::info!("Building LCS array");
-            let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
-            let index = compact_colored_kmers::CompactColexColoring::<ColorSets>::new_single_colored(Arc::new(sbwt), lcs, sample_distance, n_threads);
-            index.serialize(&mut out);
-        }
-    } 
-*/
-}
-
-/*
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_reduce_to_classes(){
-        let mut vec = vec![
-            bitvec![1, 1, 1],
-            bitvec![1, 0, 1],
-            bitvec![0, 1, 0],
-            bitvec![1, 0, 1],
-            bitvec![1, 0, 0],
-            bitvec![0, 1, 0],
-            bitvec![0, 1, 0],
-            bitvec![1, 0, 1]];
-        let counts = reduce_to_classes(&mut vec);
-        assert_eq!(vec, vec![
-            bitvec![0, 1, 0],
-            bitvec![1, 0, 0],
-            bitvec![1, 0, 1],
-            bitvec![1, 1, 1]]);
-        assert_eq!(counts, vec![3, 1, 3, 1]);
     }
 }
-
-*/
