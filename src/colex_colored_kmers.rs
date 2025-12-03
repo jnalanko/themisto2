@@ -2,6 +2,7 @@ use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
+use indicatif::ProgressStyle;
 use jseqio::reverse_complement;
 use jseqio::seq_db::SeqDB;
 use rayon::iter::ParallelIterator;
@@ -115,6 +116,9 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
         let reader_buf_size = 1_000_000;
         let (batch_send, batch_recv) = crossbeam::channel::bounded::<SeqBatch>(4);
         let reader_handle = scope.spawn(move || {
+            let progress = indicatif::ProgressBar::new_spinner();
+            progress.set_style(ProgressStyle::with_template("{pos} {msg}").unwrap());
+            progress.set_message(" Sequences read");
             let mut buf = SeqDB::new();
             let mut buf_total_len = 0_usize;
             while let Some(seq) = seqs.stream_next(){
@@ -125,10 +129,12 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
                     buf = SeqDB::new();
                     buf_total_len = 0;
                 }
+                progress.inc(1);
             }
             if buf_total_len > 0 { // Last batch
                 batch_send.send(SeqBatch{seqs: buf}).unwrap(); 
             }
+            progress.finish();
             drop(batch_send);
         });
 
