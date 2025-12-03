@@ -85,10 +85,10 @@ pub enum Subcommands {
         #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
         input: PathBuf,
 
-        #[arg(help = "Precomputed SBWT file of k-mers (optional)", short, long)]
+        #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
         sbwt_path: Option<PathBuf>,
 
-        #[arg(help = "Precomputed LCS file of k-mers (optional)", short, long)]
+        #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
         lcs_path: Option<PathBuf>,
 
         #[arg(help = "Output filename", short, long, required = true)]
@@ -185,8 +185,11 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true)]
     Import {
-        #[arg(help = "Precomputed bit matrix SBWT", long = "sbwt", short = 's')]
-        sbwt: Option<PathBuf>,
+        #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
+        sbwt_path: Option<PathBuf>,
+
+        #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
+        lcs_path: Option<PathBuf>,
 
         #[arg(help = "Index text dump file prefix, as written by Fulgor 4.0.0", long = "color-dump-prefix", short = 'c', required = true)]
         color_dump_prefix: PathBuf,
@@ -531,7 +534,7 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
-fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: &mut io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
+fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
     let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
         log::info!("Loading SBWT from {}", sbwt_path.display());
         let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
@@ -588,7 +591,7 @@ fn main() {
             let mut input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
-            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, &mut input_stream, k, n_threads);
+            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
 
             match index_type {
                 ColoringType::Bitmaps => {
@@ -641,7 +644,7 @@ fn main() {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode, sample_distance);
         },
-        Subcommands::Import { sbwt: sbwt_path, color_dump_prefix, out: out_path, n_threads, temp_dir, index_type, sample_distance} => {
+        Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, index_type, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
             let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
             let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
@@ -654,31 +657,13 @@ fn main() {
             log::info!("Reading metadata from {}", metadata_filename);
             let metadata = index_import::read_index_dump_metadata(BufReader::new(File::open(&metadata_filename).unwrap()));
 
-            let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
-                log::info!("Loading SBWT from {}", sbwt_path.display());
-                let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
-                let sbwt::SbwtIndexVariant::SubsetMatrix(sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
-                if sbwt.k() != metadata.k {
-                    log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
-                    return;
-                }
+            let input_stream = io::ChainedInputStream::new(vec![PathBuf::from(&unitig_filename)]) ;
+            let (sbwt,lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, metadata.k, n_threads);
 
-                log::info!("Building LCS array");
-                let lcs = LcsArray::from_sbwt(&sbwt, n_threads);
-                (sbwt, lcs)
-            } else {
-                log::info!("No precomputed SBWT given. Building the SBWT and the LCS array");
-                let input_stream = io::ChainedInputStream::new(vec![PathBuf::from(&unitig_filename)]);
-                let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-                    .add_rev_comp(true)
-                    .k(metadata.k)
-                    .build_lcs(true)
-                    .n_threads(n_threads)
-                    .precalc_length(8)
-                    .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(false).temp_dir(&temp_dir))
-                .run(input_stream); // No batch dedup because unitigs should not have duplicates
-                (sbwt, lcs.unwrap())
-            };
+            if sbwt.k() != metadata.k {
+                log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
+                return;
+            }
 
             let mut out = BufWriter::new(File::create(&out_path).unwrap());
 
