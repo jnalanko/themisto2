@@ -5,7 +5,7 @@
 // currently super complicated and full of landmines and depends on obscure details of generic associated
 // types. Don't do it. See: https://lucumr.pocoo.org/2022/9/11/abstracting-over-ownership/
 
-use crate::iterators::{USizeIterator, USizeIteratorGenerator, VecIterator};
+use crate::iterators::{USizeIteratorGenerator, VecIterator};
 
 // This trait represents a read-only storage struct that stores many color sets.
 // The sets are viewed through returned structs implementing the associated color set
@@ -50,7 +50,9 @@ pub trait ColorSetStorage {
     // Storage::View::Owned::View are the same type, but the compiler does not
     // see that. So the solution is to put the conversion functions here at the
     // Storage trait, and now the types do not nest like that.
+    #[allow(dead_code)] // There will be useful later
     fn view_to_owned(&self, view: &Self::SetView<'_>) -> Self::OwnedSet;
+    #[allow(dead_code)] // These will be useful later
     fn owned_to_view<'a>(&self, owned: &'a Self::OwnedSet) -> Self::SetView<'a>;
 
     // Set intersection: a := a ∩ b
@@ -61,6 +63,7 @@ pub trait ColorSetStorage {
 
     // Provided method: new from an iterator that gives iterators to color sets.
     // While iterating, stores the color sets in a reused local buffer.
+    #[allow(dead_code)] // Could be useful later
     fn new_from_iter_of_iters<
         InnerIter: Iterator<Item = usize>, 
         OuterIter: Iterator<Item = InnerIter>>
@@ -166,6 +169,8 @@ impl <InnerIter: Iterator<Item = usize>, OuterIter: Iterator<Item = InnerIter>> 
 
 #[cfg(test)]
 mod tests {
+
+    use crate::iterators::USizeIterator;
 
     use super::*;
 
