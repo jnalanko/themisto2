@@ -88,6 +88,9 @@ pub enum Subcommands {
         #[arg(help = "Precomputed SBWT file of k-mers (optional)", short, long)]
         sbwt_path: Option<PathBuf>,
 
+        #[arg(help = "Precomputed LCS file of k-mers (optional)", short, long)]
+        lcs_path: Option<PathBuf>,
+
         #[arg(help = "Output filename", short, long, required = true)]
         output: PathBuf,
 
@@ -537,7 +540,7 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, from_unitigs} => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -553,8 +556,14 @@ fn main() {
 
                 log::info!("Building select support for SBWT");
                 sbwt.build_select();
-                log::info!("Building LCS array");
-                let lcs = LcsArray::from_sbwt(&sbwt, n_threads); // TODO: load LCS
+
+                let lcs = if let Some(lcs_path) = lcs_path {
+                    log::info!("Loading the LCS array from {}", lcs_path.display());
+                    LcsArray::load(&mut BufReader::new(File::open(lcs_path).unwrap())).unwrap()
+                } else {
+                    log::info!("Building LCS array");
+                    LcsArray::from_sbwt(&sbwt, n_threads)
+                };
                 (sbwt, lcs)
             } else {
                 let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
