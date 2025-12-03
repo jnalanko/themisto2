@@ -328,7 +328,7 @@ fn print_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_th
     println!("Number of distinct color sets: {}", stats.n_distinct_color_sets);
     println!("Mean size of distinct color sets: {:.2}", stats.mean_size_of_distinct_sets());
     println!("Mean k-mer color set size: {:.2}", stats.mean_kmer_color_set_size());
-    println!("Fraction of sampled k-mers: {:.2} %", stats.sample_fraction() * 100.0);
+    println!("Fraction of key k-mers: {:.2}%", stats.sample_fraction() * 100.0);
 }
 
 
