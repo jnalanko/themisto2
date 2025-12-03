@@ -102,9 +102,9 @@ fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize, n_threads:
             hasher_handles.push(hasher_handle);
         }
 
-        reader_handle.join();
+        reader_handle.join().unwrap();
         for h in hasher_handles {
-            h.join();
+            h.join().unwrap();
         }
 
         Arc::try_unwrap(hashes_mutex).unwrap().into_inner().unwrap()
