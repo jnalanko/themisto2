@@ -122,7 +122,7 @@ impl<'a> Iterator for ColorSetViewIterator<'a> {
                 } else {
                     let x = int_vec_slice.vec.get(int_vec_slice.start + self.pos);
                     self.pos += 1;
-                    Some(x as usize)
+                    Some(x)
                 }
             },
         }
@@ -370,7 +370,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
             let piece = sorted_sparse_sets.get(sparse_id);
             for i in piece.start..piece.end {
-                sort_buf.push(piece.vec.get(i) as usize);
+                sort_buf.push(piece.vec.get(i));
             }
             sort_buf.sort();
             for offset in 0..sort_buf.len() {
@@ -419,6 +419,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 let len = iv_slice.end - iv_slice.start;
                 let mut new_iv = CompactIntVec::new(len, iv_slice.vec.bit_width());
                 let mut push_idx = 0_usize;
+                #[allow(clippy::explicit_counter_loop)] // I don't want to touch it
                 for i in iv_slice.start..iv_slice.end {
                     new_iv.set(push_idx, iv_slice.vec.get(i));
                     push_idx += 1;
@@ -584,6 +585,7 @@ impl SparseDenseStorage {
         } else {
             let mut push_idx = 0_usize;
             let mut iv = CompactIntVec::new(elements.len(), bits_per_color);
+            #[allow(clippy::explicit_counter_loop)] // I don't want to touch it
             for color in elements.iter() {
                 iv.set(push_idx, color);
                 push_idx += 1;
@@ -595,10 +597,12 @@ impl SparseDenseStorage {
 }
 
 impl SortedIntVecs {
+    #[allow(dead_code)]
     fn new(bit_width: usize) -> Self {
         SortedIntVecs{concat: CompactIntVec::new(0, bit_width), starts: vec![0]}
     }
 
+    #[allow(dead_code)]
     fn new_with_sizes(set_sizes: impl Iterator<Item = usize>, n_sets: usize, bit_width: usize) -> Self {
         let mut starts: Vec<usize> = vec![0; n_sets + 1];
         let mut total_set_size = 0_usize;
@@ -653,6 +657,7 @@ impl BitMaps {
         BitMaps{bitmap_data: bitvec::vec::BitVec::new(), individual_length}
     }
 
+    #[allow(dead_code)]
     fn new_with_zero_init(individual_length: usize, n_sets: usize) -> Self {
         BitMaps{bitmap_data: bitvec![0; n_sets*individual_length], individual_length}
     }
@@ -670,6 +675,7 @@ impl BitMaps {
         &self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
     }
 
+    #[allow(dead_code)]
     fn get_mut(&mut self, bitmap_idx: usize) -> &mut BitSlice {
         &mut self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
     }
