@@ -13,6 +13,9 @@ use std::io::Write;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Acquire;
+use std::sync::atomic::Ordering::Release;
 
 use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::CompactIntVec;
@@ -914,4 +917,61 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
         metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
+
+    pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {
+        log::info!("Computing size of distinct color sets");
+        let total_size_of_distinct_color_sets: usize = (0..self.sets.n_sets()).map(|i| self.sets.get_set_view(i).len()).sum();
+
+        log::info!("Initializing de Bruijn graph");
+        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
+        let total_kmer_color_set_size = AtomicUsize::new(0);
+
+        dbg.iter_unitigs_with_callback(|nodes|{
+            let mut cur_color_set_len: Option<usize> = None;
+            for v in nodes.iter().rev() {
+                if self.map.sampling.get(v.id) { 
+                    let id = self.colex_to_set_id(v.id);
+                    cur_color_set_len = Some(self.set_id_to_set(id).len());
+                } else {
+                    // Same set as previous
+                    assert!(cur_color_set_len.is_some()); // End of unitig should always be sampled
+                }
+                total_kmer_color_set_size.fetch_add(cur_color_set_len.unwrap(), Release);
+            }
+        }, n_threads);
+
+        let total_kmer_color_set_size = total_kmer_color_set_size.load(Acquire);
+        let n_sampled_kmers = self.map.sampling.count_ones();
+
+        IndexStats {
+            n_colors: self.sets.n_colors(),
+            n_kmers: self.sbwt.n_kmers(),
+            n_sbwt_sets: self.sbwt.n_sets(),
+            n_distinct_color_sets: self.sets.n_sets(),
+            n_sampled_kmers,
+            total_size_of_distinct_color_sets,
+            total_kmer_color_set_size,
+        }
+    }
+}
+
+pub struct IndexStats {
+    pub n_colors: usize,
+    pub n_kmers: usize,
+    pub n_sbwt_sets: usize,
+    pub n_distinct_color_sets: usize,
+    pub n_sampled_kmers: usize,
+    pub total_size_of_distinct_color_sets: usize,
+    pub total_kmer_color_set_size: usize,
+}
+
+impl IndexStats {
+    fn mean_size_of_distinct_sets(&self) -> f64 {
+        self.total_size_of_distinct_color_sets as f64 / self.n_distinct_color_sets as f64
+    }
+
+    fn mean_kmer_color_set_size(&self) -> f64 {
+        self.total_kmer_color_set_size as f64 / self.n_kmers as f64
+    }
+
 }
