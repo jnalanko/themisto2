@@ -160,7 +160,7 @@ struct DeduplicatingBufferIter {
     bitmap_iter: Option<OwningBitVecOnesIterator>,
 }
 
-impl<'a> Iterator for DeduplicatingBufferIter {
+impl Iterator for DeduplicatingBufferIter {
     type Item = usize;
     
     fn next(&mut self) -> Option<Self::Item> {
@@ -177,17 +177,15 @@ impl<'a> Iterator for DeduplicatingBufferIter {
 pub struct DistinctColexComputation<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     input: jseqio::reader::DynamicFastXReader,
-    color: usize,
     set_ids: DeduplicatingBuffer,
 }
 
 impl<'a> DistinctColexComputation<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader, color: usize) -> Self {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
             streaming_index,
             input,
-            color,
             set_ids: DeduplicatingBuffer::new(sbwt.n_sets()),
         }
     }
@@ -235,7 +233,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
             self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
                 log::info!("Processing color {}", color);
                 let reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                let gen = DistinctColexComputation::new(&self.sbwt, &self.lcs, reader, color);
+                let gen = DistinctColexComputation::new(self.sbwt, self.lcs, reader);
                 let distinct_colex_positions = gen.run();
                 for colex in distinct_colex_positions.into_iter() {
                     let set_id = if let Some(filter) = &self.filter {
@@ -260,76 +258,6 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
         self.filter = Some(filter)
-    }
-}
-
-pub struct MergedElementGenerator<'a, CSS: ColorSetStorage + Sync + Send> {
-    pub merged_sbwt: &'a SbwtIndex<SubsetMatrix>,
-    pub merged_lcs: &'a LcsArray,
-    pub coloring1: &'a CompactColexKmers<CSS>,
-    pub coloring2: &'a CompactColexKmers<CSS>,
-    pub dbg1: &'a Dbg<'a, SubsetMatrix>,
-    pub dbg2: &'a Dbg<'a, SubsetMatrix>,
-    pub filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
-}
-
-impl<'a, CSS: ColorSetStorage + Sync + Send> MergedElementGenerator<'a, CSS> {
-
-    fn process_dbg<'b>(&'b self, dbg: &Dbg<'a, SubsetMatrix>, coloring: &CompactColexKmers<CSS>, color_offset: usize, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        let si = StreamingIndex::new(&self.merged_sbwt, &self.merged_lcs);
-        let k = self.merged_sbwt.k();
-        assert!(self.merged_sbwt.k() == k);
-        let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
-        dbg.iter_unitigs_with_callback(|nodes| {
-            let mut unitig = Vec::<u8>::with_capacity(nodes.len());
-            dbg.push_unitig_string(nodes, &mut unitig);
-
-            let mut merged_colexes_iter = si.matching_statistics_iter(&unitig)
-            .skip(k-1)
-            .map(|(match_len, range)| {
-                assert!(match_len == k, "k-mer not found in merged sbwt"); // TODO: print which k-mer it is
-                assert!(range.len() == 1);
-                range.start
-            });
-
-            for node in nodes {
-                let colex = node.id;
-                let merged_colex = merged_colexes_iter.next().expect("Programming mistake: merged colex iter has fewer elements than DBG nodes");
-
-                let set_id = if let Some(filter) = &self.filter {
-                    if !filter.get(merged_colex) {
-                        continue // Do not report this
-                    } else {
-                        // Assign new id
-                        let new_id = filter.rank(merged_colex);
-                        new_id
-                    }
-                } else {
-                    merged_colex // No filter
-                };
-
-                let cs = coloring.colex_to_set(colex);
-                for color in cs.iter() {
-                    callback(SetElement{set_id, color: color + color_offset}) 
-                }
-            }
-            bar.inc(nodes.len() as u64);
-        }, n_threads);
-        bar.finish();
-
-    }
-
-}
-
-impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for MergedElementGenerator<'a, CSS> {
-
-    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        self.process_dbg(self.dbg1, self.coloring1, 0, &callback, n_threads);
-        self.process_dbg(self.dbg2, self.coloring2, self.coloring1.get_set_storage().n_colors(), &callback, n_threads);
-    }
-
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-        self.filter = Some(filter);
     }
 }
 
