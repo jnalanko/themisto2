@@ -15,7 +15,7 @@ set -xueo pipefail
 /usr/bin/time -v themisto2 merge --index-file-list fof/merge.txt -o index/merge.thm2 --temp-dir temp -d 30 -t 32 2>&1 | tee logs/merge.log
 
 # Export
-/usr/bin/time -v themisto2 export -i index/seqs.thm2 -o export/seqs -t 32 2>&1 | tee logs/half2.log
-/usr/bin/time -v themisto2 export -i index/unitigs.thm2 -o export/seqs -t 32 2>&1 | tee logs/half2.log
-/usr/bin/time -v themisto2 export -i index/merge.thm2 -o export/seqs -t 32 2>&1 | tee logs/half2.log
+/usr/bin/time -v themisto2 export -i index/seqs.thm2 -o export/seqs -t 32 2>&1 | tee logs/seqs-export.log
+/usr/bin/time -v themisto2 export -i index/unitigs.thm2 -o export/seqs -t 32 2>&1 | tee logs/unitigs-export.log
+/usr/bin/time -v themisto2 export -i index/merge.thm2 -o export/seqs -t 32 2>&1 | tee logs/merged-export.log
 
