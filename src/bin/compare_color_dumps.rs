@@ -79,6 +79,8 @@ fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize, n_threads:
 
                 bar.inc(1);
             }
+
+            #[allow(clippy::len_zero)] // Shut up
             if batch.lines.len() > 0 {
                 batch_send.send(batch).unwrap();
             }
@@ -114,6 +116,7 @@ fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize, n_threads:
 
 }
 
+#[allow(dead_code)]
 fn canonicalize_rotation_of_cyclic_unitig(unitig: &mut Vec<u8>, k: usize) {
 
     assert!(unitig.len() >= k);
@@ -135,6 +138,7 @@ fn canonicalize_rotation_of_cyclic_unitig(unitig: &mut Vec<u8>, k: usize) {
 
 }
 
+#[allow(dead_code)]
 fn canonicalize_unitig(unitig: &mut Vec<u8>, k: usize) {
     if unitig[0..k-1] == unitig[unitig.len()-(k-1) ..] {
         // Cyclic unitig
@@ -151,6 +155,7 @@ fn read_unitigs(filename: impl AsRef<Path>) -> SeqDB {
     jseqio::reader::DynamicFastXReader::from_file(&filename).unwrap().into_db().unwrap()
 }
 
+#[allow(dead_code)]
 fn read_and_canonicalize_unitigs(filename: impl AsRef<Path>, k: usize) -> SeqDB {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&filename).unwrap();
     let mut db = jseqio::seq_db::SeqDB::new();
@@ -421,7 +426,6 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     /*
     #[test]
