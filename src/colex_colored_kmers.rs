@@ -805,6 +805,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     }
                     colex += 1;
                 }
+                unitigs_out.flush().unwrap();
                 log::info!("Found {} cyclic unitigs", unitig_id - n_acyclic);
                 unitig_id
             });
