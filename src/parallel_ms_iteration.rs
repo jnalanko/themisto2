@@ -1,10 +1,10 @@
-use std::{collections::{HashSet, hash_set::IntoIter}, ops::{Range, Sub}, path::PathBuf};
+use std::{collections::HashSet, ops::Range, path::PathBuf};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
-use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, dbg::Dbg, reverse_complement_in_place};
+use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::{ColorSetStorage, ColorSetView}, io::ChainedInputStream, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
