@@ -88,27 +88,6 @@ impl<B: BufRead> ColorSetDumpIterGenerator<B> {
     }
 }
 
-// Parses the set and pushed it to `push_set_to`. Returns the color set id.
-pub fn parse_color_set_line(line: &String, push_set_to: &mut Vec<usize>) -> usize {
-    // Lines should look like this:
-    // color_set_id=9 size=7 3 4 9 12 14 15 16
-
-    let line_bytes = line.trim_end().as_bytes();
-    let mut tokens = line_bytes.split(|c| *c == b' ');
-
-    let first_token = tokens.next().unwrap();
-    assert_eq!(&first_token[0..13], b"color_set_id=");
-    let color_set_id: usize = ascii_to_int(&first_token[13..]);
-
-    let second_token = tokens.next().unwrap();
-    assert_eq!(&second_token[0..5], b"size=");
-    let _ = ascii_to_int(&second_token[5..]); // Length of the color set
-
-    push_set_to.extend(tokens.map(ascii_to_int));
-
-    color_set_id
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct IndexDumpMetadata {
     pub num_unitigs: usize,
@@ -157,20 +136,4 @@ pub fn read_index_dump_metadata(mut reader: impl BufRead) -> IndexDumpMetadata {
         k: k.expect("k missing from metadata")
     }
 
-}
-
-pub fn build_colex_to_color_set_mapping(unitig_input: impl BufRead + Send + 'static, sbwt: &sbwt::SbwtIndex<sbwt::SubsetMatrix>, lcs: &sbwt::LcsArray) -> Vec<usize> {
-    let mut reader = jseqio::reader::DynamicFastXReader::new(unitig_input).unwrap();
-    let index = sbwt::StreamingIndex::new(sbwt, lcs);
-    let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
-    while let Some(rec) = reader.read_next().unwrap() {
-        let color_set_id = get_color_set_id_from_fasta_header(rec.head);
-        for (match_len, colex_range) in index.matching_statistics(rec.seq) {
-            if match_len == sbwt.k() {
-                assert_eq!(colex_range.len(), 1);
-                colex_to_color_set_id[colex_range.start] = color_set_id;
-            }
-        }
-    }
-    colex_to_color_set_id
 }
