@@ -143,7 +143,7 @@ fn mark_new_key_kmers<'a, 'b, CSS: ColorSetStorage + Send + Sync>(coloring1: &'a
     (key_kmer_marks.into_bitvec(), dbg1, dbg2)
 }
 
-pub fn new_merge<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
 
     log::info!("Computing the sbwt merge plan");
     let merge_plan = sbwt::MergeInterleaving::new(coloring1.sbwt(), coloring2.sbwt(), optimize_peak_ram, n_threads);
@@ -383,7 +383,7 @@ mod tests {
             let ccc2 = CompactColexKmers::new(sbwt2, lcs2, colex_map_2, storage_2, None);
             let ccc_both = CompactColexKmers::new(sbwt_both, lcs_both, colex_map_both, storage_both, None);
 
-            let ccc_merged = super::new_merge(ccc1, ccc2, true, 5, n_threads);
+            let ccc_merged = super::merge_compact_colex_kmers(ccc1, ccc2, true, 5, n_threads);
             let sbwt_merged = &ccc_merged.sbwt();
 
             for colex in 0..ccc_both.sbwt().n_sets() {
