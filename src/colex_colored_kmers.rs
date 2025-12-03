@@ -926,6 +926,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let total_kmer_color_set_size = AtomicUsize::new(0);
 
+        let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
         dbg.iter_unitigs_with_callback(|nodes|{
             let mut cur_color_set_len: Option<usize> = None;
             for v in nodes.iter().rev() {
@@ -938,7 +939,9 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 }
                 total_kmer_color_set_size.fetch_add(cur_color_set_len.unwrap(), Release);
             }
+            bar.inc(nodes.len() as u64);
         }, n_threads);
+        bar.finish();
 
         let total_kmer_color_set_size = total_kmer_color_set_size.load(Acquire);
         let n_sampled_kmers = self.map.sampling.count_ones();
