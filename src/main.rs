@@ -531,6 +531,45 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
+fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: &mut io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
+    let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
+        log::info!("Loading SBWT from {}", sbwt_path.display());
+        let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
+        let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+
+        assert_eq!(sbwt.k(), k);
+
+        log::info!("Building select support for SBWT");
+        sbwt.build_select();
+
+        let lcs = if let Some(lcs_path) = lcs_path {
+            log::info!("Loading the LCS array from {}", lcs_path.display());
+            LcsArray::load(&mut BufReader::new(File::open(lcs_path).unwrap())).unwrap()
+        } else {
+            log::info!("Building LCS array");
+            LcsArray::from_sbwt(&sbwt, n_threads)
+        };
+        (sbwt, lcs)
+    } else {
+        let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            .add_rev_comp(true)
+            .k(k)
+            .build_lcs(true)
+            .n_threads(n_threads)
+            .precalc_length(8)
+            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(temp_dir))
+        .run(input_stream);
+        log::info!("Building SBWT select support");
+        sbwt.build_select();
+        let sbwt = sbwt;
+        let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
+        (sbwt, lcs)
+    };
+
+    (sbwt, lcs)
+
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -546,40 +585,10 @@ fn main() {
             }
 
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let input_stream = io::ChainedInputStream::new(input_paths.clone());
+            let mut input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
-            let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
-                log::info!("Loading SBWT from {}", sbwt_path.display());
-                let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
-                let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
-
-                log::info!("Building select support for SBWT");
-                sbwt.build_select();
-
-                let lcs = if let Some(lcs_path) = lcs_path {
-                    log::info!("Loading the LCS array from {}", lcs_path.display());
-                    LcsArray::load(&mut BufReader::new(File::open(lcs_path).unwrap())).unwrap()
-                } else {
-                    log::info!("Building LCS array");
-                    LcsArray::from_sbwt(&sbwt, n_threads)
-                };
-                (sbwt, lcs)
-            } else {
-                let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-                    .add_rev_comp(true)
-                    .k(k)
-                    .build_lcs(true)
-                    .n_threads(n_threads)
-                    .precalc_length(8)
-                    .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
-                .run(input_stream);
-                log::info!("Building SBWT select support");
-                sbwt.build_select();
-                let sbwt = sbwt;
-                let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
-                (sbwt, lcs)
-            };
+            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, &mut input_stream, k, n_threads);
 
             match index_type {
                 ColoringType::Bitmaps => {
