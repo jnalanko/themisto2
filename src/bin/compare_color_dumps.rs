@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::{fs::File, io::{BufRead, BufReader}, path::Path};
+use std::{fs::File, io::{BufRead, BufReader}, path::Path, sync::{Arc, Mutex}, thread};
 use jseqio::{reverse_complement, seq_db::SeqDB};
 use sha1::{Sha1, Digest};
 use rayon::prelude::*;
@@ -21,41 +21,97 @@ fn get_color_set_id(fasta_header: &[u8]) -> usize {
     ascii_to_int(tokens.next().expect("Color set id missing"))
 }
 
-fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize) -> Vec<[u8; 20]> {
+struct ColorSetBatch {
+    lines: Vec<String>
+}
+
+impl ColorSetBatch {
+    fn process(self) -> Vec::<(usize, [u8; 20])>{
+        let mut hashes = Vec::<(usize, [u8; 20])>::new(); // pairs (color set id, hash)
+        for line in self.lines {
+            let line_bytes = line.trim_end().as_bytes();
+            let mut tokens = line_bytes.split(|c| *c == b' ');
+
+            let first_token = tokens.next().unwrap();
+            assert_eq!(&first_token[0..13], b"color_set_id=");
+            let color_set_id: usize = ascii_to_int(&first_token[13..]);
+            //assert!(color_set_id < num_color_sets);
+
+            let second_token = tokens.next().unwrap();
+            assert_eq!(&second_token[0..5], b"size=");
+            let list_len = ascii_to_int(&second_token[5..]);
+
+            let color_set: Vec<usize> = tokens.map(ascii_to_int).collect();
+            assert_eq!(color_set.len(), list_len);
+
+            let hash = hash_color_set(&color_set);
+            hashes.push((color_set_id, hash))
+        }
+        hashes
+    }
+}
+
+fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize, n_threads: usize) -> Vec<[u8; 20]> {
     // Lines should look like this:
     // color_set_id=9 size=7 3 4 9 12 14 15 16
 
-    let mut hashes = vec![[0_u8; 20]; num_color_sets];
 
-    let mut reader = BufReader::new(File::open(filename).unwrap());
-    let mut line = String::new();
+    let hashes = thread::scope(|scope|{
+        let hashes = vec![[0_u8; 20]; num_color_sets];
+        let hashes_mutex = Arc::new(Mutex::new(hashes));
 
-    let bar = indicatif::ProgressBar::new(num_color_sets as u64);
-    while reader.read_line(&mut line).unwrap() > 0 {
-        let line_bytes = line.trim_end().as_bytes();
-        let mut tokens = line_bytes.split(|c| *c == b' ');
+        let mut reader = BufReader::new(File::open(filename).unwrap());
+        let (batch_send, batch_recv) = crossbeam::channel::bounded::<ColorSetBatch>(10);
+        let reader_handle = scope.spawn(move || {
+            let bar = indicatif::ProgressBar::new(num_color_sets as u64);
+            let mut line = String::new();
+            let mut batch = ColorSetBatch{ lines: vec![] };
+            let mut batch_total_len = 0_usize;
+            while reader.read_line(&mut line).unwrap() > 0 {
+                batch_total_len += line.len();
+                batch.lines.push(line.clone());
+                if batch_total_len > 1_000_000 {
+                    batch_send.send(batch).unwrap();
+                    batch = ColorSetBatch{ lines: vec![] };
+                    batch_total_len = 0;
+                }
+                line.clear();
 
-        let first_token = tokens.next().unwrap();
-        assert_eq!(&first_token[0..13], b"color_set_id=");
-        let color_set_id: usize = ascii_to_int(&first_token[13..]);
-        assert!(color_set_id < num_color_sets);
+                bar.inc(1);
+            }
+            if batch.lines.len() > 0 {
+                batch_send.send(batch).unwrap();
+            }
+            bar.finish();
+            drop(batch_send);
+        });
 
-        let second_token = tokens.next().unwrap();
-        assert_eq!(&second_token[0..5], b"size=");
-        let list_len = ascii_to_int(&second_token[5..]);
+        let mut hasher_handles = Vec::new();
+        for _ in 0..n_threads {
+            let recv_clone = batch_recv.clone();
+            let hashes_mutex_clone = hashes_mutex.clone();
+            let hasher_handle = scope.spawn(move || {
+                while let Ok(batch) = recv_clone.recv() {
+                    let hashes = batch.process();
+                    let mut table = hashes_mutex_clone.lock().unwrap();
+                    for (p, h) in hashes {
+                        table[p] = h;
+                    }
+                }
+            });
+            hasher_handles.push(hasher_handle);
+        }
 
-        let color_set: Vec<usize> = tokens.map(ascii_to_int).collect();
-        assert_eq!(color_set.len(), list_len);
+        reader_handle.join();
+        for h in hasher_handles {
+            h.join();
+        }
 
-        assert!(hashes[color_set_id] == [0_u8; 20]);
-        hashes[color_set_id] = hash_color_set(&color_set);
-
-        line.clear();
-        bar.inc(1);
-    }
-    bar.finish();
+        Arc::try_unwrap(hashes_mutex).unwrap().into_inner().unwrap()
+    });
 
     hashes
+
 }
 
 fn canonicalize_rotation_of_cyclic_unitig(unitig: &mut Vec<u8>, k: usize) {
@@ -354,8 +410,8 @@ fn main() {
     eprintln!("k-mer checksums match: {:?}", A_checksum);
 
     eprintln!("Reading and hashing distinct color sets...");
-    let A_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets);
-    let B_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets);
+    let A_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets, n_threads);
+    let B_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets, n_threads);
 
     eprintln!("Comparing k-mer color sets...");
     compare_color_sets(&A_unitigs, &B_unitigs, &A_color_set_hashes, &B_color_set_hashes, k);
