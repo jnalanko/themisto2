@@ -34,6 +34,7 @@ pub(crate) fn bitvec_to_simple_sds_bitvec(bv: bitvec::vec::BitVec) -> simple_sds
     simple_sds_sbwt::bit_vector::BitVector::from(bitvec_to_simple_sds_raw_bitvec(bv))
 }
 
+#[allow(dead_code)]
 pub struct VecVecSeqStream{
     vv: Vec<Vec<u8>>,
     pos: usize,
@@ -51,6 +52,7 @@ impl sbwt::SeqStream for VecVecSeqStream {
 }
 
 impl VecVecSeqStream {
+    #[allow(dead_code)]
     pub fn new(seqs: Vec<Vec<u8>>) -> Self {
         Self { vv: seqs, pos: 0 }
     }
