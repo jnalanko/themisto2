@@ -1,10 +1,10 @@
-use std::{cmp::min, collections::HashSet, marker::PhantomData, sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering::{Acquire, Relaxed, Release, SeqCst}}}};
+use std::{cmp::min, collections::HashSet, sync::{Arc, Mutex, atomic::{AtomicU8, AtomicUsize, Ordering::{Relaxed, Release}}}};
 
-use rayon::{iter::{IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
+use rayon::{iter::{IntoParallelIterator, ParallelIterator}};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq, dbg::Dbg};
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, int_vec::AtomicCompactIntVec, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
 
 
 // Returns (len, colex, position in sfs slice)
@@ -60,7 +60,7 @@ fn create_minimizer_function<'b>(m: usize) -> impl (for<'a> Fn(&'a [u8]) -> (usi
 }
 
 // The finimizer function should return a pair (start, len)
-#[allow(clippy::collapsible_else_if)]
+#[allow(clippy::collapsible_else_if, dead_code)]
 fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, minimizer: &[u8], minimizer_fn: impl for<'a> Fn(&'a [u8]) -> (usize, usize)) -> Vec<usize> {
     let k = sbwt.k();
 
@@ -200,7 +200,7 @@ impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_
         bar.finish();
     }
 
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+    fn set_filter(&mut self, _filter: simple_sds_sbwt::bit_vector::BitVector) {
         unimplemented!()
     }
 }
@@ -352,6 +352,7 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
     }
 }
 
+#[allow(dead_code)] // Old code but could be useful
 pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
     let lcs = index.lcs();
