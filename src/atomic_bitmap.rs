@@ -32,6 +32,7 @@ impl AtomicBitmap {
         (self.data[word_idx].load(std::sync::atomic::Ordering::Acquire) & mask) != 0
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.len
     }
