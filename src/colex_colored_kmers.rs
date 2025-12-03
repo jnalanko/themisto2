@@ -3,6 +3,7 @@ use bitvec::order::Lsb0;
 use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use jseqio::reverse_complement;
+use jseqio::seq_db::SeqDB;
 use rayon::iter::ParallelIterator;
 use sbwt::dbg::Dbg;
 use sbwt::{MergeInterleaving, reverse_complement_in_place};
@@ -54,6 +55,43 @@ pub struct ColexToColorSetMap {
     pub color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
 
+
+struct SeqBatch {
+    seqs: SeqDB,
+}
+
+impl SeqBatch {
+    fn process(self, sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, dbg: &Dbg<SubsetMatrix>, marks: &AtomicBitmap) {
+        let k = sbwt.k();
+        let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
+        for rec in self.seqs.iter() {
+            let seq = rec.seq;
+            for ACGT_run in seq.split(|&c| !crate::util::IS_DNA[c as usize]) {
+                if ACGT_run.len() < k { continue }
+
+                let first = sbwt.search(&ACGT_run[0..k]).unwrap_or_else(|| {
+                    panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[0..k]));
+                });
+
+                assert!(first.len() == 1);
+
+                in_neighbor_buf.clear();
+                dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
+                for (in_node, _) in in_neighbor_buf.iter() {
+                    marks.set(in_node.id, true);
+                }
+
+                let last = sbwt.search(&ACGT_run[ACGT_run.len()-k..]).unwrap_or_else(|| {
+                    panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[ACGT_run.len()-k..]));
+                });
+
+                assert!(last.len() == 1);
+                marks.set(last.start, true);
+            }
+        }
+    }
+}
+
 // key k-mers as defined in the Themisto Bioinformatics paper:
 // - Last k-mer of unitig or input sequence
 // - In-neighbors of first k-mer of unitig or input sequence
@@ -61,43 +99,53 @@ pub struct ColexToColorSetMap {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would need to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
-pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream, n_threads: usize) -> bitvec::vec::BitVec {
-    let k = sbwt.k();
+pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream + Send, n_threads: usize) -> bitvec::vec::BitVec {
 
     log::info!("Initializing DBG");
     let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
-    let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
     let marks = AtomicBitmap::new(sbwt.n_sets());
-
-    // This bit vector of length 256 marks the ascii values of these characters: acgtACGT
-    const IS_DNA: BitArray<[u32; 8]> = bitvec::bitarr![const u32, Lsb0; 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let dbg_ref = &dbg; // To borrow for worker threads
+    let marks_ref = &marks; // To borrow for worker threads
 
     log::info!("Searching first and last k-mer of every input sequence");
-    while let Some(seq) = seqs.stream_next(){
-        for ACGT_run in seq.split(|&c| !IS_DNA[c as usize]) {
-            if ACGT_run.len() < k { continue }
+    std::thread::scope(|scope| {
 
-            let first = sbwt.search(&ACGT_run[0..k]).unwrap_or_else(|| {
-                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[0..k]));     
-            });
-
-            assert!(first.len() == 1);
-
-            in_neighbor_buf.clear();
-            dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
-            for (in_node, _) in in_neighbor_buf.iter() {
-                marks.set(in_node.id, true);
+        let reader_buf_size = 1_000_000;
+        let (batch_send, batch_recv) = crossbeam::channel::bounded::<SeqBatch>(10);
+        let reader_handle = scope.spawn(move || {
+            let mut buf = SeqDB::new();
+            let mut buf_total_len = 0_usize;
+            while let Some(seq) = seqs.stream_next(){
+                buf.push_seq(seq);
+                buf_total_len += seq.len();
+                if buf_total_len > reader_buf_size {
+                    batch_send.send(SeqBatch{seqs: buf}).unwrap(); 
+                    buf = SeqDB::new();
+                    buf_total_len = 0;
+                }
             }
+            if buf_total_len > 0 { // Last batch
+                batch_send.send(SeqBatch{seqs: buf}).unwrap(); 
+            }
+            drop(batch_send);
+        });
 
-            let last = sbwt.search(&ACGT_run[ACGT_run.len()-k..]).unwrap_or_else(|| {
-                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[ACGT_run.len()-k..]));     
+        let mut worker_handles = Vec::new();
+        for _ in 0..n_threads {
+            let recv_clone = batch_recv.clone();
+            let worker_handle = scope.spawn(move || {
+                while let Ok(batch) = recv_clone.recv() {
+                    batch.process(sbwt, lcs, dbg_ref, marks_ref);
+                }
             });
-
-            assert!(last.len() == 1);
-            marks.set(last.start, true);
+            worker_handles.push(worker_handle);
         }
-    }
 
+        reader_handle.join().unwrap();
+        for h in worker_handles {
+            h.join().unwrap();
+        }
+    });
 
     log::info!("Sampling along unitigs");
     dbg.iter_unitigs_with_callback(|nodes| {

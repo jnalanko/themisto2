@@ -1,7 +1,10 @@
 use std::{cmp::min, io::{Cursor, Read}, ops::Range};
 
-use bitvec::order::Lsb0;
+use bitvec::{array::BitArray, order::Lsb0};
 use simple_sds_sbwt::serialize::Serialize;
+
+// This bit vector of length 256 marks the ascii values of these characters: acgtACGT
+pub const IS_DNA: BitArray<[u32; 8]> = bitvec::bitarr![const u32, Lsb0; 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 
 pub(crate) fn bitvec_to_simple_sds_raw_bitvec(mut bv: bitvec::vec::BitVec) -> simple_sds_sbwt::raw_vector::RawVector {
     // TODO: We really hope that usize equals u64 here, otherwise this this is probably broken.
