@@ -210,16 +210,52 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::HashMap, hash::BuildHasherDefault, sync::Arc};
 
     use jseqio::seq_db::SeqDB;
+    use rustc_hash::FxHasher;
     use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
     use simple_sds_sbwt::ops::{BitVec, Rank};
 
-    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, hash_and_encode_distinct_sets, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
+    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
 
     use super::CompactColexKmers;
 
+    /// Output:
+    /// - Distinct color sets encoded as ColorSetStorage
+    /// - HashMap from color set to its index in ColorSets
+    pub fn hash_and_encode_distinct_sets<'a, CSS: ColorSetStorage>(colex_to_set: &'a CSS, n_colors: usize) -> (CSS, HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>) {
+        let n_sets = colex_to_set.n_sets();
+
+        log::info!("Hashing distinct color sets");
+
+        let mut distinct_sets = HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
+        let mut distinct_set_colex_ranks = Vec::<usize>::new();
+        let bar = indicatif::ProgressBar::new(n_sets as u64);
+        for colex in 0..n_sets {
+            let key = colex_to_set.get_set_view(colex);
+            if !distinct_sets.contains_key(&key) {
+                distinct_sets.insert(key, distinct_sets.len());
+                distinct_set_colex_ranks.push(colex);
+            }
+            if colex % 1000 == 0 {
+                bar.inc(1000);
+            }
+        }
+        bar.finish();
+
+        log::info!("{} distinct color sets found", distinct_sets.len());
+
+        // Create an iterator of iterators, each inner iterator iterating over one color set
+        let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
+            colex_to_set.get_set_view(colex).iter()
+        });
+
+        let colorsets = CSS::new_from_iter_of_iters(color_sets_iterator, n_colors);
+
+        (*colorsets, distinct_sets)
+
+    }
 
     #[cfg(test)]
     pub(crate) fn gen_random_dna_string(len: usize, seed: u64) -> Vec<u8> {

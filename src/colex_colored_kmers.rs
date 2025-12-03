@@ -1,28 +1,22 @@
-use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
-use bitvec::{field::BitField, slice::BitSlice};
 use crossbeam::channel::{Sender, bounded};
 use indicatif::ProgressStyle;
 use jseqio::reverse_complement;
 use jseqio::seq_db::SeqDB;
-use rayon::iter::ParallelIterator;
 use sbwt::dbg::Dbg;
-use sbwt::{MergeInterleaving, reverse_complement_in_place};
+use sbwt::reverse_complement_in_place;
 use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
-use rustc_hash::FxHasher;
-use std::cmp::max;
 use std::io::Write;
 use std::ops::Range;
 use std::sync::Arc;
-use std::{cmp::min, collections::HashMap, hash::BuildHasherDefault, sync::Mutex};
-use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
 
 use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::CompactIntVec;
-use crate::coloring_interface::{self, ColorSetOwned, ColorSetStorage, ColorSetView};
+use crate::coloring_interface::{self, ColorSetStorage, ColorSetView};
 use crate::index_import;
 use crate::iterators::VecVecUsizeIteratorGenerator;
 
@@ -62,7 +56,7 @@ struct SeqBatch {
 }
 
 impl SeqBatch {
-    fn process(self, sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, dbg: &Dbg<SubsetMatrix>, marks: &AtomicBitmap) {
+    fn process(self, sbwt: &SbwtIndex<SubsetMatrix>, dbg: &Dbg<SubsetMatrix>, marks: &AtomicBitmap) {
         let k = sbwt.k();
         let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
         for rec in self.seqs.iter() {
@@ -143,7 +137,7 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
             let recv_clone = batch_recv.clone();
             let worker_handle = scope.spawn(move || {
                 while let Ok(batch) = recv_clone.recv() {
-                    batch.process(sbwt, lcs, dbg_ref, marks_ref);
+                    batch.process(sbwt, dbg_ref, marks_ref);
                 }
             });
             worker_handles.push(worker_handle);
@@ -170,6 +164,7 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
 impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
+    #[allow(dead_code)]
     fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_threads: usize) -> Self {
 
         let get_colorset_fn = |colex| colex_to_color_set_id[colex]; // TODO: this actually returns a color set id. Rename here and later.
@@ -250,7 +245,7 @@ impl ColexToColorSetMap {
     }
 
     /// Utility function used in construction
-    fn pick_sampled_kmers<'a, F: Fn(usize) -> usize + Sync + Send>(sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, lcs: Option<&LcsArray>, get_colorset_fn: F, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
+    fn pick_sampled_kmers<F: Fn(usize) -> usize + Sync + Send>(sample_distance: usize, sbwt: &SbwtIndex<SubsetMatrix>, lcs: Option<&LcsArray>, get_colorset_fn: F, n_threads: usize) -> simple_sds_sbwt::bit_vector::BitVector {
         // Find starts of unitigs. Walk forward to the end of the unitig. Segment by color sets.
         
         let marks = simple_sds_sbwt::raw_vector::RawVector::with_len(sbwt.n_sets(), false);
@@ -396,7 +391,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             names.to_vec()
         } else {
             // Assign default color names
-            (0..color_sets.n_colors()).map(|x| format!("color_{}", x.to_string())).collect::<Vec<String>>()
+            (0..color_sets.n_colors()).map(|x| format!("color_{}", x)).collect::<Vec<String>>()
         };
         Self {sbwt, lcs, sets: color_sets, map: colex_map, color_names}
     }
@@ -409,6 +404,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.lcs
     }
 
+    #[allow(dead_code)]
     pub fn get_map(&self) -> &ColexToColorSetMap {
         &self.map
     }
@@ -493,7 +489,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         Self {sbwt, lcs, sets: distinct_css, map: colex_map, color_names}
     }
 
-
+    #[allow(dead_code)] // Might still be useful in the future
     pub fn new_single_colored(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
         let n_colors = 1;
         let int_bitwidth = 1;
@@ -697,6 +693,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (subunitig_color_set_ids, subunitigs)
     }
 
+    #[allow(clippy::type_complexity)] // Yeah yeah I know
     fn search_unitig_from(&self, v: Node, dbg: &Dbg<'_, SubsetMatrix>) -> (Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>) {
         // Walk the unitig in forward orientation, and then backwards
         let k = self.sbwt.k();
@@ -726,6 +723,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         (fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)
     }
 
+    #[allow(clippy::too_many_arguments)] // Yeah yeah I know
     fn visit_and_output_kmers(&self, unitig_string: &[u8], subunitig_kmer_ranges: &[Range<usize>], subunitig_color_set_ids: &[usize], fw_colex: &[usize], rc_colex: &[usize], visited: &mut bitvec::vec::BitVec, unitigs_out: &mut impl Write, unitig_id: &mut usize) {
 
         let k = self.sbwt.k();
@@ -916,42 +914,4 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
         metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
-}
-
-
-
-/// Output:
-/// - Distinct color sets encoded as ColorSetStorage
-/// - HashMap from color set to its index in ColorSets
-pub fn hash_and_encode_distinct_sets<'a, CSS: ColorSetStorage>(colex_to_set: &'a CSS, n_colors: usize) -> (CSS, HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>) {
-    let n_sets = colex_to_set.n_sets();
-
-    log::info!("Hashing distinct color sets");
-
-    let mut distinct_sets = HashMap::<CSS::SetView<'a>, usize, BuildHasherDefault::<FxHasher>>::default(); // Set -> id
-    let mut distinct_set_colex_ranks = Vec::<usize>::new();
-    let bar = indicatif::ProgressBar::new(n_sets as u64);
-    for colex in 0..n_sets {
-        let key = colex_to_set.get_set_view(colex);
-        if !distinct_sets.contains_key(&key) {
-            distinct_sets.insert(key, distinct_sets.len());
-            distinct_set_colex_ranks.push(colex);
-        }
-        if colex % 1000 == 0 {
-            bar.inc(1000);
-        }
-    }
-    bar.finish();
-
-    log::info!("{} distinct color sets found", distinct_sets.len());
-
-    // Create an iterator of iterators, each inner iterator iterating over one color set
-    let color_sets_iterator = distinct_set_colex_ranks.into_iter().map(|colex| {
-        colex_to_set.get_set_view(colex).iter()
-    });
-
-    let colorsets = CSS::new_from_iter_of_iters(color_sets_iterator, n_colors);
-
-    (*colorsets, distinct_sets)
-
 }
