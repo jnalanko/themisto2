@@ -99,6 +99,8 @@ impl SeqBatch {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would need to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
+// Also does not mark reverse complements, so you need to provide a SeqStream that
+// produces both strands.
 pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream + Send, n_threads: usize) -> bitvec::vec::BitVec {
 
     log::info!("Initializing DBG");
