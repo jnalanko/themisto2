@@ -966,12 +966,16 @@ pub struct IndexStats {
 }
 
 impl IndexStats {
-    fn mean_size_of_distinct_sets(&self) -> f64 {
+    pub fn mean_size_of_distinct_sets(&self) -> f64 {
         self.total_size_of_distinct_color_sets as f64 / self.n_distinct_color_sets as f64
     }
 
-    fn mean_kmer_color_set_size(&self) -> f64 {
+    pub fn mean_kmer_color_set_size(&self) -> f64 {
         self.total_kmer_color_set_size as f64 / self.n_kmers as f64
+    }
+
+    pub fn sample_fraction(&self) -> f64 {
+        self.n_sampled_kmers as f64 / self.n_kmers as f64
     }
 
 }

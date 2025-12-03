@@ -205,6 +205,15 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
+    #[command(arg_required_else_help = true, name = "stats")]
+    Stats {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
+
     #[command(arg_required_else_help = true, hide = true)]
     FinimizerStats {
         #[arg(long = "index", short = 'i', required = true)]
@@ -309,6 +318,17 @@ fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>) {
     for (id, name) in index.get_color_names().iter().enumerate() {
         println!("{}\t{}", id, name);
     }
+}
+
+fn print_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize) {
+    let stats = index.compute_index_stats(n_threads);
+    println!("Number of k-mers: {}", stats.n_kmers);
+    println!("Number of colors: {}", stats.n_colors);
+    println!("SBWT length: {}", stats.n_sbwt_sets);
+    println!("Number of distinct color sets: {}", stats.n_distinct_color_sets);
+    println!("Mean size of distinct color sets: {:.2}", stats.mean_size_of_distinct_sets());
+    println!("Mean k-mer color set size: {:.2}", stats.mean_kmer_color_set_size());
+    println!("Fraction of sampled k-mers: {:.2} %", stats.sample_fraction() * 100.0);
 }
 
 
@@ -657,7 +677,16 @@ fn main() {
                 IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
             };
         },
+        Subcommands::Stats { index: index_path, n_threads } => {
+            let index = load_index_variant(&index_path, true); // Select support required for DBG
+            match index {
+                IndexVariant::BitmapIndex(idx) => print_stats(&idx, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
+            };
+
+        }
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
+            // Hidden subcommand, might be deleted at any moment
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
@@ -666,6 +695,7 @@ fn main() {
             };
         },
         Subcommands::MinimizerStats { index: index_path, n_threads, m} => {
+            // Hidden subcommand, might be deleted at any moment
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
