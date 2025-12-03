@@ -925,6 +925,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         log::info!("Initializing de Bruijn graph");
         let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
         let total_kmer_color_set_size = AtomicUsize::new(0);
+        let n_unitigs = AtomicUsize::new(0);
+        let total_unitig_length = AtomicUsize::new(0);
+        let min_unitig_length = AtomicUsize::new(usize::MAX);
+        let max_unitig_length = AtomicUsize::new(0);
 
         let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
         dbg.iter_unitigs_with_callback(|nodes|{
@@ -939,6 +943,13 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 }
                 total_kmer_color_set_size.fetch_add(cur_color_set_len.unwrap(), Release);
             }
+
+            let unitig_length = nodes.len()+self.sbwt().k()-1;
+            total_unitig_length.fetch_add(unitig_length, Release);
+            min_unitig_length.fetch_min(unitig_length, Release);
+            max_unitig_length.fetch_max(unitig_length, Release);
+            n_unitigs.fetch_add(1, Release);
+
             bar.inc(nodes.len() as u64);
         }, n_threads);
         bar.finish();
@@ -954,6 +965,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             n_sampled_kmers,
             total_size_of_distinct_color_sets,
             total_kmer_color_set_size,
+            n_unitigs: n_unitigs.load(Acquire),
+            total_unitig_length: total_unitig_length.load(Acquire),
+            max_unitig_length: max_unitig_length.load(Acquire),
+            min_unitig_length: min_unitig_length.load(Acquire),
         }
     }
 }
@@ -966,6 +981,10 @@ pub struct IndexStats {
     pub n_sampled_kmers: usize,
     pub total_size_of_distinct_color_sets: usize,
     pub total_kmer_color_set_size: usize,
+    pub n_unitigs: usize,
+    pub total_unitig_length: usize,
+    pub max_unitig_length: usize,
+    pub min_unitig_length: usize,
 }
 
 impl IndexStats {
@@ -981,4 +1000,7 @@ impl IndexStats {
         self.n_sampled_kmers as f64 / self.n_kmers as f64
     }
 
+    pub fn mean_unitig_length(&self) -> f64 {
+        self.total_unitig_length as f64 / self.n_unitigs as f64
+    }
 }

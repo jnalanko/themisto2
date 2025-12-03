@@ -329,6 +329,10 @@ fn print_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_th
     println!("Mean size of distinct color sets: {:.2}", stats.mean_size_of_distinct_sets());
     println!("Mean k-mer color set size: {:.2}", stats.mean_kmer_color_set_size());
     println!("Fraction of key k-mers: {:.2}%", stats.sample_fraction() * 100.0);
+    println!("Number of forward unitigs (not bidirected): {}", stats.n_unitigs);
+    println!("Min unitig length: {}", stats.min_unitig_length);
+    println!("Max unitig length: {}", stats.max_unitig_length);
+    println!("Mean unitig length: {:.2}", stats.mean_unitig_length());
 }
 
 
