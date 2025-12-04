@@ -271,7 +271,6 @@ fn build_coloring<CSS: ColorSetStorage + Send>(
     key_kmer_marks.enable_rank();
     assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
     let colex_map = ColexToColorSetMap {
-        sbwt: sbwt.clone(), // Clones just the Arc
         sampling: key_kmer_marks, 
         color_set_ids: key_kmer_idx_to_set_id,
     };

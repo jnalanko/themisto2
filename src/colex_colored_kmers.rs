@@ -45,10 +45,6 @@ pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
 /// the color sets of the rest can be obtained by walking forward in the de Bruijn graph to the
 /// closest sampled node.
 pub struct ColexToColorSetMap {
-
-    // See the comments inside CompactcolexColoring
-    pub sbwt: Arc<SbwtIndex<SubsetMatrix>>,
-
     pub sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
     pub color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
@@ -186,7 +182,7 @@ impl ColexToColorSetMap {
         log::info!("Building rank support for sampling marks");
         sampling_marks.enable_rank();
 
-        Self{sbwt, sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
+        Self{sampling: sampling_marks, color_set_ids: sampled_color_set_ids}
     }
 
     // We don't have the suffix group leader marks or the LCS array stored, so
@@ -196,12 +192,12 @@ impl ColexToColorSetMap {
     // TODO: if we had a borrow to the LCS array, we could do this faster, and also
     // detect whether the node is a sink. That would mean wrapping the LCS array in
     // an Arc to avoid a self-reference in ColexColoredKmers.
-    fn dbg_outneighbor_assuming_there_is_one(&self, mut colex: usize) -> usize {
+    fn dbg_outneighbor_assuming_there_is_one(&self, mut colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> usize {
         loop {
-            for char_idx in 0..self.sbwt.alphabet().len() {
-                if self.sbwt.sbwt().set_contains(colex, char_idx as u8) {
+            for char_idx in 0..sbwt.alphabet().len() {
+                if sbwt.sbwt().set_contains(colex, char_idx as u8) {
                     // Found the outedge label
-                    let new_colex = self.sbwt.lf_step(colex, char_idx);
+                    let new_colex = sbwt.lf_step(colex, char_idx);
                     return new_colex;
                 }
             }
@@ -213,7 +209,7 @@ impl ColexToColorSetMap {
 
     // Returns the colex rank of the next sampled node from here, and
     // the number of nodes walked (0 means the starting point was already marked).
-    fn walk_to_next_sample(&self, mut colex: usize) -> (usize, usize) {
+    fn walk_to_next_sample(&self, mut colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> (usize, usize) {
         let mut depth = 0;
         loop {
             if self.sampling.get(colex) {
@@ -221,14 +217,14 @@ impl ColexToColorSetMap {
             } else {
                 // This set is not stored -> walk forward in the de Bruijn graph
                 // Since this is not sampled,  this can not be a sink.
-                colex = self.dbg_outneighbor_assuming_there_is_one(colex);
+                colex = self.dbg_outneighbor_assuming_there_is_one(colex, sbwt);
                 depth += 1;
             }
         }
     }
 
-    fn colex_to_color_set_id(&self, colex: usize) -> usize {
-        let pos = self.walk_to_next_sample(colex).0;
+    fn colex_to_color_set_id(&self, colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> usize {
+        let pos = self.walk_to_next_sample(colex, sbwt).0;
         self.color_set_ids.get(self.sampling.rank(pos))
     }
 
@@ -237,14 +233,13 @@ impl ColexToColorSetMap {
         self.color_set_ids.serialize(out);
     }
 
-    pub fn load(input: &mut impl std::io::Read, sbwt: Arc<SbwtIndex<SubsetMatrix>>) -> Self {
+    pub fn load(input: &mut impl std::io::Read) -> Self {
         let sampling = simple_sds_sbwt::bit_vector::BitVector::load(input).unwrap();
         let color_set_ids = CompactIntVec::load(input);
 
-        assert_eq!(sampling.len(), sbwt.n_sets());
         assert_eq!(color_set_ids.len(), sampling.count_ones());
 
-        Self{sbwt: sbwt.clone(), sampling, color_set_ids}
+        Self{sampling, color_set_ids}
     }
 
     /// Utility function used in construction
@@ -483,7 +478,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let sbwt = Arc::new(sbwt);
         let colex_map = ColexToColorSetMap {
-            sbwt: sbwt.clone(), // Clones the Arc, not the sbwt
             sampling: sample_marks,
             color_set_ids: stored_color_set_ids,
         };
@@ -508,7 +502,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         //let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
         let color_set_ids = CompactIntVec::new(unitig_samples.count_ones(), int_bitwidth);
         let colex_map = ColexToColorSetMap{
-            sbwt: sbwt.clone(),
             sampling: unitig_samples,
             color_set_ids,
         };
@@ -516,7 +509,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     pub fn colex_to_set_id(&self, colex: usize) -> usize {
-        self.map.colex_to_color_set_id(colex)
+        self.map.colex_to_color_set_id(colex, &self.sbwt)
     }
 
     pub fn set_id_to_set<'a>(&'a self, id: usize) -> CSS::SetView<'a> {
@@ -582,7 +575,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let sbwt = Arc::new(sbwt);
         let lcs = LcsArray::load(input).unwrap();
         let sets = CSS::load(input);
-        let map = ColexToColorSetMap::load(input, sbwt.clone());
+        let map = ColexToColorSetMap::load(input);
+        assert_eq!(map.sampling.len(), sbwt.n_sets());
 
         // Load color names
         let mut n_names_bytes = [0_u8; 8];

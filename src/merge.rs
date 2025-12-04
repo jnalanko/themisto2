@@ -196,7 +196,6 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
 
     let merged_sbwt = Arc::new(merged_sbwt);
     let colex_map = ColexToColorSetMap {
-        sbwt: merged_sbwt.clone(), // Clones just the Arc
         sampling: key_kmer_marks, 
         color_set_ids: key_kmer_idx_to_set_id,
     };
@@ -397,19 +396,16 @@ mod tests {
             key_kmers_both.enable_rank();
 
             let colex_map_1 = ColexToColorSetMap{
-                sbwt: sbwt1.clone(),
                 sampling: key_kmers_1,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_1),
             };
 
             let colex_map_2 = ColexToColorSetMap{
-                sbwt: sbwt2.clone(),
                 sampling: key_kmers_2,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_2),
             };
 
             let colex_map_both = ColexToColorSetMap{
-                sbwt: sbwt_both.clone(),
                 sampling: key_kmers_both,
                 color_set_ids: CompactIntVec::from_vec(sampled_ids_both),
             };
