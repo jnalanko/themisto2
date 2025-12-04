@@ -158,7 +158,9 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
     let sbwt1 = Arc::new(sbwt1);
     let sbwt2 = Arc::new(sbwt2);
 
-    // The sbwt clones here close just the Arc. Todo: borrow the merge plan.
+    let merge_plan = Arc::new(merge_plan);
+
+    // The clones here close just the Arcs.
     let mut merged_sbwt = sbwt::merge(sbwt1.clone(), sbwt2.clone(), merge_plan.clone(), precalc_len, n_threads); 
     merged_sbwt.build_select();
 
