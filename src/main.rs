@@ -2,7 +2,7 @@
 #![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 #![allow(clippy::manual_is_multiple_of)] // Oh please
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, sync::Arc};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;

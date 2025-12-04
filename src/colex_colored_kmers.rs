@@ -388,6 +388,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         Self {sbwt, lcs, sets: color_sets, map: colex_map, color_names}
     }
 
+    pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, LcsArray, ColexToColorSetMap, CSS, Vec<String>) {
+        (self.sbwt, self.lcs, self.map, self.sets, self.color_names)
+    }
+
     pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
         &self.sbwt
     }

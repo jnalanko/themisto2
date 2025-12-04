@@ -149,11 +149,24 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
     assert_eq!(merge_plan.s1.len(), merge_plan.s2.len());
 
     log::info!("Merging SBWTs");
-    let sbwt1 = (*coloring1.sbwt()).clone(); // Todo: avoid clone. Currently unavoidable because we have just an Arc to the SBWT, but the merge needs an owned value.
-    let sbwt2 = (*coloring2.sbwt()).clone(); // Todo: avoid clone. Currently unavoidable because we have just an Arc to the SBWT, but the merge needs an owned value.
     let precalc_len = max(coloring1.sbwt().get_lookup_table().prefix_length, coloring2.sbwt().get_lookup_table().prefix_length);
-    let mut merged_sbwt = sbwt::merge(sbwt1, sbwt2, merge_plan.clone(), precalc_len, n_threads); // Todo: borrow the merge plan
+    // Temporarily destructure the colorings into parts in order to be able to put the
+    // SBWT into an Arc to pass to sbwt::merge. The function sbwt::merge takes an Arc
+    // for good reasons by design (read the comment at sbwt::merge for an explanation).
+    let (sbwt1, lcs1, map1, sets1, color_names_1) = coloring1.into_parts();
+    let (sbwt2, lcs2, map2, sets2, color_names_2) = coloring2.into_parts();
+    let sbwt1 = Arc::new(sbwt1);
+    let sbwt2 = Arc::new(sbwt2);
+
+    // The sbwt clones here close just the Arc. Todo: borrow the merge plan.
+    let mut merged_sbwt = sbwt::merge(sbwt1.clone(), sbwt2.clone(), merge_plan.clone(), precalc_len, n_threads); 
     merged_sbwt.build_select();
+
+    // Put the coloring structs back together
+    let sbwt1 = Arc::try_unwrap(sbwt1).unwrap();
+    let sbwt2 = Arc::try_unwrap(sbwt2).unwrap();
+    let coloring1 = CompactColexKmers::<CSS>::new(sbwt1, lcs1, map1, sets1, Some(&color_names_1)); 
+    let coloring2 = CompactColexKmers::<CSS>::new(sbwt2, lcs2, map2, sets2, Some(&color_names_2)); 
 
     log::info!("Building the LCS array for the merged SBWT");
     let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
@@ -208,7 +221,7 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, hash::BuildHasherDefault, sync::Arc};
+    use std::{collections::HashMap, hash::BuildHasherDefault};
 
     use jseqio::seq_db::SeqDB;
     use rustc_hash::FxHasher;
