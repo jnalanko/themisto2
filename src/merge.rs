@@ -194,7 +194,6 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
     key_kmer_marks.enable_rank();
     assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
 
-    let merged_sbwt = Arc::new(merged_sbwt);
     let colex_map = ColexToColorSetMap {
         sampling: key_kmer_marks, 
         color_set_ids: key_kmer_idx_to_set_id,
@@ -361,10 +360,6 @@ mod tests {
             sbwt1.build_select();
             sbwt2.build_select();
             sbwt_both.build_select();
-
-            let sbwt1 = Arc::new(sbwt1);
-            let sbwt2 = Arc::new(sbwt2);
-            let sbwt_both = Arc::new(sbwt_both);
 
             let lcs1 = lcs1.unwrap();
             let lcs2 = lcs2.unwrap();

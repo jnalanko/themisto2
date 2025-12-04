@@ -27,13 +27,7 @@ use crate::iterators::VecVecUsizeIteratorGenerator;
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
 /// colex rank in the SBWT. 
 pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
-    // This is on the heap to allow map to refer to it (otherwise assuring lifetime 
-    // guarantees becomes problematic). It's reference counted because this struct
-    // will have two references to it, the one in self.sbwt, and one in self.map.sbwt.
-    // Note that this means that if we replace sbwt here with a new Arc pointing to a new
-    // sbwt, then, the map will continue to point to the old sbwt. So don't do that!
-    // It's atomic (Arc) because we want to pass this struct to multiple threads.
-    sbwt: Arc<SbwtIndex<SubsetMatrix>>, 
+    sbwt: SbwtIndex<SubsetMatrix>, 
 
     lcs: LcsArray,
     sets: CSS, // Distinct color sets
@@ -382,7 +376,7 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'stat
 
 impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
-    pub fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS, color_names: Option<&[String]>)
+    pub fn new(sbwt: SbwtIndex<SubsetMatrix>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS, color_names: Option<&[String]>)
     -> CompactColexKmers<CSS> {
         let color_names = if let Some(names) = color_names {
             assert!(names.len() == color_sets.n_colors());
@@ -476,7 +470,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let distinct_css = CSS::new(color_set_stream, n_colors);
         let distinct_css = *distinct_css; // Unbox
 
-        let sbwt = Arc::new(sbwt);
         let colex_map = ColexToColorSetMap {
             sampling: sample_marks,
             color_set_ids: stored_color_set_ids,
@@ -487,7 +480,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     #[allow(dead_code)] // Might still be useful in the future
-    pub fn new_single_colored(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
+    pub fn new_single_colored(sbwt: SbwtIndex<SubsetMatrix>, lcs: LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
         let n_colors = 1;
         let int_bitwidth = 1;
 
@@ -572,7 +565,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             log::info!("Building select support");
             sbwt.build_select();
         }
-        let sbwt = Arc::new(sbwt);
         let lcs = LcsArray::load(input).unwrap();
         let sets = CSS::load(input);
         let map = ColexToColorSetMap::load(input);
