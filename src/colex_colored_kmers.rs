@@ -608,7 +608,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
-        #[derive(Eq, PartialEq)]
+        #[derive(Eq, PartialEq, Debug)]
         enum ColexPos {
             Sampled(usize),
             SameAsNext(usize),
@@ -656,6 +656,20 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 },
             }
         }
+
+        // Debug verification:
+        /*
+        for (i, kmer) in seq.windows(k).enumerate() {
+            match self.sbwt.search(kmer) {
+                Some(colex) => {
+                    assert!(set_ids_output[i] == Some(self.map.colex_to_color_set_id(colex.start, &self.sbwt))); 
+                },
+                None => {
+                    assert!(set_ids_output[i].is_none());    
+                },
+            }
+        }
+        */
     }
 
     pub fn get_k(&self) -> usize {
