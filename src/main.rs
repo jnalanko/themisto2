@@ -2,7 +2,7 @@
 #![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 #![allow(clippy::manual_is_multiple_of)] // Oh please
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, time::Instant};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
@@ -343,8 +343,16 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
 
     log::info!("Retrieving color sets for query sequences in {}", query_path.display());
 
+    let mut total_lookup_nanoseconds = 0_u128;
+    let mut total_io_nanoseconds = 0_u128;
+    let mut total_bases_read = 0_usize; 
     while let Some(rec) = reader.read_next().unwrap() {
+        total_bases_read += rec.seq.len();
+        let lookup_start = Instant::now();
         let sets = index.lookup_kmer_color_sets(rec.seq);
+        total_lookup_nanoseconds += lookup_start.elapsed().as_nanos();
+
+        let io_start = Instant::now();
         for (set_idx, set) in sets.iter().enumerate() {
             if print_kmers {
                 write!(out, "{} ", String::from_utf8(rec.seq[set_idx..set_idx+index.get_k()].to_vec()).unwrap()).unwrap();
@@ -361,7 +369,12 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
             }
             writeln!(out).unwrap();
         }
+        total_io_nanoseconds += io_start.elapsed().as_nanos();
     }
+    log::info!("Total time: {:.2} s", (total_lookup_nanoseconds + total_io_nanoseconds) as f64 / 1_000_000_000.0);
+    log::info!("Total lookup time: {:.2} s", total_lookup_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Total I/O time: {:.2} s", total_io_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Lookup time per nucleotide: {:.2} ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
 }
 
 #[allow(clippy::manual_flatten)]
