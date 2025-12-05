@@ -74,11 +74,18 @@ impl PseudoalignmentBatch {
     }
 }
 
+impl PseudoalignmentBatchResult {
+    fn get_result_set(&self, idx: usize) -> &[usize] {
+        &self.concat[self.starts[idx]..self.starts[idx+1]]
+    } 
+}
+
 // This uses a factory pattern for creating new pseudoaligners. I'm so sorry.
 // But it actually makes sense here: I want that the pseudoalignment function
 // can create a separate aligner for each worker thread, but so that
 // it does not have to care how they are constructed.
-fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_workers: usize) {
+// The output callback takes pairs (read rank in input, pseudoaligned color ids)
+fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut((usize, &[usize])) + Send, n_workers: usize) {
     let mut aligner = ThresholdPseudoaligner {
         counts: vec![0; index.get_set_storage().n_colors()],
         nonzero_count_indices: vec![],
@@ -125,8 +132,10 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
         }
 
         let outputter_handle = scope.spawn(|| {
-            while let Ok(batch) = work_recv.recv() {
-
+            while let Ok(result) = results_recv.recv() {
+                for (idx, query_rank) in result.seq_ranks.clone().enumerate() {
+                    output_callback((query_rank, result.get_result_set(idx)));
+                }
             }
         });
         
