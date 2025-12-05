@@ -19,6 +19,7 @@ pub enum Denominator { // Options for the CLI
     MaxHits,
 }
 
+#[derive(Clone)]
 struct ThresholdPseudoaligner<'a, CSS: ColorSetStorage> {
     counts: Vec<usize>,
     nonzero_count_indices: Vec<usize>,
@@ -50,7 +51,7 @@ impl PseudoalignmentBatch {
     }
 }
 
-fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, n_workers: usize) {
+fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, algorithm: Box<dyn PseudoalignmentAlgorithm<CSS>>, n_workers: usize) {
     let mut aligner = ThresholdPseudoaligner {
         counts: vec![0; index.get_set_storage().n_colors()],
         nonzero_count_indices: vec![],
@@ -80,6 +81,16 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
             }
             drop(work_send);
         });
+
+        let mut worker_handles = vec![];
+        for worker_id in 0..n_workers {
+            let handle = scope.spawn(|| {
+                while let Ok(batch) = work_recv.recv() {
+
+                }
+            });
+            worker_handles.push(handle);
+        }
     }); 
 
     let ans1 = aligner.process(b"ACGTAGCTGAC");
