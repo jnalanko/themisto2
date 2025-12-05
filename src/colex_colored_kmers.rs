@@ -609,13 +609,13 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
         #[derive(Eq, PartialEq, Debug)]
-        enum ColexPos {
+        enum ColorId { // Contains colex rank in the value, if exists
             Sampled(usize),
             SameAsNext(usize),
             AbsentKmer
         }
 
-        let mut colex_positions = Vec::<ColexPos>::with_capacity(seq.len()-k+1);
+        let mut colex_positions = Vec::<ColorId>::with_capacity(seq.len()-k+1);
 
         // Pass 1: Compute colex ranks and whether the k-mers are sampled
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
@@ -623,12 +623,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                 assert!(range.len() == 1);
                 let colex = range.start;
                 if self.map.sampling.get(colex) {
-                    colex_positions.push(ColexPos::Sampled(colex));
+                    colex_positions.push(ColorId::Sampled(colex));
                 } else {
-                    colex_positions.push(ColexPos::SameAsNext(colex));
+                    colex_positions.push(ColorId::SameAsNext(colex));
                 }
             } else {
-                colex_positions.push(ColexPos::AbsentKmer);
+                colex_positions.push(ColorId::AbsentKmer);
             }
         }
 
@@ -638,11 +638,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let set_ids_output = &mut buffer[old_buf_len..];
         for i in (0..colex_positions.len()).rev() {
             match colex_positions[i] {
-                ColexPos::Sampled(colex) => {
+                ColorId::Sampled(colex) => {
                     let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
                     set_ids_output[i] = Some(set_id);
                 },
-                ColexPos::SameAsNext(colex) => {
+                ColorId::SameAsNext(colex) => {
                     if i+1 == set_ids_output.len() || set_ids_output[i+1].is_none() {
                         // Can not copy color set id from position i+1
                         let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
@@ -651,7 +651,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                         set_ids_output[i] = set_ids_output[i+1];
                     }
                 },
-                ColexPos::AbsentKmer => {
+                ColorId::AbsentKmer => {
                     set_ids_output[i] = None;
                 },
             }
