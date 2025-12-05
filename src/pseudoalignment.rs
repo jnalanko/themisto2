@@ -9,7 +9,7 @@ trait Pseudoaligner<CSS: ColorSetStorage> {
 
     // The &mut self is to access and modify thread-local buffers
     // owned by the algorithm.
-    fn process<'a>(&'a mut self, seq: &[u8]) -> CSS::SetView<'a>;
+    fn process<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>) -> CSS::SetView<'a>;
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -20,16 +20,15 @@ pub enum Denominator { // Options for the CLI
 }
 
 #[derive(Clone)]
-struct ThresholdPseudoaligner<'a, CSS: ColorSetStorage> {
+struct ThresholdPseudoaligner<CSS: ColorSetStorage> {
     counts: Vec<usize>,
     nonzero_count_indices: Vec<usize>,
     threshold: f64,
     denominator: Denominator,
     answer: CSS::OwnedSet, // Answer to the current query
-    index: &'a CompactColexKmers<CSS>,
 }
 
-impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<'a, CSS> {
+impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
     fn new(index: &'a CompactColexKmers<CSS>, threshold: f64, denominator: Denominator) -> Self {
         Self {
             counts: vec![0; index.get_set_storage().n_colors()],
@@ -37,13 +36,12 @@ impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<'a, CSS> {
             threshold,
             denominator,
             answer: index.get_set_storage().get_empty_set(),
-            index,
         }
     }
 }
 
-impl<'a, CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<'a, CSS> {
-    fn process<'b>(&'b mut self, seq: &[u8]) -> <CSS as ColorSetStorage>::SetView<'b> {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
+    fn process<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>) -> CSS::SetView<'a> {
         todo!();
     }
 }
@@ -151,12 +149,15 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
     }); 
 }
 
-fn run_threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write, n_workers: usize) {
-    let reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
+pub fn run_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_aligners: usize) {
+    let reader = crate::io::ChainedInputStream::new(vec![input_file.to_path_buf()]);
 
-    let create_aligner = || {
-        let aligner = ThresholdPseudoaligner::new(index, 0.8, Denominator::All);
-        Box::new(aligner);
+    let output_callback = |(read_rank, color_ids): (usize, &[usize])| {
+        write!(output, "{}", read_rank).unwrap();
+        for cid in color_ids {
+            write!(output, " {}", cid).unwrap();
+        }
+        writeln!(output).unwrap();
     };
-
+    run_all_queries(index, reader, create_new_aligner, output_callback, n_aligners);
 }
