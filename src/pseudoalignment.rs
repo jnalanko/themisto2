@@ -9,7 +9,7 @@ trait Pseudoaligner<CSS: ColorSetStorage> {
 
     // The &mut self is to access and modify thread-local buffers
     // owned by the algorithm.
-    fn process<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>) -> CSS::SetView<'a>;
+    fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, output: &mut Vec<usize>);
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -25,15 +25,17 @@ struct ThresholdPseudoaligner<CSS: ColorSetStorage> {
     nonzero_count_indices: Vec<usize>,
     threshold: f64,
     denominator: Denominator,
+    min_hits: usize,
     answer: CSS::OwnedSet, // Answer to the current query
 }
 
 impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
-    fn new(index: &'a CompactColexKmers<CSS>, threshold: f64, denominator: Denominator) -> Self {
+    fn new(index: &'a CompactColexKmers<CSS>, threshold: f64, min_hits: usize, denominator: Denominator) -> Self {
         Self {
             counts: vec![0; index.get_set_storage().n_colors()],
             nonzero_count_indices: vec![],
             threshold,
+            min_hits,
             denominator,
             answer: index.get_set_storage().get_empty_set(),
         }
@@ -41,8 +43,45 @@ impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
 }
 
 impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
-    fn process<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>) -> CSS::SetView<'a> {
-        todo!();
+    fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+        let mut n_relevant = 0_usize;
+        let mut n_all = 0_usize;
+        for set in index.lookup_kmer_color_sets(seq) {
+            if let Some(set) = set {
+                for color in set.iter() {
+                    self.counts[color] += 1;
+                    if self.counts[color] == 1 {
+                        self.nonzero_count_indices.push(color);
+                    }
+                }
+                n_relevant += 1;
+            }
+            n_all += 1;
+        }
+        self.nonzero_count_indices.sort_unstable(); // Sort to output in sorted order by colors 
+
+        // Add to output all colors that pass the threshold
+        if n_relevant >= self.min_hits && self.nonzero_count_indices.len() > 0 {
+            let den = match self.denominator {
+                Denominator::All => n_all as f64,
+                Denominator::Relevant => n_relevant as f64,
+                Denominator::MaxHits => {
+                    let maxhits = self.nonzero_count_indices.iter().map(|&color| self.counts[color]).max();
+                    maxhits.unwrap() as f64 // Safe because here nonzero_count_indices.len() > 0
+                },
+            };
+            for &color in self.nonzero_count_indices.iter() {
+                if self.counts[color] as f64 / den >= self.threshold {
+                    out.push(color);
+                }
+            }
+        }
+
+        // Clean up
+        for &color in &self.nonzero_count_indices {
+            self.counts[color] = 0;
+        }
+        self.nonzero_count_indices.clear();
     }
 }
 
@@ -67,7 +106,7 @@ impl PseudoalignmentBatch {
         self.seq_ranks.end += 1;
     }
 
-    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>) -> PseudoalignmentBatchResult {
+    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, index: &CompactColexKmers<CSS>) -> PseudoalignmentBatchResult {
         let mut result = PseudoalignmentBatchResult {
             concat: vec![],
             starts: vec![0],
@@ -75,10 +114,7 @@ impl PseudoalignmentBatch {
         };
 
         for rec in self.seqs.iter() {
-            let set = aligner.process(rec.seq);
-            for color in set.iter() {
-                result.concat.push(color);
-            }
+            aligner.push_compatible_colors(rec.seq, index, &mut result.concat);
             result.starts.push(result.concat.len());
         }
         result
@@ -96,7 +132,7 @@ impl PseudoalignmentBatchResult {
 // can create a separate aligner for each worker thread, but so that
 // it does not have to care how they are constructed.
 // The output callback takes pairs (read rank in input, pseudoaligned color ids)
-fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut((usize, &[usize])) + Send, n_workers: usize) {
+fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut((usize, &[usize])) + Send, n_workers: usize) {
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
@@ -125,9 +161,10 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
             let mut aligner = create_new_aligner();
             let work_recv_clone = work_recv.clone();
             let results_send_clone = results_send.clone();
+            let index_ref = index;
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let result = batch.process(&mut aligner);
+                    let result = batch.process(&mut aligner, index_ref);
                     results_send_clone.send(result).unwrap();
                 }
             });
@@ -149,7 +186,7 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
     }); 
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_aligners: usize) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_aligners: usize) {
     let reader = crate::io::ChainedInputStream::new(vec![input_file.to_path_buf()]);
 
     let output_callback = |(read_rank, color_ids): (usize, &[usize])| {
