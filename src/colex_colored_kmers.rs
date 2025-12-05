@@ -617,7 +617,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let mut colex_positions = Vec::<ColexPos>::with_capacity(seq.len()-k+1);
 
-        // Pass 1: store ids for sampled k-mers
+        // Pass 1: Compute colex ranks and whether the k-mers are sampled
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
             if len == k {
                 assert!(range.len() == 1);
