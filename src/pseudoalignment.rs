@@ -5,7 +5,7 @@ use sbwt::SeqStream;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
-trait PseudoalignmentAlgorithm<CSS: ColorSetStorage> {
+trait Pseudoaligner<CSS: ColorSetStorage> {
 
     // The &mut self is to access and modify thread-local buffers
     // owned by the algorithm.
@@ -29,7 +29,7 @@ struct ThresholdPseudoaligner<'a, CSS: ColorSetStorage> {
     storage: &'a CSS,
 }
 
-impl<'a, CSS: ColorSetStorage> PseudoalignmentAlgorithm<CSS> for ThresholdPseudoaligner<'a, CSS> {
+impl<'a, CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<'a, CSS> {
     fn process<'b>(&'b mut self, seq: &[u8]) -> <CSS as ColorSetStorage>::SetView<'b> {
         self.storage.owned_to_view(&self.answer)
     }
@@ -38,6 +38,12 @@ impl<'a, CSS: ColorSetStorage> PseudoalignmentAlgorithm<CSS> for ThresholdPseudo
 struct PseudoalignmentBatch {
     seqs: SeqDB,
     seq_ranks: Range<usize>
+}
+
+struct PseudoalignmentBatchResult {
+    concat: Vec<usize>,
+    starts: Vec<usize>, // Has an end sentinel one past the end
+    seq_ranks: Range<usize>, // Original sequence ranks for these queries
 }
 
 impl PseudoalignmentBatch {
@@ -49,9 +55,30 @@ impl PseudoalignmentBatch {
         self.seqs.push_seq(seq);
         self.seq_ranks.end += 1;
     }
+
+    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>) -> PseudoalignmentBatchResult {
+        let mut result = PseudoalignmentBatchResult {
+            concat: vec![],
+            starts: vec![0],
+            seq_ranks: self.seq_ranks,
+        };
+
+        for rec in self.seqs.iter() {
+            let set = aligner.process(rec.seq);
+            for color in set.iter() {
+                result.concat.push(color);
+            }
+            result.starts.push(result.concat.len());
+        }
+        result
+    }
 }
 
-fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, algorithm: Box<dyn PseudoalignmentAlgorithm<CSS>>, n_workers: usize) {
+// This uses a factory pattern for creating new pseudoaligners. I'm so sorry.
+// But it actually makes sense here: I want that the pseudoalignment function
+// can create a separate aligner for each worker thread, but so that
+// it does not have to care how they are constructed.
+fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_workers: usize) {
     let mut aligner = ThresholdPseudoaligner {
         counts: vec![0; index.get_set_storage().n_colors()],
         nonzero_count_indices: vec![],
@@ -62,7 +89,8 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
     };
 
     let batch_size = 10_000_usize;
-    let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(10);
+    let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
+    let (results_send, results_recv) = crossbeam::channel::bounded::<PseudoalignmentBatchResult>(n_workers);
 
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
@@ -79,18 +107,33 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
             if cur_batch.seqs.total_seq_len() > 0 { // Last batch
                 work_send.send(cur_batch).unwrap();
             }
-            drop(work_send);
+            drop(work_send); // Signal that no more work is going to be pushed
         });
 
         let mut worker_handles = vec![];
-        for worker_id in 0..n_workers {
-            let handle = scope.spawn(|| {
-                while let Ok(batch) = work_recv.recv() {
-
+        for _worker_id in 0..n_workers {
+            let mut aligner = create_new_aligner();
+            let work_recv_clone = work_recv.clone();
+            let results_send_clone = results_send.clone();
+            let handle = scope.spawn(move || {
+                while let Ok(batch) = work_recv_clone.recv() {
+                    let result = batch.process(&mut aligner);
+                    results_send_clone.send(result).unwrap();
                 }
             });
             worker_handles.push(handle);
         }
+
+        let outputter_handle = scope.spawn(|| {
+            while let Ok(batch) = work_recv.recv() {
+
+            }
+        });
+        
+        parser_handle.join().unwrap(); // Wait for the parser to finish
+        for h in worker_handles { h.join().unwrap() } // Wait for the workers to finish
+        drop(results_send); // Signal that no more results will be pushed
+        outputter_handle.join().unwrap(); // Wait for the outputter to finish
     }); 
 
     let ans1 = aligner.process(b"ACGTAGCTGAC");
