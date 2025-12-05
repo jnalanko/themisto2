@@ -612,7 +612,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
                     }
                 }
             } else {
-                // Same set as previous
+                // Same set as previous (possibly None)
                 sets.push(sets.last().unwrap().clone())
             }
         }
