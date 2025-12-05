@@ -5,44 +5,42 @@ use sbwt::SeqStream;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
-trait Pseudoaligner<CSS: ColorSetStorage> {
+pub trait Pseudoaligner<CSS: ColorSetStorage> {
 
     // The &mut self is to access and modify thread-local buffers
     // owned by the algorithm.
     fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, output: &mut Vec<usize>);
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
-pub enum Denominator { // Options for the CLI
+#[derive(Clone, Copy, Debug)]
+pub enum Denominator {
     All,
     Relevant,
     MaxHits,
 }
 
 #[derive(Clone)]
-struct ThresholdPseudoaligner<CSS: ColorSetStorage> {
+pub struct ThresholdPseudoaligner {
     counts: Vec<usize>,
     nonzero_count_indices: Vec<usize>,
     threshold: f64,
     denominator: Denominator,
     min_hits: usize,
-    answer: CSS::OwnedSet, // Answer to the current query
 }
 
-impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
-    fn new(index: &'a CompactColexKmers<CSS>, threshold: f64, min_hits: usize, denominator: Denominator) -> Self {
+impl ThresholdPseudoaligner {
+    pub fn new(n_colors: usize, threshold: f64, min_hits: usize, denominator: Denominator) -> Self {
         Self {
-            counts: vec![0; index.get_set_storage().n_colors()],
+            counts: vec![0; n_colors],
             nonzero_count_indices: vec![],
             threshold,
             min_hits,
             denominator,
-            answer: index.get_set_storage().get_empty_set(),
         }
     }
 }
 
-impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
     fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
@@ -186,7 +184,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
     }); 
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, n_aligners: usize) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, n_aligners: usize) {
     let reader = crate::io::ChainedInputStream::new(vec![input_file.to_path_buf()]);
 
     let output_callback = |(read_rank, color_ids): (usize, &[usize])| {

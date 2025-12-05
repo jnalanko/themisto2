@@ -127,6 +127,9 @@ pub enum Subcommands {
 
         #[arg(long = "denominator", short = 'n')]
         denominator: Denominator,
+
+        #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
+        n_threads: usize,
     },
 
     #[command(arg_required_else_help = true, name = "print-color-sets")]
@@ -414,61 +417,32 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator) {
-    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, n_threads: usize) {
     // Buffered writing to stdout
     let stdout = std::io::stdout();
-    let mut out = BufWriter::new(stdout);
-    let mut query_idx = 0_usize;
-    let n_colors = index.get_set_storage().get_full_set().len();
-    let mut hit_counts = vec![0usize; n_colors];
-    let mut nonzero_count_indices = vec![];
-    log::info!("Performing threshold pseudoalignment for query sequences in {}", query_path.display());
-    while let Some(rec) = reader.read_next().unwrap(){
-        let mut n_relevant = 0_usize;
-        let mut n_all = 0_usize;
-        for set in index.lookup_kmer_color_sets(rec.seq) {
-            if let Some(set) = set {
-                for color in set.iter() {
-                    hit_counts[color] += 1;
-                    if hit_counts[color] == 1 {
-                        nonzero_count_indices.push(color);
-                    }
-                }
-                n_relevant += 1;
-            }
-            n_all += 1;
-        }
-        nonzero_count_indices.sort_unstable(); // Sort to output in sorted order by colors 
+    let out = BufWriter::new(stdout);
 
-        // Write to output all colors that pass the threshold
-        write!(out, "{}", query_idx).unwrap();
-        if n_relevant >= min_hits && nonzero_count_indices.len() > 0 {
-            let den = match denominator {
-                Denominator::All => n_all as f64,
-                Denominator::Relevant => n_relevant as f64,
-                Denominator::MaxHits => {
-                    let maxhits = nonzero_count_indices.iter().map(|color| hit_counts[color]).max();
-                    maxhits.unwrap() as f64 // Safe because here nonzero_count_indices.len() > 0
-                },
-            };
-            for color in nonzero_count_indices.iter() {
-                if hit_counts[color] as f64 / den >= threshold {
-                    write!(out, " {}", color).unwrap();
-                }
-            }
-        }
-        writeln!(out).unwrap();
+    // Map from the CLI denominator enum to the pseudoalignment denominator enum.
+    let denominator = match denominator {
+        Denominator::All => pseudoalignment::Denominator::All,
+        Denominator::Relevant => pseudoalignment::Denominator::Relevant,
+        Denominator::MaxHits => pseudoalignment::Denominator::MaxHits,
+    };
 
-        // Clean up
-        for &color in &nonzero_count_indices {
-            hit_counts[color] = 0;
-        }
-        nonzero_count_indices.clear();
+    let n_colors = index.get_set_storage().n_colors();
 
-        query_idx += 1;
+    log::info!("Running threshold pseudoalignment for query sequences in {}", query_path.display());
+    let create_new_aligner = move || {
+        let aligner = pseudoalignment::ThresholdPseudoaligner::new(
+            n_colors, 
+            threshold,
+            min_hits,
+            denominator
+        );
+        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
+    };
 
-    }
+    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
 }
 
 fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool, sample_distance: usize) {
@@ -619,12 +593,12 @@ fn main() {
             };
 
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator} => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             match index {
-                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator),
-                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator),
+                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, n_threads),
             };
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
