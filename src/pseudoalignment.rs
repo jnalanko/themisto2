@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{io::{Read, Write}, ops::Range, path::Path};
 
 use jseqio::seq_db::SeqDB;
 use sbwt::SeqStream;
@@ -26,12 +26,25 @@ struct ThresholdPseudoaligner<'a, CSS: ColorSetStorage> {
     threshold: f64,
     denominator: Denominator,
     answer: CSS::OwnedSet, // Answer to the current query
-    storage: &'a CSS,
+    index: &'a CompactColexKmers<CSS>,
+}
+
+impl<'a, CSS: ColorSetStorage> ThresholdPseudoaligner<'a, CSS> {
+    fn new(index: &'a CompactColexKmers<CSS>, threshold: f64, denominator: Denominator) -> Self {
+        Self {
+            counts: vec![0; index.get_set_storage().n_colors()],
+            nonzero_count_indices: vec![],
+            threshold,
+            denominator,
+            answer: index.get_set_storage().get_empty_set(),
+            index,
+        }
+    }
 }
 
 impl<'a, CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<'a, CSS> {
     fn process<'b>(&'b mut self, seq: &[u8]) -> <CSS as ColorSetStorage>::SetView<'b> {
-        self.storage.owned_to_view(&self.answer)
+        todo!();
     }
 }
 
@@ -86,14 +99,6 @@ impl PseudoalignmentBatchResult {
 // it does not have to care how they are constructed.
 // The output callback takes pairs (read rank in input, pseudoaligned color ids)
 fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut((usize, &[usize])) + Send, n_workers: usize) {
-    let mut aligner = ThresholdPseudoaligner {
-        counts: vec![0; index.get_set_storage().n_colors()],
-        nonzero_count_indices: vec![],
-        threshold: 0.7,
-        denominator: Denominator::Relevant,
-        answer: index.get_set_storage().get_empty_set(),
-        storage: index.get_set_storage(),
-    };
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
@@ -144,14 +149,14 @@ fn run_all_queries<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, mut que
         drop(results_send); // Signal that no more results will be pushed
         outputter_handle.join().unwrap(); // Wait for the outputter to finish
     }); 
+}
 
-    let ans1 = aligner.process(b"ACGTAGCTGAC");
-    for c in ans1.iter() {
-        println!("{}", c);
-    }
-    drop(ans1);
-    let ans2 = aligner.process(b"ACAATGCTGATCA");
-    for c in ans2.iter() {
-        println!("{}", c);
-    }
+fn run_threshold_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write, n_workers: usize) {
+    let reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
+
+    let create_aligner = || {
+        let aligner = ThresholdPseudoaligner::new(index, 0.8, Denominator::All);
+        Box::new(aligner);
+    };
+
 }
