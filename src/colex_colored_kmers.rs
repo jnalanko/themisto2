@@ -608,22 +608,52 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
 
-        let mut prev_set_id: Option<usize> = None;
+        #[derive(Eq, PartialEq)]
+        enum ColexPos {
+            Sampled(usize),
+            SameAsNext(usize),
+            AbsentKmer
+        }
+
+        let mut colex_positions = Vec::<ColexPos>::with_capacity(seq.len()-k+1);
+
+        // Pass 1: store ids for sampled k-mers
         for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
             if len == k {
                 assert!(range.len() == 1);
                 let colex = range.start;
-                let set_id = self.colex_to_set_id(colex);
-                if prev_set_id.is_some_and(|p| p == set_id) {
-                    // Same as previous
-                    let prev = buffer.last().unwrap();
-                    buffer.push(*prev);
+                if self.map.sampling.get(colex) {
+                    colex_positions.push(ColexPos::Sampled(colex));
                 } else {
-                    buffer.push(Some(set_id));
+                    colex_positions.push(ColexPos::SameAsNext(colex));
                 }
-                prev_set_id = Some(set_id);
             } else {
-                prev_set_id = None;
+                colex_positions.push(ColexPos::AbsentKmer);
+            }
+        }
+
+        // Pass 2: look up set ids right-to-left, reusing set ids for the next k-mer whenever possible
+        let old_buf_len = buffer.len();
+        buffer.resize(old_buf_len + colex_positions.len(), None); // Make space for results
+        let set_ids_output = &mut buffer[old_buf_len..];
+        for i in (0..colex_positions.len()).rev() {
+            match colex_positions[i] {
+                ColexPos::Sampled(colex) => {
+                    let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
+                    set_ids_output[i] = Some(set_id);
+                },
+                ColexPos::SameAsNext(colex) => {
+                    if i+1 == set_ids_output.len() || set_ids_output[i+1].is_none() {
+                        // Can not copy color set id from position i+1
+                        let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
+                        set_ids_output[i] = Some(set_id);
+                    } else {
+                        set_ids_output[i] = set_ids_output[i+1];
+                    }
+                },
+                ColexPos::AbsentKmer => {
+                    set_ids_output[i] = None;
+                },
             }
         }
     }
