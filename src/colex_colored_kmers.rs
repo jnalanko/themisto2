@@ -594,9 +594,29 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
-        let mut buffer = Vec::<Option<usize>>::new();
-        self.push_color_set_ids_to_buffer(seq, &mut buffer);
-        buffer.into_iter().map(|opt| opt.map(|x| self.set_id_to_set(x))).collect()
+        let mut set_ids = Vec::<Option<usize>>::new();
+        self.push_color_set_ids_to_buffer(seq, &mut set_ids);
+
+        let mut sets = Vec::<Option::<CSS::SetView<'_>>>::with_capacity(set_ids.len());
+        for (idx, id) in set_ids.iter().enumerate() {
+            if idx == 0 || (set_ids[idx] != set_ids[idx-1]) {
+                // If the kmer existed, its color set different than the previous
+                match id {
+                    Some(id) => {
+                        // k-mer exists -> fetch color set
+                        sets.push(Some(self.set_id_to_set(*id)))
+                    },
+                    None => {
+                        // Absent k-mer
+                        sets.push(None)
+                    }
+                }
+            } else {
+                // Same set as previous
+                sets.push(sets.last().unwrap().clone())
+            }
+        }
+        sets
     }
 
     // Does not clear the buffer
