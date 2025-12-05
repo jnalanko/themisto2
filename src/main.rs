@@ -371,10 +371,10 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
         }
         total_io_nanoseconds += io_start.elapsed().as_nanos();
     }
-    log::info!("Total time: {:.2} s", (total_lookup_nanoseconds + total_io_nanoseconds) as f64 / 1_000_000_000.0);
-    log::info!("Total lookup time: {:.2} s", total_lookup_nanoseconds as f64 / 1_000_000_000.0);
-    log::info!("Total I/O time: {:.2} s", total_io_nanoseconds as f64 / 1_000_000_000.0);
-    log::info!("Lookup time per nucleotide: {:.2} ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
+    log::info!("Total time: {:.2}s", (total_lookup_nanoseconds + total_io_nanoseconds) as f64 / 1_000_000_000.0);
+    log::info!("Total lookup time: {:.2}s", total_lookup_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Total I/O time: {:.2}s", total_io_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Lookup time per nucleotide: {:.2}ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
 }
 
 #[allow(clippy::manual_flatten)]
