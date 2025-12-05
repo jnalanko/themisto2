@@ -1,15 +1,13 @@
-use std::{io::{Read, Write}, ops::Range, path::Path};
-
+use std::{io::Write, ops::Range, path::Path};
 use jseqio::seq_db::SeqDB;
 use sbwt::SeqStream;
-
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
 
     // The &mut self is to access and modify thread-local buffers
     // owned by the algorithm.
-    fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, output: &mut Vec<usize>);
+    fn push_compatible_colors(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, output: &mut Vec<usize>);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -41,7 +39,7 @@ impl ThresholdPseudoaligner {
 }
 
 impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
-    fn push_compatible_colors<'a>(&'a mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+    fn push_compatible_colors(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
         for set in index.lookup_kmer_color_sets(seq) {
@@ -64,11 +62,11 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
                 Denominator::All => n_all as f64,
                 Denominator::Relevant => n_relevant as f64,
                 Denominator::MaxHits => {
-                    let maxhits = self.nonzero_count_indices.iter().map(|&color| self.counts[color]).max();
+                    let maxhits = self.nonzero_count_indices.iter().map(|color| self.counts[color]).max();
                     maxhits.unwrap() as f64 // Safe because here nonzero_count_indices.len() > 0
                 },
             };
-            for &color in self.nonzero_count_indices.iter() {
+            for color in self.nonzero_count_indices.iter() {
                 if self.counts[color] as f64 / den >= self.threshold {
                     out.push(color);
                 }
@@ -82,6 +80,40 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
         self.nonzero_count_indices.clear();
     }
 }
+
+#[derive(Clone)]
+pub struct IntersectionPseudoaligner {
+    min_hits: usize,
+}
+
+impl IntersectionPseudoaligner{
+    pub fn new(min_hits: usize) -> Self {
+        Self {
+            min_hits,
+        }
+    }
+}
+
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
+    fn push_compatible_colors(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, output: &mut Vec<usize>) {
+        let mut intersection = index.get_set_storage().get_full_set();
+        let mut n_hits = 0_usize;
+        #[allow(clippy::manual_flatten)] // Clearer this way
+        for set in index.lookup_kmer_color_sets(seq) {
+            if let Some(set) = set {
+                index.get_set_storage().intersect(&mut intersection, &set);
+                n_hits += 1;
+            }
+        }
+
+        if n_hits >= self.min_hits {
+            for color in intersection.iter() {
+                output.push(color);
+            }
+        }
+    }
+}
+
 
 struct PseudoalignmentBatch {
     seqs: SeqDB,

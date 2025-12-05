@@ -6,7 +6,7 @@ use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Pat
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
-use coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
+use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::ChainedInputStreamWithRevComp;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
@@ -109,6 +109,9 @@ pub enum Subcommands {
 
         #[arg(long = "min-hits", short = 'm', default_value = "1")]
         min_hits: usize,
+
+        #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
+        n_threads: usize,
     },
 
     #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
@@ -385,35 +388,19 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
 }
 
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize) {
-    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, n_threads: usize) {
     // Buffered writing to stdout
     let stdout = std::io::stdout();
-    let mut out = BufWriter::new(stdout);
-    let mut query_idx = 0_usize;
-    log::info!("Performing intersection pseudoalignment for query sequences in {}", query_path.display());
-    while let Some(rec) = reader.read_next().unwrap(){
-        let mut intersection = index.get_set_storage().get_full_set();
-        let mut n_hits = 0_usize;
-        for set in index.lookup_kmer_color_sets(rec.seq) {
-            if let Some(set) = set {
-                index.get_set_storage().intersect(&mut intersection, &set);
-                n_hits += 1;
-            }
-        }
+    let out = BufWriter::new(stdout);
 
-        // Write output
-        write!(out, "{}", query_idx).unwrap();
-        if n_hits >= min_hits {
-            for color in intersection.iter() {
-                write!(out, " {}", color).unwrap();
-            }
-        }
-        writeln!(out).unwrap();
+    log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
 
-        query_idx += 1;
+    let create_new_aligner = move || {
+        let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
+        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
+    };
 
-    }
+    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
@@ -584,12 +571,12 @@ fn main() {
             }
 
         },
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits } => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             match index {
-                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
-                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits),
+                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, n_threads),
             };
 
         },
