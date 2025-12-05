@@ -346,8 +346,10 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
     let mut total_lookup_nanoseconds = 0_u128;
     let mut total_io_nanoseconds = 0_u128;
     let mut total_bases_read = 0_usize; 
+    let mut total_reads = 0_usize; 
     while let Some(rec) = reader.read_next().unwrap() {
         total_bases_read += rec.seq.len();
+        total_reads += 1;
         let lookup_start = Instant::now();
         let sets = index.lookup_kmer_color_sets(rec.seq);
         total_lookup_nanoseconds += lookup_start.elapsed().as_nanos();
@@ -371,10 +373,11 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
         }
         total_io_nanoseconds += io_start.elapsed().as_nanos();
     }
-    log::info!("Total time: {:.2}s", (total_lookup_nanoseconds + total_io_nanoseconds) as f64 / 1_000_000_000.0);
-    log::info!("Total lookup time: {:.2}s", total_lookup_nanoseconds as f64 / 1_000_000_000.0);
-    log::info!("Total I/O time: {:.2}s", total_io_nanoseconds as f64 / 1_000_000_000.0);
-    log::info!("Lookup time per nucleotide: {:.2}ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
+    log::info!("Processed total of {} bases in {} reads", total_bases_read, total_reads);
+    log::info!("Total query time (excluding index loading): {:.2}s", (total_lookup_nanoseconds + total_io_nanoseconds) as f64 / 1_000_000_000.0);
+    log::info!("Total time in color set lookup: {:.2}s", total_lookup_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Total time in output: {:.2}s", total_io_nanoseconds as f64 / 1_000_000_000.0);
+    log::info!("Time in lookup per nucleotide: {:.2}ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
 }
 
 #[allow(clippy::manual_flatten)]
