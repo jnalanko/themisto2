@@ -1,4 +1,5 @@
-use std::{io::Write, ops::Range, path::Path};
+use std::{io::Write, ops::Range, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use crossbeam::channel::RecvTimeoutError;
 use jseqio::seq_db::SeqDB;
 use sbwt::SeqStream;
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
@@ -136,7 +137,7 @@ impl PseudoalignmentBatch {
         self.seq_ranks.end += 1;
     }
 
-    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, index: &CompactColexKmers<CSS>) -> PseudoalignmentBatchResult {
+    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, index: &CompactColexKmers<CSS>, n_bases_processed: &AtomicUsize) -> PseudoalignmentBatchResult {
         let mut result = PseudoalignmentBatchResult {
             concat: vec![],
             starts: vec![0],
@@ -146,6 +147,7 @@ impl PseudoalignmentBatch {
         for rec in self.seqs.iter() {
             aligner.push_compatible_colors(rec.seq, index, &mut result.concat);
             result.starts.push(result.concat.len());
+            n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
         result
     }
@@ -167,6 +169,9 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
     let (results_send, results_recv) = crossbeam::channel::bounded::<PseudoalignmentBatchResult>(n_workers);
+    let (progress_printer_quit_signal_send, progress_printer_quit_signal_recv) = crossbeam::channel::bounded::<()>(1);
+
+    let n_bases_processed = AtomicUsize::new(0); 
 
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
@@ -192,9 +197,10 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
             let work_recv_clone = work_recv.clone();
             let results_send_clone = results_send.clone();
             let index_ref = index;
+            let n_bases_processed_ref = &n_bases_processed;
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let result = batch.process(&mut aligner, index_ref);
+                    let result = batch.process(&mut aligner, index_ref, n_bases_processed_ref);
                     results_send_clone.send(result).unwrap();
                 }
             });
@@ -208,11 +214,43 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
                 }
             }
         });
+
+        let progress_printer_handle = scope.spawn(|| {
+            let mut last_wakeup_time = std::time::Instant::now();
+            let print_interval = std::time::Duration::from_secs(10);
+            let start_time = std::time::Instant::now();
+            loop {
+                match progress_printer_quit_signal_recv.recv_timeout(print_interval) {
+                    Ok(_) => break, // Received the quit signal
+                    Err(RecvTimeoutError::Timeout) => { // Time to print
+                        let n = n_bases_processed.load(Relaxed);
+                        let t = last_wakeup_time.elapsed().as_secs();
+                        let throughput = n as f64 / t as f64 / (1 << 20) as f64;
+                        log::info!("Current throughput {} Mbases/s ({} bases processed total)", throughput, n);
+                        last_wakeup_time = std::time::Instant::now();
+                    },
+                    Err(RecvTimeoutError::Disconnected) => {
+                        // I'm not sure when this would happen, but let's just quit
+                       break
+                    }
+                }
+            }
+
+            // Print total statistics
+            let total_n = n_bases_processed.load(Relaxed);
+            let total_t = start_time.elapsed().as_secs();
+            let total_throughput = total_n as f64 / total_t as f64 / (1 << 20) as f64;
+            log::info!("Total bases processed: {}", total_n);
+            log::info!("Total throughput: {}", total_throughput);
+            //std::thread::sleep(std::time::Duration::from_secs(sleep_interval_seconds));
+        });
         
         parser_handle.join().unwrap(); // Wait for the parser to finish
         for h in worker_handles { h.join().unwrap() } // Wait for the workers to finish
         drop(results_send); // Signal that no more results will be pushed
         outputter_handle.join().unwrap(); // Wait for the outputter to finish
+        progress_printer_quit_signal_send.send(()).unwrap(); // Interrupt the progress printer from sleep
+        progress_printer_handle.join().unwrap();
     }); 
 }
 
