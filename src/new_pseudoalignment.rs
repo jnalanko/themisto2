@@ -1,12 +1,15 @@
+use std::{io::Write, path::Path, sync::atomic::AtomicUsize};
+
 use crossbeam::channel::{Receiver, Sender};
 use jseqio::{record::Record, seq_db::SeqDB};
 use rand_distr::num_traits::ConstOne;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
-trait CompatibilityCriterion {
+trait Pseudoaligner {
     // The &mut self is to allow internal state containing reused buffers
     fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
+    fn new() -> Self; // Not object safe with this
 }
 
 struct IntersectionPseudoalignment {
@@ -41,7 +44,7 @@ impl ThresholdPseudoaligner {
     }
 }
 
-impl CompatibilityCriterion for ThresholdPseudoaligner {
+impl Pseudoaligner for ThresholdPseudoaligner {
     fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
@@ -84,7 +87,7 @@ impl CompatibilityCriterion for ThresholdPseudoaligner {
     }
 }
 
-impl CompatibilityCriterion for IntersectionPseudoalignment {
+impl Pseudoaligner for IntersectionPseudoalignment {
     fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;
@@ -137,7 +140,15 @@ struct QueryBatch {
 }
 
 impl QueryBatch {
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl CompatibilityCriterion) -> QueryResult {
+    fn new() -> Self { // TODO: take metrics
+        Self {
+            seqs: SeqDB::new(),
+            metrics: vec![],
+        }
+    }
+
+    // Returns JSON-formatted bytes
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner) -> Vec<u8> {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -149,7 +160,10 @@ impl QueryBatch {
             let metric_vecs = self.compute_metrics(&rec.seq, &compat_set_buf, index);
             result.metrics.push(metric_vecs);
         }
-        result
+        let mut bytes_out = Vec::<u8>::new();
+        result.into_json(&mut bytes_out);
+
+        bytes_out
     }
 
     fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<(Metric, Vec<usize>)>{
@@ -200,7 +214,7 @@ impl QueryResult {
         }
     }
 
-    fn into_json(self, out: &mut Vec<u8>) {
+    fn into_json(self, out: &mut impl Write) {
         todo!();
     }
 
@@ -213,19 +227,98 @@ impl QueryResult {
     }
 }
 
-struct Worker<'a, CSS: ColorSetStorage, CC: CompatibilityCriterion> {
+struct Worker<'a, CSS: ColorSetStorage, CC: Pseudoaligner> {
     index: &'a  CompactColexKmers<CSS>,
     compatibility_criterion: CC,
 }
 
-impl<'a, CSS: ColorSetStorage, CC: CompatibilityCriterion> Worker<'a, CSS, CC> {
-    fn run(&mut self, input: Receiver<QueryBatch>, output: &Sender<Vec<u8>>){
-        while let Ok(batch) = input.recv() {
-            let result = batch.process(self.index, &mut self.compatibility_criterion);
-            let mut json_buf = Vec::<u8>::new();
-            result.into_json(&mut json_buf);
-            json_buf.push(b'\n');
-            output.send(json_buf).unwrap();
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, n_aligners: usize) {
+    let reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
+
+    let batch_size = 10_000_usize;
+    let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);
+    let (results_send, results_recv) = crossbeam::channel::bounded::<Vec<u8>>(n_aligners); // Json-formatted blocks of text
+
+    let (progress_printer_quit_signal_send, progress_printer_quit_signal_recv) = crossbeam::channel::bounded::<()>(1);
+
+    let n_bases_processed = AtomicUsize::new(0); 
+
+    std::thread::scope(|scope| {
+        let parser_handle = scope.spawn(move || {
+            let mut n_seqs_read = 0_usize;
+            let mut cur_batch = QueryBatch::new();
+            while let Some(q) = reader.read_next().unwrap() {
+                n_seqs_read += 1;
+                cur_batch.seqs.push_record(q);
+                if cur_batch.seqs.total_seq_len() >= batch_size {
+                    work_send.send(cur_batch).unwrap();
+                    cur_batch = QueryBatch::new();
+                }
+            }
+            if cur_batch.seqs.total_seq_len() > 0 { // Last batch
+                work_send.send(cur_batch).unwrap();
+            }
+            drop(work_send); // Signal that no more work is going to be pushed
+        });
+
+        let mut worker_handles = vec![];
+        for _worker_id in 0..n_aligners {
+            let mut aligner = CC::new();
+            let work_recv_clone = work_recv.clone();
+            let results_send_clone = results_send.clone();
+            let index_ref = index;
+            let n_bases_processed_ref = &n_bases_processed;
+            let handle = scope.spawn(move || {
+                while let Ok(batch) = work_recv_clone.recv() {
+                    let json = batch.process(index, &mut aligner);
+                    results_send.send(json);
+                }
+            });
+            worker_handles.push(handle);
         }
-    }
+
+        let outputter_handle = scope.spawn(|| {
+            while let Ok(json) = results_recv.recv() {
+                output.write_all(&json).unwrap();
+            }
+        });
+
+        let progress_printer_handle = scope.spawn(|| {
+            let mut last_wakeup_time = std::time::Instant::now();
+            let mut last_n_bases_processed = n_bases_processed.load(Relaxed);
+            let print_interval = std::time::Duration::from_secs(10);
+            let start_time = std::time::Instant::now();
+            loop {
+                match progress_printer_quit_signal_recv.recv_timeout(print_interval) {
+                    Ok(_) => break, // Received the quit signal
+                    Err(RecvTimeoutError::Timeout) => { // Time to print
+                        let n = n_bases_processed.load(Relaxed);
+                        let t = last_wakeup_time.elapsed().as_secs_f64();
+                        let throughput = (n - last_n_bases_processed) as f64 / t / (1 << 20) as f64;
+                        log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
+                        last_n_bases_processed = n;
+                        last_wakeup_time = std::time::Instant::now();
+                    },
+                    Err(RecvTimeoutError::Disconnected) => {
+                        // I'm not sure when this would happen, but let's just quit
+                       break
+                    }
+                }
+            }
+
+            // Print total statistics
+            let total_n = n_bases_processed.load(Relaxed);
+            let total_t = start_time.elapsed().as_secs_f64();
+            let total_throughput = total_n as f64 / total_t / (1 << 20) as f64;
+            log::info!("Total bases {} bases processed in {:.3} seconds", total_n, total_t);
+            log::info!("Total throughput: {:.3} Mbases/s", total_throughput);
+        });
+        
+        parser_handle.join().unwrap(); // Wait for the parser to finish
+        for h in worker_handles { h.join().unwrap() } // Wait for the workers to finish
+        drop(results_send); // Signal that no more results will be pushed
+        outputter_handle.join().unwrap(); // Wait for the outputter to finish
+        progress_printer_quit_signal_send.send(()).unwrap(); // Interrupt the progress printer from sleep
+        progress_printer_handle.join().unwrap();
+    }); 
 }
