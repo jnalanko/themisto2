@@ -1,5 +1,5 @@
 use std::{cmp::Reverse, io::Write, ops::Range, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
-use crossbeam::channel::RecvTimeoutError;
+use crossbeam::channel::{RecvTimeoutError, Sender};
 use jseqio::seq_db::SeqDB;
 use sbwt::SeqStream;
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
@@ -147,6 +147,8 @@ impl Ord for PseudoalignmentBatchResult {
 }
 
 impl PseudoalignmentBatch {
+    const SEND_TO_OUTPUT_THRESHOLD: usize = 1_000_000;
+
     fn new(first_seq_rank: usize) -> Self {
         Self { seqs: SeqDB::new(), seq_ranks: first_seq_rank..first_seq_rank }
     }
@@ -156,23 +158,41 @@ impl PseudoalignmentBatch {
         self.seq_ranks.end += 1;
     }
 
-    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, index: &CompactColexKmers<CSS>, n_bases_processed: &AtomicUsize) -> PseudoalignmentBatchResult {
-        let mut result = PseudoalignmentBatchResult {
-            concat: vec![],
-            starts: vec![0],
-            seq_ranks: self.seq_ranks,
-        };
-
+    fn process<CSS: ColorSetStorage>(self, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, index: &CompactColexKmers<CSS>, n_bases_processed: &AtomicUsize, output_channel: &Sender<PseudoalignmentBatchResult>) {
+        let mut result = PseudoalignmentBatchResult::new(self.seq_ranks.start);
         for rec in self.seqs.iter() {
             aligner.push_compatible_colors(rec.seq, index, &mut result.concat);
             result.starts.push(result.concat.len());
+            result.seq_ranks.end += 1;
+
+            if result.concat.len() > Self::SEND_TO_OUTPUT_THRESHOLD {
+                // Send current results for output
+                let next_start = result.seq_ranks.end;
+                output_channel.send(result).unwrap();
+                result = PseudoalignmentBatchResult::new(next_start);
+                eprintln!("Early flush");
+            }
+
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
-        result
+
+        // Output remaining results
+        if result.seq_ranks.len() > 0 {
+            output_channel.send(result).unwrap();
+        }
     }
 }
 
 impl PseudoalignmentBatchResult {
+
+    fn new(first_seq_rank: usize) -> Self {
+        Self {
+            concat: vec![],
+            starts: vec![0],
+            seq_ranks: first_seq_rank..first_seq_rank,
+        }
+    }
+
     fn get_result_set(&self, idx: usize) -> &[usize] {
         &self.concat[self.starts[idx]..self.starts[idx+1]]
     } 
@@ -229,8 +249,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
             let n_bases_processed_ref = &n_bases_processed;
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let result = batch.process(&mut aligner, index_ref, n_bases_processed_ref);
-                    results_send_clone.send(result).unwrap();
+                    batch.process(&mut aligner, index_ref, n_bases_processed_ref, &results_send_clone);
                 }
             });
             worker_handles.push(handle);
