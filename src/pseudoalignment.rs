@@ -1,4 +1,4 @@
-use std::{io::Write, ops::Range, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::{cmp::Reverse, io::Write, ops::Range, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 use crossbeam::channel::RecvTimeoutError;
 use jseqio::seq_db::SeqDB;
 use sbwt::SeqStream;
@@ -127,6 +127,25 @@ struct PseudoalignmentBatchResult {
     seq_ranks: Range<usize>, // Original sequence ranks for these queries
 }
 
+impl PartialEq for PseudoalignmentBatchResult {
+    fn eq(&self, other: &Self) -> bool {
+        self.seq_ranks == other.seq_ranks
+    }
+}
+impl Eq for PseudoalignmentBatchResult {}
+
+impl PartialOrd for PseudoalignmentBatchResult {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other)) // Using the total order
+    }
+}
+
+impl Ord for PseudoalignmentBatchResult {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.seq_ranks.start.cmp(&other.seq_ranks.start)
+    }
+}
+
 impl PseudoalignmentBatch {
     fn new(first_seq_rank: usize) -> Self {
         Self { seqs: SeqDB::new(), seq_ranks: first_seq_rank..first_seq_rank }
@@ -157,6 +176,16 @@ impl PseudoalignmentBatchResult {
     fn get_result_set(&self, idx: usize) -> &[usize] {
         &self.concat[self.starts[idx]..self.starts[idx+1]]
     } 
+
+    fn write(&self, out: &mut impl std::io::Write) {
+        for seq_rank in self.seq_ranks.clone() {
+            write!(out, "{}", seq_rank).unwrap();
+            for cid in self.get_result_set(seq_rank - self.seq_ranks.start){
+                write!(out, " {}", cid).unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+    }
 }
 
 // This uses a factory pattern for creating new pseudoaligners. I'm so sorry.
@@ -164,7 +193,7 @@ impl PseudoalignmentBatchResult {
 // can create a separate aligner for each worker thread, but so that
 // it does not have to care how they are constructed.
 // The output callback takes pairs (read rank in input, pseudoaligned color ids)
-fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut((usize, &[usize])) + Send, n_workers: usize) {
+fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut queries: impl SeqStream + Send + 'static, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send>, mut output_callback: impl FnMut(PseudoalignmentBatchResult) + Send, n_workers: usize) {
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
@@ -209,9 +238,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
 
         let outputter_handle = scope.spawn(|| {
             while let Ok(result) = results_recv.recv() {
-                for (idx, query_rank) in result.seq_ranks.clone().enumerate() {
-                    output_callback((query_rank, result.get_result_set(idx)));
-                }
+                output_callback(result)
             }
         });
 
@@ -255,15 +282,49 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
     }); 
 }
 
+struct OutputWriter {
+    buffer: std::collections::BinaryHeap::<Reverse<PseudoalignmentBatchResult>>, // Reverse makes this a min-heap
+    next_seq_rank: usize,
+}
+
+impl OutputWriter {
+    fn new() -> Self {
+        Self {
+            buffer: std::collections::BinaryHeap::<Reverse<PseudoalignmentBatchResult>>::new(),
+            next_seq_rank: 0,
+        }
+    }
+
+    // Does not immediately write if we're missing some batch result that should
+    // be written ealier.
+    fn push_batch(&mut self, result_batch: PseudoalignmentBatchResult, mut output: &mut impl Write) {
+        self.buffer.push(Reverse(result_batch)); // Reverse makes this a min heap
+        loop { // Print all batches that can now be printed
+            let min_batch = self.buffer.peek();
+            if let Some(min_batch) = min_batch {
+                let min_batch = &min_batch.0; // Unwrap from Reverse
+                if min_batch.seq_ranks.start == self.next_seq_rank {
+                    min_batch.write(&mut output);
+                    self.next_seq_rank = min_batch.seq_ranks.end;
+                    self.buffer.pop();
+                } else {
+                    break; // Not ready to print min_batch yet
+                }
+            } else {
+                break; // Batch buffer is empty
+            }
+        }
+    }
+}
+
 pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, n_aligners: usize) {
     let reader = crate::io::ChainedInputStream::new(vec![input_file.to_path_buf()]);
 
-    let output_callback = |(read_rank, color_ids): (usize, &[usize])| {
-        write!(output, "{}", read_rank).unwrap();
-        for cid in color_ids {
-            write!(output, " {}", cid).unwrap();
-        }
-        writeln!(output).unwrap();
+    // Create the output callback
+    let mut writer = OutputWriter::new();
+    let output_callback = |result_batch| {
+        writer.push_batch(result_batch, &mut output);
     };
+
     run_all_queries(index, reader, create_new_aligner, output_callback, n_aligners);
 }
