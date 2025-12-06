@@ -37,32 +37,32 @@ fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &
 
 struct QueryBatch {
     seqs: SeqDB,
-    metrics: Vec<Metric>,
+    metrics: Vec<Metric>, // These metric should be computed
 }
 
 impl QueryBatch {
     fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl CompatibilityCriterion) -> QueryResult {
         let mut result = QueryResult::new();
-        let mut color_set_id_buf = Vec::<Option<usize>>::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
             compat_set_buf.clear();
-            color_set_id_buf.clear();
 
             cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
-            //let color_set_ids = index.push_color_set_ids_to_buffer(rec.seq, &mut color_set_id_buf);
             result.push(&compat_set_buf, rec.name());
+
+            let metric_vecs = self.compute_metrics(&rec.seq, &compat_set_buf, index);
+            result.metrics.push(metric_vecs);
         }
         result
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<(Metric, Vec<usize>)>{
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<(Metric, Vec<usize>)>{
         let mut color_set_ids = Vec::<Option<usize>>::new();
         index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
 
         let mut ans = Vec::<(Metric, Vec<usize>)>::new();
 
-        for metric in metrics {
+        for metric in self.metrics.iter() {
             let values = match metric {
                 Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
                 Metric::BasesCovered => todo!(),
