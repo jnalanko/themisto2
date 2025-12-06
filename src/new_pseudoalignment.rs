@@ -150,7 +150,7 @@ impl QueryBatch {
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner<CSS>, n_bases_processed: &AtomicUsize) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize) -> Vec<u8> {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
