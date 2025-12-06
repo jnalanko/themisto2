@@ -216,11 +216,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<PseudoalignmentBatch>(n_workers);
-
-    // This has to be unbounded because otherwise we could deadlock if the channel becomes full before
-    // the next result batch in order to be printed arrives. Todo: make it bounded but create a priority
-    // lane to be able to get the next result batch even when the channel is full.
-    let (results_send, results_recv) = crossbeam::channel::unbounded::<PseudoalignmentBatchResult>();
+    let (results_send, results_recv) = crossbeam::channel::bounded::<PseudoalignmentBatchResult>(n_workers);
 
     let (progress_printer_quit_signal_send, progress_printer_quit_signal_recv) = crossbeam::channel::bounded::<()>(1);
 
