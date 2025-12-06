@@ -1,6 +1,6 @@
-use std::{io::Write, path::Path, sync::atomic::AtomicUsize};
+use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver, RecvTimeoutError, Sender};
 use jseqio::{record::Record, seq_db::SeqDB};
 use rand_distr::num_traits::ConstOne;
 
@@ -148,7 +148,7 @@ impl QueryBatch {
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner, n_bases_processed: &AtomicUsize) -> Vec<u8> {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -159,6 +159,8 @@ impl QueryBatch {
 
             let metric_vecs = self.compute_metrics(&rec.seq, &compat_set_buf, index);
             result.metrics.push(metric_vecs);
+
+            n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
         let mut bytes_out = Vec::<u8>::new();
         result.into_json(&mut bytes_out);
@@ -232,8 +234,8 @@ struct Worker<'a, CSS: ColorSetStorage, CC: Pseudoaligner> {
     compatibility_criterion: CC,
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, n_aligners: usize) {
-    let reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner + Send>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, n_aligners: usize) {
+    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);
@@ -245,10 +247,8 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner
 
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
-            let mut n_seqs_read = 0_usize;
             let mut cur_batch = QueryBatch::new();
             while let Some(q) = reader.read_next().unwrap() {
-                n_seqs_read += 1;
                 cur_batch.seqs.push_record(q);
                 if cur_batch.seqs.total_seq_len() >= batch_size {
                     work_send.send(cur_batch).unwrap();
@@ -270,8 +270,8 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner
             let n_bases_processed_ref = &n_bases_processed;
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let json = batch.process(index, &mut aligner);
-                    results_send.send(json);
+                    let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref);
+                    results_send_clone.send(json);
                 }
             });
             worker_handles.push(handle);
