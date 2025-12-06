@@ -242,7 +242,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
             let total_n = n_bases_processed.load(Relaxed);
             let total_t = start_time.elapsed().as_secs();
             let total_throughput = total_n as f64 / total_t as f64 / (1 << 20) as f64;
-            log::info!("Total bases processed: {}", total_n);
+            log::info!("Total bases {} bases processed in {:.3} seconds", total_n, total_t);
             log::info!("Total throughput: {:.3} Mbases/s", total_throughput);
             //std::thread::sleep(std::time::Duration::from_secs(sleep_interval_seconds));
         });
