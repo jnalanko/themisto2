@@ -226,7 +226,7 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
                         let n = n_bases_processed.load(Relaxed);
                         let t = last_wakeup_time.elapsed().as_secs();
                         let throughput = n as f64 / t as f64 / (1 << 20) as f64;
-                        log::info!("Current throughput {} Mbases/s ({} bases processed total)", throughput, n);
+                        log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
                         last_wakeup_time = std::time::Instant::now();
                     },
                     Err(RecvTimeoutError::Disconnected) => {
