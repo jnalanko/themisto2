@@ -272,7 +272,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
                     let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref);
-                    results_send_clone.send(json);
+                    results_send_clone.send(json).unwrap();
                 }
             });
             worker_handles.push(handle);
