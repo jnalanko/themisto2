@@ -22,12 +22,9 @@ impl QueryBatch {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
-            let seq = rec.seq;
-            let name = rec.name();
-
             compat_set_buf.clear();
-            cc.push_compatibility_set(seq, &mut compat_set_buf);
-            result.push(&compat_set_buf, &name);
+            cc.push_compatibility_set(rec.seq, &mut compat_set_buf);
+            result.push(&compat_set_buf, rec.name());
         }
         result
     }
