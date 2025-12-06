@@ -431,6 +431,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
     };
 
     pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
+    log::info!("Finished");
 }
 
 fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool, sample_distance: usize) {
