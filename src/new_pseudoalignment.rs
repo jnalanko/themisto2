@@ -1,20 +1,43 @@
 use crossbeam::channel::{Receiver, Sender};
 use jseqio::{record::Record, seq_db::SeqDB};
+use rand_distr::num_traits::ConstOne;
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
 trait CompatibilityCriterion {
     // The &mut self is to allow internal state containing reused buffers
-    fn push_compatibility_set(&mut self, seq: &[u8], out: &mut Vec<usize>);
+    fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
+}
+
+#[derive(Copy, Clone)]
+enum Metric {
+    KmerHits,
+    BasesCovered,
+    AlignmentLength,
+    LongestMatchRun,
+    ShortestGap
+}
+
+// todo: can be much faster 
+fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+    let mut hits = vec![0; index.get_set_storage().n_colors()];
+    for color_set_id_opt in color_set_ids {
+        if let Some(color_set_id) = color_set_id_opt {
+            let color_set = index.set_id_to_set(*color_set_id);
+            for color in color_set.iter() {
+                hits[color] += 1;
+                // TODO: Faster: If same color id appears multiple times, increment by the multiplicity
+            }
+        }
+    }
+
+    // Return only hits to compatible colors
+    compatible_colors.iter().map(|&c| hits[c]).collect()
 }
 
 struct QueryBatch {
     seqs: SeqDB,
-    report_hit_counts: bool,
-    report_bases_covered: bool,
-    report_alignment_length: bool,
-    report_longest_match_run: bool,
-    report_shortest_gap: bool,
+    metrics: Vec<Metric>,
 }
 
 impl QueryBatch {
@@ -26,12 +49,30 @@ impl QueryBatch {
             compat_set_buf.clear();
             color_set_id_buf.clear();
 
-            let color_set_ids = index.push_color_set_ids_to_buffer(rec.seq, &mut color_set_id_buf);
-            todo!();
-            cc.push_compatibility_set(rec.seq, &mut compat_set_buf);
+            cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
+            //let color_set_ids = index.push_color_set_ids_to_buffer(rec.seq, &mut color_set_id_buf);
             result.push(&compat_set_buf, rec.name());
         }
         result
+    }
+
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<(Metric, Vec<usize>)>{
+        let mut color_set_ids = Vec::<Option<usize>>::new();
+        index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
+
+        let mut ans = Vec::<(Metric, Vec<usize>)>::new();
+
+        for metric in metrics {
+            let values = match metric {
+                Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
+                Metric::BasesCovered => todo!(),
+                Metric::AlignmentLength => todo!(),
+                Metric::LongestMatchRun => todo!(),
+                Metric::ShortestGap => todo!(),
+            };
+            ans.push((*metric, values));
+        }
+        ans
     }
 }
 
@@ -42,12 +83,12 @@ struct QueryResult {
     compatibility_class_concat: Vec<usize>,
     compatibility_class_starts: Vec<usize>,
 
-    // Optional metrics
-    hit_counts: Option<Vec<usize>>,
-    bases_covered: Option<Vec<usize>>,
-    alignment_length: Option<Vec<usize>>,
-    longest_match_runs: Option<Vec<usize>>,
-    shortest_gaps: Option<Vec<usize>>,
+    // Optional metrics: For each query sequence, a vector of pairs
+    // (Metric, Vec<usize>), where the length of the vector in the pair
+    // is equal to the compatibility class size, and has metric values
+    // for each color in the compatibility class in the same order as
+    // the colors appear in the compatibility class.
+    metrics: Vec<Vec<(Metric, Vec<usize>)>>
 }
 
 impl QueryResult {
@@ -58,11 +99,6 @@ impl QueryResult {
             query_names_starts: vec![0], 
             compatibility_class_concat: vec![], 
             compatibility_class_starts: vec![0], 
-            hit_counts: None, 
-            bases_covered: None, 
-            alignment_length: None, 
-            longest_match_runs: None, 
-            shortest_gaps: None,
         }
     }
 
