@@ -345,4 +345,5 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
     };
 
     run_all_queries(index, reader, create_new_aligner, output_callback, n_aligners);
+    assert!(writer.buffer.is_empty());
 }
