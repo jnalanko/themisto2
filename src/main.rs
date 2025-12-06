@@ -33,6 +33,7 @@ mod finimizers;
 mod util;
 mod merge;
 mod pseudoalignment;
+mod new_pseudoalignment;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
