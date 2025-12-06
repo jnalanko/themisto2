@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::{io::Write, marker::PhantomData, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 
 use crossbeam::channel::{Receiver, RecvTimeoutError, Sender};
 use jseqio::{record::Record, seq_db::SeqDB};
@@ -6,14 +6,14 @@ use rand_distr::num_traits::ConstOne;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
-trait Pseudoaligner {
+trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
-    fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
-    fn new() -> Self; // Not object safe with this
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
 }
 
-struct IntersectionPseudoalignment {
+struct IntersectionPseudoalignment<CSS: ColorSetStorage> {
     min_hits: usize,
+    css: PhantomData<CSS>, // TODO: does this make sense?
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,15 +24,16 @@ pub enum Denominator {
 }
 
 #[derive(Clone)]
-pub struct ThresholdPseudoaligner {
+pub struct ThresholdPseudoaligner<CSS: ColorSetStorage> {
     counts: Vec<usize>,
     nonzero_count_indices: Vec<usize>,
     threshold: f64,
     denominator: Denominator,
     min_hits: usize,
+    css: PhantomData<CSS>, // TODO: does this make sense?
 }
 
-impl ThresholdPseudoaligner {
+impl<CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
     pub fn new(n_colors: usize, threshold: f64, min_hits: usize, denominator: Denominator) -> Self {
         Self {
             counts: vec![0; n_colors],
@@ -40,12 +41,13 @@ impl ThresholdPseudoaligner {
             threshold,
             min_hits,
             denominator,
+            css: PhantomData,
         }
     }
 }
 
-impl Pseudoaligner for ThresholdPseudoaligner {
-    fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
         for set in index.lookup_kmer_color_sets(seq) {
@@ -87,8 +89,8 @@ impl Pseudoaligner for ThresholdPseudoaligner {
     }
 }
 
-impl Pseudoaligner for IntersectionPseudoalignment {
-    fn push_compatibility_set<CSS: ColorSetStorage>(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment<CSS> {
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;
         #[allow(clippy::manual_flatten)] // Clearer this way
@@ -148,7 +150,7 @@ impl QueryBatch {
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner, n_bases_processed: &AtomicUsize) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl Pseudoaligner<CSS>, n_bases_processed: &AtomicUsize) -> Vec<u8> {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -229,12 +231,11 @@ impl QueryResult {
     }
 }
 
-struct Worker<'a, CSS: ColorSetStorage, CC: Pseudoaligner> {
+struct Worker<'a, CSS: ColorSetStorage> {
     index: &'a  CompactColexKmers<CSS>,
-    compatibility_criterion: CC,
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner + Send>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, n_aligners: usize) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, n_aligners: usize) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;
@@ -263,7 +264,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync, CC: Pseudoaligner
 
         let mut worker_handles = vec![];
         for _worker_id in 0..n_aligners {
-            let mut aligner = CC::new();
+            let mut aligner = create_new_aligner();
             let work_recv_clone = work_recv.clone();
             let results_send_clone = results_send.clone();
             let index_ref = index;
