@@ -224,9 +224,9 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
                 match progress_printer_quit_signal_recv.recv_timeout(print_interval) {
                     Ok(_) => break, // Received the quit signal
                     Err(RecvTimeoutError::Timeout) => { // Time to print
-                        let n = n_bases_processed.load(Relaxed) - last_n_bases_processed;
+                        let n = n_bases_processed.load(Relaxed);
                         let t = last_wakeup_time.elapsed().as_secs();
-                        let throughput = n as f64 / t as f64 / (1 << 20) as f64;
+                        let throughput = (n - last_n_bases_processed) as f64 / t as f64 / (1 << 20) as f64;
                         log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
                         last_n_bases_processed = n;
                         last_wakeup_time = std::time::Instant::now();
