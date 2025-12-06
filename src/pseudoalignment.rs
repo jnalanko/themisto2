@@ -170,7 +170,6 @@ impl PseudoalignmentBatch {
                 let next_start = result.seq_ranks.end;
                 output_channel.send(result).unwrap();
                 result = PseudoalignmentBatchResult::new(next_start);
-                eprintln!("Early flush");
             }
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
