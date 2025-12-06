@@ -57,20 +57,23 @@ impl QueryBatch {
     }
 
     fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<(Metric, Vec<usize>)>{
-        let mut color_set_ids = Vec::<Option<usize>>::new();
-        index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
-
         let mut ans = Vec::<(Metric, Vec<usize>)>::new();
 
-        for metric in self.metrics.iter() {
-            let values = match metric {
-                Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
-                Metric::BasesCovered => todo!(),
-                Metric::AlignmentLength => todo!(),
-                Metric::LongestMatchRun => todo!(),
-                Metric::ShortestGap => todo!(),
-            };
-            ans.push((*metric, values));
+        if self.metrics.len() > 0 {
+            let mut color_set_ids = Vec::<Option<usize>>::new();
+            index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
+
+
+            for metric in self.metrics.iter() {
+                let values = match metric {
+                    Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
+                    Metric::BasesCovered => todo!(),
+                    Metric::AlignmentLength => todo!(),
+                    Metric::LongestMatchRun => todo!(),
+                    Metric::ShortestGap => todo!(),
+                };
+                ans.push((*metric, values));
+            }
         }
         ans
     }
