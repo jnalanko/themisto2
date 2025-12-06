@@ -225,8 +225,8 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
                     Ok(_) => break, // Received the quit signal
                     Err(RecvTimeoutError::Timeout) => { // Time to print
                         let n = n_bases_processed.load(Relaxed);
-                        let t = last_wakeup_time.elapsed().as_secs();
-                        let throughput = (n - last_n_bases_processed) as f64 / t as f64 / (1 << 20) as f64;
+                        let t = last_wakeup_time.elapsed().as_secs_f64();
+                        let throughput = (n - last_n_bases_processed) as f64 / t / (1 << 20) as f64;
                         log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
                         last_n_bases_processed = n;
                         last_wakeup_time = std::time::Instant::now();
@@ -240,8 +240,8 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
 
             // Print total statistics
             let total_n = n_bases_processed.load(Relaxed);
-            let total_t = start_time.elapsed().as_secs();
-            let total_throughput = total_n as f64 / total_t as f64 / (1 << 20) as f64;
+            let total_t = start_time.elapsed().as_secs_f64();
+            let total_throughput = total_n as f64 / total_t / (1 << 20) as f64;
             log::info!("Total bases {} bases processed in {:.3} seconds", total_n, total_t);
             log::info!("Total throughput: {:.3} Mbases/s", total_throughput);
         });
