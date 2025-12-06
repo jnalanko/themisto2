@@ -401,6 +401,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
     };
 
     pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
+    log::info!("Finished");
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
