@@ -217,16 +217,18 @@ fn run_all_queries<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers
 
         let progress_printer_handle = scope.spawn(|| {
             let mut last_wakeup_time = std::time::Instant::now();
+            let mut last_n_bases_processed = n_bases_processed.load(Relaxed);
             let print_interval = std::time::Duration::from_secs(10);
             let start_time = std::time::Instant::now();
             loop {
                 match progress_printer_quit_signal_recv.recv_timeout(print_interval) {
                     Ok(_) => break, // Received the quit signal
                     Err(RecvTimeoutError::Timeout) => { // Time to print
-                        let n = n_bases_processed.load(Relaxed);
+                        let n = n_bases_processed.load(Relaxed) - last_n_bases_processed;
                         let t = last_wakeup_time.elapsed().as_secs();
                         let throughput = n as f64 / t as f64 / (1 << 20) as f64;
                         log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
+                        last_n_bases_processed = n;
                         last_wakeup_time = std::time::Instant::now();
                     },
                     Err(RecvTimeoutError::Disconnected) => {
