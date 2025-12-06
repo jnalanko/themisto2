@@ -18,11 +18,16 @@ struct QueryBatch {
 }
 
 impl QueryBatch {
-    fn process(self, cc: &mut impl CompatibilityCriterion) -> QueryResult {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut impl CompatibilityCriterion) -> QueryResult {
         let mut result = QueryResult::new();
+        let mut color_set_id_buf = Vec::<Option<usize>>::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
             compat_set_buf.clear();
+            color_set_id_buf.clear();
+
+            let color_set_ids = index.push_color_set_ids_to_buffer(rec.seq, &mut color_set_id_buf);
+            todo!();
             cc.push_compatibility_set(rec.seq, &mut compat_set_buf);
             result.push(&compat_set_buf, rec.name());
         }
