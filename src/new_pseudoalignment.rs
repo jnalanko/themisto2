@@ -242,9 +242,9 @@ impl QueryResult {
             let compat_s = self.compatibility_class_starts[seq_idx]; 
             let compat_e = self.compatibility_class_starts[seq_idx+1]; 
 
-            bytes.extend(b"\"name\": ");
+            bytes.extend(b"\"name\": \"");
             bytes.extend(&self.query_names_concat[name_s..name_e]);
-            bytes.extend(b", \"colors\": ");
+            bytes.extend(b"\", \"colors\": ");
             Self::write_slice_as_ascii(&self.compatibility_class_concat[compat_s..compat_e], &mut bytes);
 
             for (metric, values) in &self.metrics[seq_idx] {
