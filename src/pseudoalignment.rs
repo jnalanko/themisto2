@@ -174,7 +174,7 @@ struct QueryResult {
     compatibility_class_concat: Vec<usize>,
     compatibility_class_starts: Vec<usize>,
 
-    // List of metric that were computed for this batch
+    // List of metric names that were computed for this batch
     computed_metric_names: Vec<Metric>,
 
     // For each query, the concatenation like:
