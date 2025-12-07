@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::min;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
@@ -40,7 +40,7 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
         if let Some(color_set_id) = color_set_id_opt {
             let color_set = index.set_id_to_set(*color_set_id);
             for color in color_set.iter() {
-                let n_new_covered = max(kmer_end - end_of_last_covered_kmer[color], index.get_k());
+                let n_new_covered = min(kmer_end - end_of_last_covered_kmer[color], index.get_k());
                 bases_covered[color] += n_new_covered;
                 end_of_last_covered_kmer[color] = kmer_end;
             }
