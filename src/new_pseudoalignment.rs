@@ -242,27 +242,27 @@ impl QueryResult {
             let compat_s = self.compatibility_class_starts[seq_idx]; 
             let compat_e = self.compatibility_class_starts[seq_idx+1]; 
 
-            bytes.extend(b"name: ");
+            bytes.extend(b"\"name\": ");
             bytes.extend(&self.query_names_concat[name_s..name_e]);
-            bytes.extend(b", colors: ");
+            bytes.extend(b", \"colors\": ");
             Self::write_slice_as_ascii(&self.compatibility_class_concat[compat_s..compat_e], &mut bytes);
 
             for (metric, values) in &self.metrics[seq_idx] {
                 match metric {
                     Metric::KmerHits => {
-                        bytes.extend(b", kmer_hits: ");
+                        bytes.extend(b", \"kmer_hits\": ");
                     },
                     Metric::BasesCovered => {
-                        bytes.extend(b", bases_covered: ");
+                        bytes.extend(b", \"bases_covered\": ");
                     },
                     Metric::AlignmentLength => {
-                        bytes.extend(b", alignment_length: ");
+                        bytes.extend(b", \"alignment_length\": ");
                     },
                     Metric::LongestMatchRun => {
-                        bytes.extend(b", longest_match_run: ");
+                        bytes.extend(b", \"longest_match_run\": ");
                     },
                     Metric::ShortestGap => {
-                        bytes.extend(b", shortest_gap: ");
+                        bytes.extend(b", \"shortest_gap\": ");
                     },
                 }
                 Self::write_slice_as_ascii(values, &mut bytes);
