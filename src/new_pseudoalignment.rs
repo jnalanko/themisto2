@@ -6,7 +6,7 @@ use rand_distr::num_traits::ConstOne;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
-trait Pseudoaligner<CSS: ColorSetStorage> {
+pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
 }
@@ -276,6 +276,7 @@ impl QueryResult {
                 Self::write_slice_as_ascii(values, &mut bytes);
             }
             bytes.push(b'}');
+            bytes.push(b'\n');
         }
     }
 
