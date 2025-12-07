@@ -156,7 +156,7 @@ impl QueryBatch {
             cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
             result.push(&compat_set_buf, rec.name());
 
-            let metric_vecs = self.compute_metrics(&rec.seq, &compat_set_buf, index);
+            let metric_vecs = self.compute_metrics(rec.seq, &compat_set_buf, index);
             result.metrics.push(metric_vecs);
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
@@ -275,6 +275,7 @@ impl QueryResult {
             bytes.push(b'}');
             bytes.push(b'\n');
         }
+        out.write_all(&bytes).unwrap();
     }
 
     fn push(&mut self, compat_set: &[usize], seq_name: &[u8]) {
@@ -284,10 +285,6 @@ impl QueryResult {
         self.query_names_concat.extend_from_slice(seq_name);
         self.query_names_starts.push(self.query_names_concat.len());
     }
-}
-
-struct Worker<'a, CSS: ColorSetStorage> {
-    index: &'a  CompactColexKmers<CSS>,
 }
 
 pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, n_aligners: usize) {
