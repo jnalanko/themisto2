@@ -11,9 +11,8 @@ pub trait Pseudoaligner<CSS: ColorSetStorage> {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
 }
 
-struct IntersectionPseudoalignment<CSS: ColorSetStorage> {
+struct IntersectionPseudoalignment {
     min_hits: usize,
-    css: PhantomData<CSS>, // TODO: does this make sense?
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,16 +23,15 @@ pub enum Denominator {
 }
 
 #[derive(Clone)]
-pub struct ThresholdPseudoaligner<CSS: ColorSetStorage> {
+pub struct ThresholdPseudoaligner {
     counts: Vec<usize>,
     nonzero_count_indices: Vec<usize>,
     threshold: f64,
     denominator: Denominator,
     min_hits: usize,
-    css: PhantomData<CSS>, // TODO: does this make sense?
 }
 
-impl<CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
+impl ThresholdPseudoaligner {
     pub fn new(n_colors: usize, threshold: f64, min_hits: usize, denominator: Denominator) -> Self {
         Self {
             counts: vec![0; n_colors],
@@ -41,12 +39,11 @@ impl<CSS: ColorSetStorage> ThresholdPseudoaligner<CSS> {
             threshold,
             min_hits,
             denominator,
-            css: PhantomData,
         }
     }
 }
 
-impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
@@ -89,7 +86,7 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner<CSS> {
     }
 }
 
-impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment<CSS> {
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;

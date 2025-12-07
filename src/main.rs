@@ -413,25 +413,25 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
 
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
-        Denominator::All => pseudoalignment::Denominator::All,
-        Denominator::Relevant => pseudoalignment::Denominator::Relevant,
-        Denominator::MaxHits => pseudoalignment::Denominator::MaxHits,
+        Denominator::All => new_pseudoalignment::Denominator::All,
+        Denominator::Relevant => new_pseudoalignment::Denominator::Relevant,
+        Denominator::MaxHits => new_pseudoalignment::Denominator::MaxHits,
     };
 
     let n_colors = index.get_set_storage().n_colors();
 
     log::info!("Running threshold pseudoalignment for query sequences in {}", query_path.display());
     let create_new_aligner = move || {
-        let aligner = pseudoalignment::ThresholdPseudoaligner::new(
+        let aligner = new_pseudoalignment::ThresholdPseudoaligner::new(
             n_colors, 
             threshold,
             min_hits,
             denominator
         );
-        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
+        Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
+    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
     log::info!("Finished");
 }
 
