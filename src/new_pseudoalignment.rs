@@ -105,7 +105,7 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Metric {
     KmerHits,
     BasesCovered,
@@ -151,10 +151,10 @@ impl QueryBatch {
             compat_set_buf.clear();
 
             cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
-            result.push(&compat_set_buf, rec.name());
 
             let metric_vecs = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
-            result.metrics.push(metric_vecs);
+
+            result.push(&compat_set_buf, rec.name(), metric_vecs);
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
@@ -230,15 +230,13 @@ impl QueryResult {
         // that the serde json implementation is fast enough because it
         // must be quite generic.
         let mut bytes = Vec::<u8>::new();
-        bytes.push(b'{');
         assert_eq!(self.compatibility_class_starts.len(), self.query_names_starts.len());
 
-        let n_queries = self.query_names_starts.len();
-
-        self.compatibility_class_starts.push(self.compatibility_class_concat.len());
-        self.query_names_starts.push(self.query_names_concat.len());
+        assert!(self.query_names_starts.len() > 0); // There should be at least the 0 at the beginning even if it's empty
+        let n_queries = self.query_names_starts.len()-1;
 
         for seq_idx in 0..n_queries {
+            bytes.push(b'{');
             let name_s = self.query_names_starts[seq_idx];
             let name_e = self.query_names_starts[seq_idx+1];
             let compat_s = self.compatibility_class_starts[seq_idx]; 
@@ -275,12 +273,14 @@ impl QueryResult {
         out.write_all(&bytes).unwrap();
     }
 
-    fn push(&mut self, compat_set: &[usize], seq_name: &[u8]) {
+    fn push(&mut self, compat_set: &[usize], seq_name: &[u8], metric_vecs: Vec<(Metric, Vec<usize>)>) {
         self.compatibility_class_concat.extend_from_slice(compat_set);
         self.compatibility_class_starts.push(self.compatibility_class_concat.len());
 
         self.query_names_concat.extend_from_slice(seq_name);
         self.query_names_starts.push(self.query_names_concat.len());
+
+        self.metrics.push(metric_vecs);
     }
 }
 
