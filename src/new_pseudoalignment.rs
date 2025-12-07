@@ -218,8 +218,65 @@ impl QueryResult {
         }
     }
 
-    fn into_json(self, out: &mut impl Write) {
-        todo!();
+    fn write_slice_as_ascii(v: &[usize], out: &mut Vec<u8>) {
+        out.push(b'[');
+        for (i, val) in v.iter().enumerate() {
+            if i > 0 {
+                out.push(b',');
+            }
+
+            // Push digits to out without intermediate allocation
+            write!(out, "{}", val).unwrap(); // Does this allocate?
+        }
+        out.push(b']');
+    }
+
+    fn into_json(mut self, out: &mut impl Write) {
+        // I'm rolling my own JSON serialization because I don't trust
+        // that the serde json implementation is fast enough because it
+        // must be quite generic.
+        let mut bytes = Vec::<u8>::new();
+        bytes.push(b'{');
+        assert_eq!(self.compatibility_class_starts.len(), self.query_names_starts.len());
+
+        let n_queries = self.query_names_starts.len();
+
+        self.compatibility_class_starts.push(self.compatibility_class_concat.len());
+        self.query_names_starts.push(self.query_names_concat.len());
+
+        for seq_idx in 0..n_queries {
+            let name_s = self.query_names_starts[seq_idx];
+            let name_e = self.query_names_starts[seq_idx+1];
+            let compat_s = self.compatibility_class_starts[seq_idx]; 
+            let compat_e = self.compatibility_class_starts[seq_idx+1]; 
+
+            bytes.extend(b"name: ");
+            bytes.extend(&self.query_names_concat[name_s..name_e]);
+            bytes.extend(b", colors: ");
+            Self::write_slice_as_ascii(&self.compatibility_class_concat[compat_s..compat_e], &mut bytes);
+
+            for (metric, values) in &self.metrics[seq_idx] {
+                match metric {
+                    Metric::KmerHits => {
+                        bytes.extend(b", kmer_hits: ");
+                    },
+                    Metric::BasesCovered => {
+                        bytes.extend(b", bases_covered: ");
+                    },
+                    Metric::AlignmentLength => {
+                        bytes.extend(b", alignment_length: ");
+                    },
+                    Metric::LongestMatchRun => {
+                        bytes.extend(b", longest_match_run: ");
+                    },
+                    Metric::ShortestGap => {
+                        bytes.extend(b", shortest_gap: ");
+                    },
+                }
+                Self::write_slice_as_ascii(values, &mut bytes);
+            }
+            bytes.push(b'}');
+        }
     }
 
     fn push(&mut self, compat_set: &[usize], seq_name: &[u8]) {
