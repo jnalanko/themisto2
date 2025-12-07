@@ -431,7 +431,8 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
         Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
+    let metrics: Vec<new_pseudoalignment::Metric> = vec![]; //  TODO
+    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics.as_slice(), n_threads);
     log::info!("Finished");
 }
 

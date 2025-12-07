@@ -1,8 +1,7 @@
-use std::{io::Write, marker::PhantomData, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 
-use crossbeam::channel::{Receiver, RecvTimeoutError, Sender};
+use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
-use rand_distr::num_traits::ConstOne;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
 
@@ -107,7 +106,7 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment {
 }
 
 #[derive(Copy, Clone)]
-enum Metric {
+pub enum Metric {
     KmerHits,
     BasesCovered,
     AlignmentLength,
@@ -135,19 +134,17 @@ fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &
 
 struct QueryBatch {
     seqs: SeqDB,
-    metrics: Vec<Metric>, // These metric should be computed
 }
 
 impl QueryBatch {
     fn new() -> Self { // TODO: take metrics
         Self {
             seqs: SeqDB::new(),
-            metrics: vec![],
         }
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &[Metric]) -> Vec<u8> {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -156,7 +153,7 @@ impl QueryBatch {
             cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
             result.push(&compat_set_buf, rec.name());
 
-            let metric_vecs = self.compute_metrics(rec.seq, &compat_set_buf, index);
+            let metric_vecs = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
             result.metrics.push(metric_vecs);
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
@@ -167,13 +164,13 @@ impl QueryBatch {
         bytes_out
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<(Metric, Vec<usize>)>{
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<(Metric, Vec<usize>)>{
         let mut ans = Vec::<(Metric, Vec<usize>)>::new();
 
-        if self.metrics.len() > 0 {
+        if metrics.len() > 0 {
             let mut color_set_ids = Vec::<Option<usize>>::new();
             index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
-            for metric in self.metrics.iter() {
+            for metric in metrics.iter() {
                 let values = match metric {
                     Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
                     Metric::BasesCovered => todo!(),
@@ -287,7 +284,7 @@ impl QueryResult {
     }
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, n_aligners: usize) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;
@@ -323,7 +320,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
             let n_bases_processed_ref = &n_bases_processed;
             let handle = scope.spawn(move || {
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref);
+                    let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref, metrics);
                     results_send_clone.send(json).unwrap();
                 }
             });
