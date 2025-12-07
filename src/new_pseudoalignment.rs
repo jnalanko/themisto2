@@ -10,7 +10,7 @@ pub trait Pseudoaligner<CSS: ColorSetStorage> {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
 }
 
-struct IntersectionPseudoalignment {
+pub struct IntersectionPseudoaligner {
     min_hits: usize,
 }
 
@@ -85,7 +85,15 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
     }
 }
 
-impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment {
+impl IntersectionPseudoaligner {
+    pub fn new(min_hits: usize) -> Self {
+        Self {
+            min_hits,
+        }
+    }
+}
+
+impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;

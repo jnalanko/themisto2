@@ -114,6 +114,12 @@ pub enum Subcommands {
 
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
+
+        #[arg(long = "report-hit-counts", default_value = "false")]
+        report_hit_counts: bool,
+
+        #[arg(long = "report-bases-covered", default_value = "false")]
+        report_bases_covered: bool,
     },
 
     #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
@@ -396,7 +402,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
 }
 
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, n_threads: usize) {
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize) {
     // Buffered writing to stdout
     let stdout = std::io::stdout();
     let out = BufWriter::new(stdout);
@@ -404,11 +410,11 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
     log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
 
     let create_new_aligner = move || {
-        let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
-        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
+        let aligner = new_pseudoalignment::IntersectionPseudoaligner::new(min_hits);
+        Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, n_threads);
+    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
     log::info!("Finished");
 }
 
@@ -547,6 +553,17 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
 
 }
 
+fn into_metric_list(report_hit_counts: bool, report_bases_covered: bool) -> Vec<crate::pseudoalignment_metrics::Metric> {
+    let mut metrics: Vec<pseudoalignment_metrics::Metric> = vec![];
+    if report_hit_counts {
+        metrics.push(pseudoalignment_metrics::Metric::KmerHits);
+    }
+    if report_bases_covered {
+        metrics.push(pseudoalignment_metrics::Metric::BasesCovered);
+    }
+    metrics
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -581,27 +598,20 @@ fn main() {
             }
 
         },
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads} => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
+            let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             match index {
-                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, n_threads),
+                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads),
             };
 
         },
         Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
-
-            let mut metrics: Vec<pseudoalignment_metrics::Metric> = vec![];
-            if report_hit_counts {
-                metrics.push(pseudoalignment_metrics::Metric::KmerHits);
-            }
-            if report_bases_covered {
-                metrics.push(pseudoalignment_metrics::Metric::BasesCovered);
-            }
-
+            let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             match index {
                 IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads),
                 IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads),
