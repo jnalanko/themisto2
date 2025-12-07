@@ -134,6 +134,9 @@ pub enum Subcommands {
 
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
+
+        #[arg(long = "print-hit-counts", default_value = "false")]
+        print_hit_counts: bool,
     },
 
     #[command(arg_required_else_help = true, name = "print-color-sets")]
@@ -406,7 +409,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, n_threads: usize) {
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, print_hits_counts: bool, n_threads: usize) {
     // Buffered writing to stdout
     let stdout = std::io::stdout();
     let out = BufWriter::new(stdout);
@@ -431,7 +434,10 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
         Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    let metrics: Vec<new_pseudoalignment::Metric> = vec![]; //  TODO
+    let mut metrics: Vec<new_pseudoalignment::Metric> = vec![];
+    if print_hits_counts {
+        metrics.push(new_pseudoalignment::Metric::KmerHits);
+    }
     new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics.as_slice(), n_threads);
     log::info!("Finished");
 }
@@ -584,12 +590,12 @@ fn main() {
             };
 
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads} => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, print_hit_counts} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             match index {
-                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, n_threads),
+                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, print_hit_counts, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, print_hit_counts, n_threads),
             };
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {

@@ -225,7 +225,7 @@ impl QueryResult {
         out.push(b']');
     }
 
-    fn into_json(mut self, out: &mut impl Write) {
+    fn into_json(self, out: &mut impl Write) {
         // I'm rolling my own JSON serialization because I don't trust
         // that the serde json implementation is fast enough because it
         // must be quite generic.
