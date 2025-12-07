@@ -127,15 +127,16 @@ impl QueryBatch {
     // Returns JSON-formatted bytes
     fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &[Metric]) -> Vec<u8> {
         let mut result = QueryResult::new();
+        result.computed_metric_names = metrics.to_vec();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
             compat_set_buf.clear();
 
             cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
 
-            let metric_vecs = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
+            let metric_values_concat = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
 
-            result.push(&compat_set_buf, rec.name(), metric_vecs);
+            result.push(&compat_set_buf, rec.name(), metric_values_concat);
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
@@ -145,8 +146,8 @@ impl QueryBatch {
         bytes_out
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<(Metric, Vec<usize>)>{
-        let mut ans = Vec::<(Metric, Vec<usize>)>::new();
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<usize> {
+        let mut ans_concats = Vec::<usize>::new();
 
         if metrics.len() > 0 {
             let mut color_set_ids = Vec::<Option<usize>>::new();
@@ -159,10 +160,10 @@ impl QueryBatch {
                     Metric::LongestMatchRun => todo!(),
                     Metric::ShortestGap => todo!(),
                 };
-                ans.push((*metric, values));
+                ans_concats.extend(values);
             }
         }
-        ans
+        ans_concats
     }
 }
 
@@ -173,12 +174,17 @@ struct QueryResult {
     compatibility_class_concat: Vec<usize>,
     compatibility_class_starts: Vec<usize>,
 
-    // Optional metrics: For each query sequence, a vector of pairs
-    // (Metric, Vec<usize>), where the length of the vector in the pair
-    // is equal to the compatibility class size, and has metric values
-    // for each color in the compatibility class in the same order as
-    // the colors appear in the compatibility class.
-    metrics: Vec<Vec<(Metric, Vec<usize>)>> // TODO: concatenation
+    // List of metric that were computed for this batch
+    computed_metric_names: Vec<Metric>,
+
+    // For each query, the concatenation like:
+    //   [metric 1, color 1] [metric 1, color 2] ... [metric 1, color m]
+    //   [metric 2, color 1] [metric 2, color 2] ... [metric 2, color m]
+    //   ... 
+    //   [metric r, color 1] [metric r, color 2] ... [metric r, color m]
+    // The metric values are reported only for the m compatible colors, in the
+    // same order as the colors appear in the compatibility class.
+    metrics_concat: Vec<Vec<usize>>, 
 }
 
 impl QueryResult {
@@ -189,7 +195,8 @@ impl QueryResult {
             query_names_starts: vec![0], 
             compatibility_class_concat: vec![], 
             compatibility_class_starts: vec![0], 
-            metrics: vec![],
+            computed_metric_names: vec![],
+            metrics_concat: vec![],
         }
     }
 
@@ -228,7 +235,7 @@ impl QueryResult {
             bytes.extend(b"\", \"colors\": ");
             Self::write_slice_as_ascii(&self.compatibility_class_concat[compat_s..compat_e], &mut bytes);
 
-            for (metric, values) in &self.metrics[seq_idx] {
+            for (metric_idx, metric) in self.computed_metric_names.iter().enumerate() {
                 match metric {
                     Metric::KmerHits => {
                         bytes.extend(b", \"kmer_hits\": ");
@@ -246,6 +253,9 @@ impl QueryResult {
                         bytes.extend(b", \"shortest_gap\": ");
                     },
                 }
+                let slice_start = metric_idx * (compat_e-compat_s);
+                let slice_end = (metric_idx+1) * (compat_e-compat_s);
+                let values = &self.metrics_concat[seq_idx][slice_start..slice_end];
                 Self::write_slice_as_ascii(values, &mut bytes);
             }
             bytes.push(b'}');
@@ -254,14 +264,14 @@ impl QueryResult {
         out.write_all(&bytes).unwrap();
     }
 
-    fn push(&mut self, compat_set: &[usize], seq_name: &[u8], metric_vecs: Vec<(Metric, Vec<usize>)>) {
+    fn push(&mut self, compat_set: &[usize], seq_name: &[u8], metric_values_concat: Vec<usize>) {
         self.compatibility_class_concat.extend_from_slice(compat_set);
         self.compatibility_class_starts.push(self.compatibility_class_concat.len());
 
         self.query_names_concat.extend_from_slice(seq_name);
         self.query_names_starts.push(self.query_names_concat.len());
 
-        self.metrics.push(metric_vecs);
+        self.metrics_concat.push(metric_values_concat);
     }
 }
 

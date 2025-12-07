@@ -2,8 +2,6 @@ use std::cmp::min;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
-
-
 #[derive(Copy, Clone, Debug)]
 pub enum Metric {
     KmerHits,
