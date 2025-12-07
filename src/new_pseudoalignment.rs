@@ -3,7 +3,7 @@ use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}}
 use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, compute_bases_covered, compute_kmer_hits_to_compatible_colors}};
 
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
@@ -105,33 +105,6 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoalignment {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Metric {
-    KmerHits,
-    BasesCovered,
-    AlignmentLength,
-    LongestMatchRun,
-    ShortestGap
-}
-
-// todo: can be much faster 
-#[allow(clippy::manual_flatten)]
-fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut hits = vec![0; index.get_set_storage().n_colors()];
-    for color_set_id_opt in color_set_ids {
-        if let Some(color_set_id) = color_set_id_opt {
-            let color_set = index.set_id_to_set(*color_set_id);
-            for color in color_set.iter() {
-                hits[color] += 1;
-                // TODO: Faster: If same color id appears multiple times, increment by the multiplicity
-            }
-        }
-    }
-
-    // Return only hits to compatible colors
-    compatible_colors.iter().map(|&c| hits[c]).collect()
-}
-
 struct QueryBatch {
     seqs: SeqDB,
 }
@@ -173,7 +146,7 @@ impl QueryBatch {
             for metric in metrics.iter() {
                 let values = match metric {
                     Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
-                    Metric::BasesCovered => todo!(),
+                    Metric::BasesCovered => compute_bases_covered(&color_set_ids, compatible_colors, index),
                     Metric::AlignmentLength => todo!(),
                     Metric::LongestMatchRun => todo!(),
                     Metric::ShortestGap => todo!(),
