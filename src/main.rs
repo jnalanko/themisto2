@@ -33,7 +33,6 @@ mod finimizers;
 mod util;
 mod merge;
 mod pseudoalignment;
-mod new_pseudoalignment;
 mod pseudoalignment_metrics;
 
 #[derive(Parser)]
@@ -410,11 +409,11 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
     log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
 
     let create_new_aligner = move || {
-        let aligner = new_pseudoalignment::IntersectionPseudoaligner::new(min_hits);
-        Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
+        let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
+        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
+    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
     log::info!("Finished");
 }
 
@@ -426,25 +425,25 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
 
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
-        Denominator::All => new_pseudoalignment::Denominator::All,
-        Denominator::Relevant => new_pseudoalignment::Denominator::Relevant,
-        Denominator::MaxHits => new_pseudoalignment::Denominator::MaxHits,
+        Denominator::All => pseudoalignment::Denominator::All,
+        Denominator::Relevant => pseudoalignment::Denominator::Relevant,
+        Denominator::MaxHits => pseudoalignment::Denominator::MaxHits,
     };
 
     let n_colors = index.get_set_storage().n_colors();
 
     log::info!("Running threshold pseudoalignment for query sequences in {}", query_path.display());
     let create_new_aligner = move || {
-        let aligner = new_pseudoalignment::ThresholdPseudoaligner::new(
+        let aligner = pseudoalignment::ThresholdPseudoaligner::new(
             n_colors, 
             threshold,
             min_hits,
             denominator
         );
-        Box::new(aligner) as Box<dyn new_pseudoalignment::Pseudoaligner<CSS> + Send>
+        Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    new_pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
+    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
     log::info!("Finished");
 }
 
