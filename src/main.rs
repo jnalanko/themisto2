@@ -131,7 +131,7 @@ pub enum Subcommands {
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
 
-        #[arg(long = "min-hits", short = 'm', required = true, default_value = "1")]
+        #[arg(long = "min-hits", short = 'm', default_value = "1")]
         min_hits: usize,
 
         #[arg(long = "threshold", short = 'd', required = true)]
