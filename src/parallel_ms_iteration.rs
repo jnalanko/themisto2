@@ -10,6 +10,7 @@ pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
+    include_rev_comp: bool,
 }
 
 impl<'a> MsElementGenerator<'a> {
@@ -21,11 +22,17 @@ impl<'a> MsElementGenerator<'a> {
             input_files,
             streaming_index,
             filter: None,
+            include_rev_comp: true,
         }
     }
 }
 
 impl<'a> MsElementGenerator<'a> {
+
+    pub fn disable_reverse_complements(&mut self) {
+        self.include_rev_comp = false;
+    }
+
     fn run_seq(&self, seq: &[u8], color: usize, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
         let k = self.streaming_index.k();
         let ms_iter = self.streaming_index.matching_statistics_iter(seq);
@@ -64,8 +71,10 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
                 let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
                 while let Some(rec) = reader.read_next_mut().unwrap() {
                     self.run_seq(rec.seq, color, &callback);
-                    reverse_complement_in_place(rec.seq);
-                    self.run_seq(rec.seq, color, &callback);
+                    if self.include_rev_comp {
+                        reverse_complement_in_place(rec.seq);
+                        self.run_seq(rec.seq, color, &callback);
+                    }
                 }
             })
         });
@@ -200,14 +209,16 @@ impl<'a> DistinctColexComputation<'a> {
         }
     }
 
-    fn run(mut self) -> DeduplicatingBuffer {
+    fn run(mut self, include_rev_comp: bool) -> DeduplicatingBuffer {
         let mut buf = Vec::<u8>::new();
         while let Some(rec) = self.input.read_next_mut().unwrap() {
             buf.clear();
             buf.extend_from_slice(rec.seq);
             self.process_seq(&buf);
-            reverse_complement_in_place(&mut buf);
-            self.process_seq(&buf);
+            if include_rev_comp {
+                reverse_complement_in_place(&mut buf);
+                self.process_seq(&buf);
+            }
         }
         self.set_ids
     }
@@ -218,11 +229,16 @@ pub struct DeduplicatingColorElementGenerator<'a> {
     sbwt: &'a SbwtIndex<SubsetMatrix>,
     lcs: &'a LcsArray,
     filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
+    include_rev_comp: bool,
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
     pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>) -> Self {
-        Self { input_files, sbwt, lcs, filter: None }
+        Self { input_files, sbwt, lcs, filter: None, include_rev_comp: true }
+    }
+
+    pub fn disable_reverse_complements(&mut self) {
+        self.include_rev_comp = false;
     }
 }
 
@@ -234,7 +250,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
                 log::info!("Processing color {}", color);
                 let reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
                 let gen = DistinctColexComputation::new(self.sbwt, self.lcs, reader);
-                let distinct_colex_positions = gen.run();
+                let distinct_colex_positions = gen.run(self.include_rev_comp);
                 for colex in distinct_colex_positions.into_iter() {
                     let set_id = if let Some(filter) = &self.filter {
                         if !filter.get(colex) {

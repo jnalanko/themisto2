@@ -13,7 +13,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator};
 
 mod EM;
 mod bitmap_storage;
@@ -97,6 +97,12 @@ pub enum Subcommands {
 
         #[arg(long = "index-type")]
         index_type: ColoringType,
+
+        // Hidden because index import and export assume that reverse complements are indexed.
+        // The main purpose for this flag currently is to build the index for
+        // the running example in the manuscript.
+        #[arg(long = "forward-only", hide = true, default_value = "true")]
+        forward_only: bool,
 
     },
 
@@ -255,34 +261,42 @@ pub enum Subcommands {
     },
 }
 
-fn build_coloring<CSS: ColorSetStorage + Send>(
-    sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool) -> CompactColexKmers<CSS> {
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool) -> CompactColexKmers<CSS> {
 
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
-    let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
-    let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads);
+    let key_kmer_marks = if forward_only {
+        let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
+        mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
+    } else {
+        let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
+        mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
+    };
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        let mut gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        if forward_only { gen.disable_reverse_complements() }
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
+        let mut gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
+        if forward_only { gen.disable_reverse_complements() }
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     };
 
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
     let css = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        let mut gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs));
+        if forward_only { gen.disable_reverse_complements() }
         set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
+        let mut gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned());
+        if forward_only { gen.disable_reverse_complements() }
         set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
     };
 
@@ -513,7 +527,7 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
-fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
+fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: io::ChainedInputStream, k: usize, forward_only: bool, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
     let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
         log::info!("Loading SBWT from {}", sbwt_path.display());
         let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
@@ -534,7 +548,7 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
         (sbwt, lcs)
     } else {
         let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-            .add_rev_comp(true)
+            .add_rev_comp(!forward_only)
             .k(k)
             .build_lcs(true)
             .n_threads(n_threads)
@@ -572,7 +586,7 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs} => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -581,16 +595,16 @@ fn main() {
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
             let mut out = BufWriter::new(File::create(&output).unwrap());
 
-            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
+            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, forward_only, n_threads);
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs);
+                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only);
                     log::info!("Serializing bitmap index to {}", output.display());
                     write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs);
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only);
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
@@ -650,7 +664,7 @@ fn main() {
             let metadata = index_import::read_index_dump_metadata(BufReader::new(File::open(&metadata_filename).unwrap()));
 
             let input_stream = io::ChainedInputStream::new(vec![PathBuf::from(&unitig_filename)]) ;
-            let (sbwt,lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, metadata.k, n_threads);
+            let (sbwt,lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, metadata.k, true, n_threads);
 
             if sbwt.k() != metadata.k {
                 log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
