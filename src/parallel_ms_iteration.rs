@@ -14,24 +14,17 @@ pub struct MsElementGenerator<'a> {
 }
 
 impl<'a> MsElementGenerator<'a> {
-    pub fn new(
-        input_files: Vec<PathBuf>,
-        streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    ) -> Self {
+    pub fn new( input_files: Vec<PathBuf>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
         Self {
             input_files,
             streaming_index,
             filter: None,
-            include_rev_comp: true,
+            include_rev_comp,
         }
     }
 }
 
 impl<'a> MsElementGenerator<'a> {
-
-    pub fn disable_reverse_complements(&mut self) {
-        self.include_rev_comp = false;
-    }
 
     fn run_seq(&self, seq: &[u8], color: usize, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
         let k = self.streaming_index.k();
@@ -233,12 +226,8 @@ pub struct DeduplicatingColorElementGenerator<'a> {
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
-    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>) -> Self {
-        Self { input_files, sbwt, lcs, filter: None, include_rev_comp: true }
-    }
-
-    pub fn disable_reverse_complements(&mut self) {
-        self.include_rev_comp = false;
+    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>, include_rev_comp: bool) -> Self {
+        Self { input_files, sbwt, lcs, filter: None, include_rev_comp }
     }
 }
 
