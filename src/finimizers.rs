@@ -152,16 +152,16 @@ fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexK
             n_correct += 1; // This k-mer has the same color set as the finimizer
         } else {
             n_wrong += 1;
+
+            let mut intersection = finimizer_colors.clone();
+            storage.intersect(&mut intersection, &kmer_colors_view);
+
+            let mut union = finimizer_colors.clone();
+            storage.union(&mut union, &kmer_colors_view);
+
+            sum_jaccard += intersection.len() as f64 / union.len() as f64;
         }
-
-        let mut intersection = finimizer_colors.clone();
-        storage.intersect(&mut intersection, &kmer_colors_view);
-
-        let mut union = finimizer_colors.clone();
-        storage.union(&mut union, &kmer_colors_view);
-
-        sum_jaccard += intersection.len() as f64 / union.len() as f64;
-
+        
     }
     (n_correct, n_wrong, sum_jaccard / class.len() as f64)
 }
