@@ -101,7 +101,7 @@ pub enum Subcommands {
         // Hidden because index import and export assume that reverse complements are indexed.
         // The main purpose for this flag currently is to build the index for
         // the running example in the manuscript.
-        #[arg(long = "forward-only", hide = true, default_value = "true")]
+        #[arg(long = "forward-only", hide = true, default_value = "false")]
         forward_only: bool,
 
     },
