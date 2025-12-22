@@ -75,6 +75,9 @@ mod tests {
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
         let hit_counts = compute_kmer_hits_to_compatible_colors(&cset_ids, &[1,2,3], &index);
+
+        dbg!(&hit_counts);
+
         assert!(hit_counts[0] == s1.len()-k+1);
         assert!(hit_counts[1] == s2.len()-k+1);
         assert!(hit_counts[2] == s3.len()-k+1);
