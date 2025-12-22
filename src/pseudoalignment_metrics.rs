@@ -89,7 +89,7 @@ mod tests {
 
         // s1 and s3 have substitutions with X
         let s0 = b"AACTACGTACGTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice(); // "Random" sequence
-        let s1 =           b"GTACGACATCGTACGATCGXTTATGCTAGCTAGCTGAT".as_slice();
+        let s1 =           b"GTACGACATCGTACGATCGXTTAXGCTAGCTAGCTGAT".as_slice();
         let s2 =           b"GTACGACATCGTACGATCGATT".as_slice();
         let s3 = b"AACTACGTAXXTACGACATCGTACXATCGATTAT".as_slice();
 
@@ -104,9 +104,9 @@ mod tests {
 
         dbg!(&bases_covered);
 
-        assert_eq!(bases_covered[0], s1.len()-1); // 1 X
-        assert_eq!(bases_covered[1], s2.len());   // 0 X
-        assert_eq!(bases_covered[2], s3.len()-3); // 3 X
+        assert_eq!(bases_covered[0], s1.len()-5);
+        assert_eq!(bases_covered[1], s2.len());
+        assert_eq!(bases_covered[2], s3.len()-3);
 
     }
 }
