@@ -30,17 +30,14 @@ pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_id
     let mut hits = vec![0; index.get_set_storage().n_colors()];
     for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
-        let color_set_run = &color_set_ids[run_range];
-        match color_set_run.first() {
-            None => panic!("Empty color set run"), // Should never happen
-            Some(first_id) => {
-                if let Some(set_id) = first_id {
-                    for color in index.set_id_to_set(*set_id).iter() {
-                        hits[color] += run_len;
-                    }
-                }
+        assert!(run_len > 0);
+
+        let first_id = color_set_ids[run_range.start];
+        if let Some(set_id) = first_id {
+            for color in index.set_id_to_set(set_id).iter() {
+                hits[color] += run_len;
             }
-        }
+        } // Runs of None are ignored
     });
 
     // Return only hits to compatible colors
