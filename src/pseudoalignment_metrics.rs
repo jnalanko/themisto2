@@ -51,28 +51,24 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
         assert!(run_len > 0);
+        let first_id = color_set_ids[run_range.start];
+
         let first_kmer_end = run_range.start + index.get_k();
         let last_kmer_end = run_range.end + index.get_k() - 1;
-        let color_set_run = &color_set_ids[run_range];
-        match color_set_run.first() {
-            None => panic!("Empty color set run"), // Should never happen
-            Some(first_id) => {
-                if let Some(set_id) = first_id {
-                    let color_set = index.set_id_to_set(*set_id);
-                    for color in color_set.iter() {
+        if let Some(set_id) = first_id {
+            let color_set = index.set_id_to_set(set_id);
+            for color in color_set.iter() {
 
-                        // New bases covered by the first k-mer
-                        let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer[color], index.get_k());
+                // New bases covered by the first k-mer
+                let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer[color], index.get_k());
 
-                        // Add new bases covered by the rest of the k-mers (1 base each)
-                        n_new_covered += run_len - 1;
+                // Add new bases covered by the rest of the k-mers (1 base each)
+                n_new_covered += run_len - 1;
 
-                        bases_covered[color] += n_new_covered;
-                        end_of_last_covered_kmer[color] = last_kmer_end;
-                    }
-                }
+                bases_covered[color] += n_new_covered;
+                end_of_last_covered_kmer[color] = last_kmer_end;
             }
-        }
+        } // Runs of None are ignored
     });
     
     // Return only counts to compatible colors
