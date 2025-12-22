@@ -31,7 +31,6 @@ fn break_into_runs<T: Eq>(items: &[T]) -> Vec<&[T]> {
     runs
 }
 
-// todo: can be much faster 
 #[allow(clippy::manual_flatten)]
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut hits = vec![0; index.get_set_storage().n_colors()];
