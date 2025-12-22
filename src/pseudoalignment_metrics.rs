@@ -51,27 +51,7 @@ pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_id
     compatible_colors.iter().map(|&c| hits[c]).collect()
 }
 
-// todo: can be much faster 
 pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut bases_covered = vec![0; index.get_set_storage().n_colors()];
-    let mut end_of_last_covered_kmer = vec![0; index.get_set_storage().n_colors()]; // For each color. Exclusive end.
-    for (kmer_start, color_set_id_opt) in color_set_ids.iter().enumerate() {
-        let kmer_end = kmer_start + index.get_k();
-        if let Some(color_set_id) = color_set_id_opt {
-            let color_set = index.set_id_to_set(*color_set_id);
-            for color in color_set.iter() {
-                let n_new_covered = min(kmer_end - end_of_last_covered_kmer[color], index.get_k());
-                bases_covered[color] += n_new_covered;
-                end_of_last_covered_kmer[color] = kmer_end;
-            }
-        }
-    }
-    
-    // Return only counts to compatible colors
-    compatible_colors.iter().map(|&c| bases_covered[c]).collect()
-}
-
-pub fn compute_bases_covered_new<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut bases_covered = vec![0; index.get_set_storage().n_colors()];
     let mut end_of_last_covered_kmer = vec![0; index.get_set_storage().n_colors()]; // For each color. Exclusive end.
 
@@ -158,7 +138,7 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let bases_covered = compute_bases_covered_new(&cset_ids, &[1,2,3], &index);
+        let bases_covered = compute_bases_covered(&cset_ids, &[1,2,3], &index);
 
         dbg!(&bases_covered);
 
