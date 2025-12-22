@@ -48,3 +48,28 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     // Return only counts to compatible colors
     compatible_colors.iter().map(|&c| bases_covered[c]).collect()
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use sbwt::SbwtConstructionAlgorithm;
+
+    use crate::colex_colored_kmers::{self, ColexToColorSetMap};
+
+
+    #[test]
+    fn test_kmer_hits() {
+        let s1 = b"AACTACGTACGTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice(); // "Random" sequence
+        let s2 =           b"GTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice();
+        let s3 =                           b"GTACGACATCGTACGATCGATT".as_slice();
+        let s4 = b"AACTACGTACGTACGACATCGTACGATCGATTAT".as_slice();
+
+        let inputs = vec![s1,s2,s3,s4];
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            .algorithm(sbwt::BitPackedKmerSortingMem::new())
+            .run_from_slices(&inputs);
+
+        let index = colex_colored_kmers::CompactColexKmers::new(sbwt, lcs, colex_map, color_sets, color_names);
+    }
+}
+    */

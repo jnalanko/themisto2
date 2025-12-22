@@ -11,7 +11,6 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use std::io::Write;
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Acquire;
@@ -158,10 +157,10 @@ impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
     #[allow(dead_code)]
-    fn new(sbwt: Arc<SbwtIndex<SubsetMatrix>>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_threads: usize) -> Self {
+    fn new(sbwt: &SbwtIndex<SubsetMatrix>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_threads: usize) -> Self {
 
         let get_colorset_fn = |colex| colex_to_color_set_id[colex]; // TODO: this actually returns a color set id. Rename here and later.
-        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, &sbwt, lcs, get_colorset_fn, n_threads);
+        let mut sampling_marks = Self::pick_sampled_kmers(sample_distance, sbwt, lcs, get_colorset_fn, n_threads);
 
         let color_set_id_bit_width = n_distinct_color_sets.next_power_of_two().trailing_zeros() as usize;
         let mut sampled_color_set_ids = CompactIntVec::new(sampling_marks.count_ones(), color_set_id_bit_width); // In colex order
@@ -386,6 +385,70 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             (0..color_sets.n_colors()).map(|x| format!("color_{}", x)).collect::<Vec<String>>()
         };
         Self {sbwt, lcs, sets: color_sets, map: colex_map, color_names}
+    }
+
+    /// Easy but inefficient constructor for tests
+    /// colored_seqs has pairs (seq, color)
+    #[cfg(test)]
+    fn new_from_small_input(colored_seqs: &[(&[u8], usize)], sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+        use std::collections::HashMap;
+        use sbwt::StreamingIndex;
+        
+        // n_colors = max color id + 1
+        let n_colors = colored_seqs.iter().map(|(_seq, color)| *color).max().unwrap() + 1;
+
+        let just_seqs: Vec<&[u8]> = colored_seqs.iter().map(|x| x.0).collect();
+
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            .algorithm(sbwt::BitPackedKmerSortingMem::new())
+            .build_lcs(true)
+            .run_from_slices(&just_seqs);
+
+        let lcs = lcs.unwrap(); // .build_lcs(true)
+
+        // Build the color sets for each colex position
+        log::info!("Building color sets");
+        let mut color_sets = Vec::<Vec::<usize>>::new();
+        color_sets.resize(sbwt.n_sets(), vec![]);
+
+        let si = StreamingIndex::new(&sbwt, &lcs);
+        for (seq, color) in colored_seqs.iter() {
+            si.matching_statistics_iter(seq)
+            .skip(sbwt.k()-1)
+            .filter(|(len,_)| *len == sbwt.k())
+            .for_each(|(_, range)|{
+                assert_eq!(range.len(), 1);
+                color_sets[range.start].push(*color);
+            })
+        }
+
+        for cset in color_sets.iter_mut() {
+            cset.sort();
+            cset.dedup();
+        }
+
+        let mut distinct_sets_to_id = HashMap::<Vec<usize>, usize>::new(); // Color set -> id
+        let mut distinct_sets_in_order = Vec::<Vec::<usize>>::new();
+        for cset in color_sets.iter() {
+            if !distinct_sets_to_id.contains_key(cset) {
+                distinct_sets_to_id.insert(cset.clone(), distinct_sets_to_id.len());
+                distinct_sets_in_order.push(cset.clone());
+            }
+        }
+
+        let n_distinct_sets = distinct_sets_to_id.len();
+        log::info!("{} distinct color sets found", n_distinct_sets);
+
+        let mut colex_to_color_set_id = vec![0_usize; sbwt.n_sets()];
+        for colex in 0..sbwt.n_sets() {
+            colex_to_color_set_id[colex] = distinct_sets_to_id[&color_sets[colex]];
+        }
+        let map = ColexToColorSetMap::new(&sbwt, Some(&lcs), sample_distance, colex_to_color_set_id, n_distinct_sets, n_threads);
+
+        let color_set_iter = VecVecUsizeIteratorGenerator::new(distinct_sets_in_order);
+        let css = CSS::new(color_set_iter, n_colors);
+        Self::new(sbwt, lcs, map, *css, None)
+
     }
 
     pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, LcsArray, ColexToColorSetMap, CSS, Vec<String>) {
