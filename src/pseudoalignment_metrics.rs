@@ -49,27 +49,34 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     compatible_colors.iter().map(|&c| bases_covered[c]).collect()
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use sbwt::SbwtConstructionAlgorithm;
 
-    use crate::colex_colored_kmers::{self, ColexToColorSetMap};
+    use crate::{colex_colored_kmers::{self, ColexToColorSetMap}, pseudoalignment_metrics::compute_kmer_hits_to_compatible_colors, sparse_dense_storage::SparseDenseStorage};
 
 
     #[test]
     fn test_kmer_hits() {
-        let s1 = b"AACTACGTACGTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice(); // "Random" sequence
-        let s2 =           b"GTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice();
-        let s3 =                           b"GTACGACATCGTACGATCGATT".as_slice();
-        let s4 = b"AACTACGTACGTACGACATCGTACGATCGATTAT".as_slice();
+        let k = 8;
+        let sample_distance = 3;
+        let n_threads = 1;
 
-        let inputs = vec![s1,s2,s3,s4];
-        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-            .algorithm(sbwt::BitPackedKmerSortingMem::new())
-            .run_from_slices(&inputs);
+        let s0 = b"AACTACGTACGTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice(); // "Random" sequence
+        let s1 =           b"GTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice();
+        let s2 =           b"GTACGACATCGTACGATCGATT".as_slice();
+        let s3 = b"AACTACGTACGTACGACATCGTACGATCGATTAT".as_slice();
 
-        let index = colex_colored_kmers::CompactColexKmers::new(sbwt, lcs, colex_map, color_sets, color_names);
+        let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
+        
+        let index = colex_colored_kmers::CompactColexKmers::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+
+        let query = s0;
+        let mut cset_ids = Vec::new();
+        index.push_color_set_ids_to_buffer(query, &mut cset_ids);
+        let hit_counts = compute_kmer_hits_to_compatible_colors(&cset_ids, &[1,2,3], &index);
+        assert!(hit_counts[0] == s1.len()-k+1);
+        assert!(hit_counts[1] == s2.len()-k+1);
+        assert!(hit_counts[2] == s3.len()-k+1);
     }
 }
-    */

@@ -390,7 +390,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     /// Easy but inefficient constructor for tests
     /// colored_seqs has pairs (seq, color)
     #[cfg(test)]
-    fn new_from_small_input(colored_seqs: &[(&[u8], usize)], sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+    pub fn new_from_small_input(colored_seqs: &[(&[u8], usize)], k: usize, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
         use std::collections::HashMap;
         use sbwt::StreamingIndex;
         
@@ -401,6 +401,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
             .algorithm(sbwt::BitPackedKmerSortingMem::new())
+            .k(k)
             .build_lcs(true)
             .run_from_slices(&just_seqs);
 
