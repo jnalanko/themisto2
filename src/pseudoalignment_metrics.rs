@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::{cmp::min, ops::Range};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
 
@@ -11,8 +11,8 @@ pub enum Metric {
     ShortestGap
 }
 
-fn break_into_runs<T: Eq>(items: &[T]) -> Vec<&[T]> {
-    let mut runs: Vec<&[T]> = vec![];
+fn break_into_runs<T: Eq>(items: &[T]) -> Vec<Range<usize>> {
+    let mut runs: Vec<Range<usize>> = vec![];
     if items.is_empty() {
         return runs;
     }
@@ -20,22 +20,21 @@ fn break_into_runs<T: Eq>(items: &[T]) -> Vec<&[T]> {
     let mut run_start = 0;
     for i in 1..items.len() {
         if items[i] != items[i-1] {
-            runs.push(&items[run_start..i]);
+            runs.push(run_start..i);
             run_start = i;
         }
     }
-
     // Final run
-    runs.push(&items[run_start..items.len()]);
-
+    runs.push(run_start..items.len());
     runs
 }
 
 #[allow(clippy::manual_flatten)]
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut hits = vec![0; index.get_set_storage().n_colors()];
-    for color_set_run in break_into_runs(color_set_ids) {
-        let run_len = color_set_run.len(); 
+    for run_range in break_into_runs(color_set_ids) {
+        let run_len = run_range.len(); 
+        let color_set_run = &color_set_ids[run_range];
         match color_set_run.first() {
             None => panic!("Empty color set run"), // Should never happen
             Some(first_id) => {
@@ -72,10 +71,46 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     compatible_colors.iter().map(|&c| bases_covered[c]).collect()
 }
 
+pub fn compute_bases_covered_new<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+    let mut bases_covered = vec![0; index.get_set_storage().n_colors()];
+    let mut end_of_last_covered_kmer = vec![0; index.get_set_storage().n_colors()]; // For each color. Exclusive end.
+
+    for run_range in break_into_runs(color_set_ids) {
+        let run_len = run_range.len(); 
+        assert!(run_len > 0);
+        let first_kmer_end = run_range.start + index.get_k();
+        let last_kmer_end = run_range.end + index.get_k() - 1;
+        let color_set_run = &color_set_ids[run_range];
+        match color_set_run.first() {
+            None => panic!("Empty color set run"), // Should never happen
+            Some(first_id) => {
+                if let Some(set_id) = first_id {
+                    let color_set = index.set_id_to_set(*set_id);
+                    for color in color_set.iter() {
+
+                        // New bases covered by the first k-mer
+                        let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer[color], index.get_k());
+
+                        // Add new bases covered by the rest of the k-mers (1 base each)
+                        n_new_covered += run_len - 1;
+
+                        bases_covered[color] += n_new_covered;
+                        end_of_last_covered_kmer[color] = last_kmer_end;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Return only counts to compatible colors
+    compatible_colors.iter().map(|&c| bases_covered[c]).collect()
+}
+
 #[cfg(test)]
 mod tests {
 
     use crate::{colex_colored_kmers, pseudoalignment_metrics::{compute_bases_covered, compute_kmer_hits_to_compatible_colors}, sparse_dense_storage::SparseDenseStorage};
+    use super::*;
 
     #[test]
     fn test_kmer_hits() {
@@ -123,7 +158,7 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let bases_covered = compute_bases_covered(&cset_ids, &[1,2,3], &index);
+        let bases_covered = compute_bases_covered_new(&cset_ids, &[1,2,3], &index);
 
         dbg!(&bases_covered);
 
