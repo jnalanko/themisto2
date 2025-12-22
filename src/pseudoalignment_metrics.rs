@@ -1,6 +1,6 @@
 use std::{cmp::min, ops::Range};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Metric {
@@ -9,20 +9,6 @@ pub enum Metric {
     AlignmentLength,
     LongestMatchRun,
     ShortestGap
-}
-
-fn for_each_run<T: Eq, F: FnMut(Range<usize>)>(items: &[T], mut callback: F) {
-    if items.is_empty() { return }
-
-    let mut run_start = 0;
-    for i in 1..items.len() {
-        if items[i] != items[i-1] {
-            callback(run_start..i);
-            run_start = i;
-        }
-    }
-    // Final run
-    callback(run_start..items.len());
 }
 
 #[allow(clippy::manual_flatten)]

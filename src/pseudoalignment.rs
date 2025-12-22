@@ -46,18 +46,28 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
-        for set in index.lookup_kmer_color_sets(seq) {
-            if let Some(set) = set {
-                for color in set.iter() {
-                    self.counts[color] += 1;
-                    if self.counts[color] == 1 {
+
+        let mut color_set_ids = Vec::<Option::<usize>>::new();
+        index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
+        crate::util::for_each_run(&color_set_ids, |run_range| {
+            let run_len = run_range.len(); 
+            assert!(run_len > 0);
+
+            let first_id = color_set_ids[run_range.start];
+            if let Some(set_id) = first_id {
+                for color in index.set_id_to_set(set_id).iter() {
+                    if self.counts[color] == 0 {
                         self.nonzero_count_indices.push(color);
                     }
+                    self.counts[color] += run_len;
                 }
-                n_relevant += 1;
+                n_relevant += run_len;
             }
-            n_all += 1;
-        }
+
+            n_all += run_len; // Runs of None count here
+
+        });
+
         self.nonzero_count_indices.sort_unstable(); // Sort to output in sorted order by colors 
 
         // Add to output all colors that pass the threshold

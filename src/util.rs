@@ -73,6 +73,21 @@ pub fn segment_range(range: Range<usize>, n_pieces: usize) -> Vec<Range<usize>> 
     pieces
 }
 
+pub fn for_each_run<T: Eq, F: FnMut(Range<usize>)>(items: &[T], mut callback: F) {
+    if items.is_empty() { return }
+
+    let mut run_start = 0;
+    for i in 1..items.len() {
+        if items[i] != items[i-1] {
+            callback(run_start..i);
+            run_start = i;
+        }
+    }
+    // Final run
+    callback(run_start..items.len());
+}
+
+
 #[cfg(test)]
 mod tests {
     use simple_sds_sbwt::ops::BitVec;
