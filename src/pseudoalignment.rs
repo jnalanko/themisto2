@@ -107,13 +107,28 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;
+
         #[allow(clippy::manual_flatten)] // Clearer this way
-        for set in index.lookup_kmer_color_sets(seq) {
-            if let Some(set) = set {
-                index.get_set_storage().intersect(&mut intersection, &set);
-                n_hits += 1;
+        let mut color_set_ids = Vec::<Option::<usize>>::new();
+        index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
+        // TODO: do not look everything at once to be able to exit early
+        // if the intersection becomes empty.
+        // TODO: intersection smallest sets first to speed up the computation.
+        crate::util::for_each_run(&color_set_ids, |run_range| {
+            // If the current intersection in empty, it will stay empty, so we
+            // need to do any work only if the intersection is nonempty.
+            if intersection.len() > 0 {
+                let run_len = run_range.len(); 
+                assert!(run_len > 0);
+
+                let first_id = color_set_ids[run_range.start];
+                if let Some(first_id) = first_id {
+                    let set = index.set_id_to_set(first_id);
+                    index.get_set_storage().intersect(&mut intersection, &set);
+                    n_hits += 1;
+                }
             }
-        }
+        });
 
         if n_hits >= self.min_hits {
             for color in intersection.iter() {
