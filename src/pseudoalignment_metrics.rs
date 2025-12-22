@@ -52,7 +52,7 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
 #[cfg(test)]
 mod tests {
 
-    use crate::{colex_colored_kmers, pseudoalignment_metrics::compute_kmer_hits_to_compatible_colors, sparse_dense_storage::SparseDenseStorage};
+    use crate::{colex_colored_kmers, pseudoalignment_metrics::{compute_bases_covered, compute_kmer_hits_to_compatible_colors}, sparse_dense_storage::SparseDenseStorage};
 
     #[test]
     fn test_kmer_hits() {
@@ -100,12 +100,13 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let bases_covered = compute_kmer_hits_to_compatible_colors(&cset_ids, &[1,2,3], &index);
+        let bases_covered = compute_bases_covered(&cset_ids, &[1,2,3], &index);
 
         dbg!(&bases_covered);
 
         assert_eq!(bases_covered[0], s1.len()-1); // 1 X
         assert_eq!(bases_covered[1], s2.len()); // 0 X
         assert_eq!(bases_covered[2], s3.len()-3); // 3 X
+
     }
 }
