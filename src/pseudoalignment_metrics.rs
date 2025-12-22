@@ -11,16 +11,40 @@ pub enum Metric {
     ShortestGap
 }
 
+fn break_into_runs<T: Eq>(items: &[T]) -> Vec<&[T]> {
+    let mut runs: Vec<&[T]> = vec![];
+    if items.is_empty() {
+        return runs;
+    }
+
+    let mut run_start = 0;
+    for i in 1..items.len() {
+        if items[i] != items[i-1] {
+            runs.push(&items[run_start..i]);
+            run_start = i;
+        }
+    }
+
+    // Final run
+    runs.push(&items[run_start..items.len()]);
+
+    runs
+}
+
 // todo: can be much faster 
 #[allow(clippy::manual_flatten)]
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut hits = vec![0; index.get_set_storage().n_colors()];
-    for color_set_id_opt in color_set_ids {
-        if let Some(color_set_id) = color_set_id_opt {
-            let color_set = index.set_id_to_set(*color_set_id);
-            for color in color_set.iter() {
-                hits[color] += 1;
-                // TODO: Faster: If same color id appears multiple times, increment by the multiplicity
+    for color_set_run in break_into_runs(color_set_ids) {
+        let run_len = color_set_run.len(); 
+        match color_set_run.first() {
+            None => panic!("Empty color set run"), // Should never happen
+            Some(first_id) => {
+                if let Some(set_id) = first_id {
+                    for color in index.set_id_to_set(*set_id).iter() {
+                        hits[color] += run_len;
+                    }
+                }
             }
         }
     }
