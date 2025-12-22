@@ -76,8 +76,36 @@ mod tests {
 
         dbg!(&hit_counts);
 
-        assert!(hit_counts[0] == s1.len()-k+1);
-        assert!(hit_counts[1] == s2.len()-k+1);
-        assert!(hit_counts[2] == s3.len()-k+1);
+        assert_eq!(hit_counts[0], s1.len()-k+1);
+        assert_eq!(hit_counts[1], s2.len()-k+1);
+        assert_eq!(hit_counts[2], s3.len()-k+1);
+    }
+
+    #[test]
+    fn test_bases_covered() {
+        let k = 8;
+        let sample_distance = 3;
+        let n_threads = 1;
+
+        // s1 and s3 have substitutions with X
+        let s0 = b"AACTACGTACGTACGACATCGTACGATCGATTATGCTAGCTAGCTGAT".as_slice(); // "Random" sequence
+        let s1 =           b"GTACGACATCGTACGATCGXTTATGCTAGCTAGCTGAT".as_slice();
+        let s2 =           b"GTACGACATCGTACGATCGATT".as_slice();
+        let s3 = b"AACTACGTAXXTACGACATCGTACXATCGATTAT".as_slice();
+
+        let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
+        
+        let index = colex_colored_kmers::CompactColexKmers::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+
+        let query = s0;
+        let mut cset_ids = Vec::new();
+        index.push_color_set_ids_to_buffer(query, &mut cset_ids);
+        let bases_covered = compute_kmer_hits_to_compatible_colors(&cset_ids, &[1,2,3], &index);
+
+        dbg!(&bases_covered);
+
+        assert_eq!(bases_covered[0], s1.len()-1); // 1 X
+        assert_eq!(bases_covered[1], s2.len()); // 0 X
+        assert_eq!(bases_covered[2], s3.len()-3); // 3 X
     }
 }
