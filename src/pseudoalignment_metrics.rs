@@ -105,7 +105,7 @@ mod tests {
         dbg!(&bases_covered);
 
         assert_eq!(bases_covered[0], s1.len()-1); // 1 X
-        assert_eq!(bases_covered[1], s2.len()); // 0 X
+        assert_eq!(bases_covered[1], s2.len());   // 0 X
         assert_eq!(bases_covered[2], s3.len()-3); // 3 X
 
     }
