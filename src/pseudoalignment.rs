@@ -113,7 +113,7 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
         index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
         // TODO: do not look everything at once to be able to exit early
         // if the intersection becomes empty.
-        // TODO: intersection smallest sets first to speed up the computation.
+        // TODO: intersect smallest sets first to speed up the computation.
         crate::util::for_each_run(&color_set_ids, |run_range| {
             // If the current intersection in empty, it will stay empty, so we
             // need to do any work only if the intersection is nonempty.
