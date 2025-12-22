@@ -11,28 +11,24 @@ pub enum Metric {
     ShortestGap
 }
 
-fn break_into_runs<T: Eq>(items: &[T]) -> Vec<Range<usize>> {
-    let mut runs: Vec<Range<usize>> = vec![];
-    if items.is_empty() {
-        return runs;
-    }
+fn for_each_run<T: Eq, F: FnMut(Range<usize>)>(items: &[T], mut callback: F) {
+    if items.is_empty() { return }
 
     let mut run_start = 0;
     for i in 1..items.len() {
         if items[i] != items[i-1] {
-            runs.push(run_start..i);
+            callback(run_start..i);
             run_start = i;
         }
     }
     // Final run
-    runs.push(run_start..items.len());
-    runs
+    callback(run_start..items.len());
 }
 
 #[allow(clippy::manual_flatten)]
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut hits = vec![0; index.get_set_storage().n_colors()];
-    for run_range in break_into_runs(color_set_ids) {
+    for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
         let color_set_run = &color_set_ids[run_range];
         match color_set_run.first() {
@@ -45,7 +41,7 @@ pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_id
                 }
             }
         }
-    }
+    });
 
     // Return only hits to compatible colors
     compatible_colors.iter().map(|&c| hits[c]).collect()
@@ -55,7 +51,7 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     let mut bases_covered = vec![0; index.get_set_storage().n_colors()];
     let mut end_of_last_covered_kmer = vec![0; index.get_set_storage().n_colors()]; // For each color. Exclusive end.
 
-    for run_range in break_into_runs(color_set_ids) {
+    for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
         assert!(run_len > 0);
         let first_kmer_end = run_range.start + index.get_k();
@@ -80,7 +76,7 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
                 }
             }
         }
-    }
+    });
     
     // Return only counts to compatible colors
     compatible_colors.iter().map(|&c| bases_covered[c]).collect()
