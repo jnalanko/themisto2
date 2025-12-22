@@ -157,6 +157,7 @@ impl ColexToColorSetMap {
 
     // sets maps from color set to its index in the distinct color sets
     // Requires select support on the sbwt
+    #[cfg(test)]
     fn new(sbwt: &SbwtIndex<SubsetMatrix>, lcs: Option<&LcsArray>, sample_distance: usize, colex_to_color_set_id: Vec<usize>, n_distinct_color_sets: usize, n_threads: usize) -> Self {
 
         let get_colorset_fn = |colex| colex_to_color_set_id[colex]; // TODO: this actually returns a color set id. Rename here and later.
@@ -399,7 +400,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let just_seqs: Vec<&[u8]> = colored_seqs.iter().map(|x| x.0).collect();
 
-        let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
             .algorithm(sbwt::BitPackedKmerSortingMem::new())
             .k(k)
             .build_select_support(true) // Required for colex map creation from sbwt

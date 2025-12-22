@@ -51,10 +51,8 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
 
 #[cfg(test)]
 mod tests {
-    use sbwt::SbwtConstructionAlgorithm;
 
-    use crate::{colex_colored_kmers::{self, ColexToColorSetMap}, pseudoalignment_metrics::compute_kmer_hits_to_compatible_colors, sparse_dense_storage::SparseDenseStorage};
-
+    use crate::{colex_colored_kmers, pseudoalignment_metrics::compute_kmer_hits_to_compatible_colors, sparse_dense_storage::SparseDenseStorage};
 
     #[test]
     fn test_kmer_hits() {
