@@ -172,13 +172,16 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let hit_counts = compute_kmer_hits_to_compatible_colors(&cset_ids, &[1,2,3], &index);
+
+        let mut processor = HitCountProcessor::new(index.get_set_storage().n_colors());
+        let hit_counts = processor.process(&cset_ids, &index);
 
         dbg!(&hit_counts);
 
-        assert_eq!(hit_counts[0], s1.len()-k+1);
-        assert_eq!(hit_counts[1], s2.len()-k+1);
-        assert_eq!(hit_counts[2], s3.len()-k+1);
+        assert_eq!(hit_counts[0], s0.len()-k+1);
+        assert_eq!(hit_counts[1], s1.len()-k+1);
+        assert_eq!(hit_counts[2], s2.len()-k+1);
+        assert_eq!(hit_counts[3], s3.len()-k+1);
     }
 
     #[test]
@@ -200,7 +203,8 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let bases_covered = compute_bases_covered(&cset_ids, &[1,2,3], &index);
+        let mut processor = BasesCoveredProcessor::new(index.get_set_storage().n_colors());
+        let bases_covered = processor.process(&cset_ids, &index);
 
         dbg!(&bases_covered);
 
