@@ -150,14 +150,14 @@ impl QueryBatch {
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, cc: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &[Metric]) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &[Metric]) -> Vec<u8> {
         let mut result = QueryResult::new();
         result.computed_metric_names = metrics.to_vec();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
             compat_set_buf.clear();
 
-            cc.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
+            aligner.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
 
             let metric_values_concat = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
 
