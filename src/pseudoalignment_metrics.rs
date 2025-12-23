@@ -208,9 +208,10 @@ mod tests {
 
         dbg!(&bases_covered);
 
-        assert_eq!(bases_covered[0], s1.len()-5);
-        assert_eq!(bases_covered[1], s2.len());
-        assert_eq!(bases_covered[2], s3.len()-3);
+        assert_eq!(bases_covered[0], s0.len());
+        assert_eq!(bases_covered[1], s1.len()-5);
+        assert_eq!(bases_covered[2], s2.len());
+        assert_eq!(bases_covered[3], s3.len()-3);
 
     }
 }
