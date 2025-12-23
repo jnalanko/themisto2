@@ -5,6 +5,17 @@ use jseqio::{record::Record, seq_db::SeqDB};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, PseudoalignmentMetricProcessor, create_metric_processor}};
 
+struct SortedVec {
+    v: Vec<usize>
+}
+
+impl SortedVec {
+    fn new(mut v: Vec<usize>) -> Self {
+        v.sort();
+        Self{v}
+    }
+}
+
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
@@ -158,7 +169,9 @@ impl QueryBatch {
 
             aligner.push_compatibility_set(rec.seq, index, &mut compat_set_buf);
 
-            let metric_values_concat = self.compute_metrics(rec.seq, &compat_set_buf, index, metrics);
+            let sorted_compat_set = SortedVec::new(compat_set_buf);
+            let metric_values_concat = self.compute_metrics(rec.seq, &sorted_compat_set, index, metrics);
+            compat_set_buf = sorted_compat_set.v; // Move ownership back
 
             result.push(&compat_set_buf, rec.name(), metric_values_concat);
 
@@ -173,15 +186,30 @@ impl QueryBatch {
         bytes_out
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &SortedVec, index: &CompactColexKmers<CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
         let mut ans_concats = Vec::<usize>::new();
 
         if metrics.len() > 0 {
             let mut color_set_ids = Vec::<Option<usize>>::new();
             index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
             for processor in metrics.iter_mut() {
-                let values = processor.process(&color_set_ids, index);
-                ans_concats.extend(values);
+                let mut compatible_colors_idx = 0_usize;
+                let mut color_value_pairs = processor.process(&color_set_ids, index);
+                color_value_pairs.sort();
+                for (color, value) in color_value_pairs {
+                    // Push this only if this color is compatible. Here we make use of the property that
+                    // compatible_colors is sorted.
+                    if compatible_colors_idx < compatible_colors.v.len() && compatible_colors.v[compatible_colors_idx] == color {
+                        ans_concats.push(value);
+                        compatible_colors_idx += 1;
+                    }
+                }
+
+                // All of the metrics are assumed to be so that if a color is compatible
+                // according to pseudoalignment, then we report some value for it.
+                // TODO: this is a brittle assumption and might break in the future. Do something about it.
+                // For now we just assert that it's true.
+                assert_eq!(compatible_colors_idx, compatible_colors.v.len());
             }
         }
         ans_concats
