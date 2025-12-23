@@ -3,7 +3,7 @@ use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}}
 use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, compute_bases_covered, compute_kmer_hits_to_compatible_colors}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, PseudoalignmentMetricProcessor, create_metric_processor}};
 
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
@@ -150,9 +150,8 @@ impl QueryBatch {
     }
 
     // Returns JSON-formatted bytes
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &[Metric]) -> Vec<u8> {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<u8> {
         let mut result = QueryResult::new();
-        result.computed_metric_names = metrics.to_vec();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
             compat_set_buf.clear();
@@ -165,26 +164,23 @@ impl QueryBatch {
 
             n_bases_processed.fetch_add(rec.seq.len(), Relaxed);
         }
+
+        result.computed_metric_names.extend(metrics.iter().map(|proc| proc.metric_id()));
+
         let mut bytes_out = Vec::<u8>::new();
         result.into_json(&mut bytes_out);
 
         bytes_out
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &[Metric]) -> Vec<usize> {
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &[usize], index: &CompactColexKmers<CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
         let mut ans_concats = Vec::<usize>::new();
 
         if metrics.len() > 0 {
             let mut color_set_ids = Vec::<Option<usize>>::new();
             index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
-            for metric in metrics.iter() {
-                let values = match metric {
-                    Metric::KmerHits => compute_kmer_hits_to_compatible_colors(&color_set_ids, compatible_colors, index),
-                    Metric::BasesCovered => compute_bases_covered(&color_set_ids, compatible_colors, index),
-                    Metric::AlignmentLength => todo!(),
-                    Metric::LongestMatchRun => todo!(),
-                    Metric::ShortestGap => todo!(),
-                };
+            for processor in metrics.iter_mut() {
+                let values = processor.process(&color_set_ids, index);
                 ans_concats.extend(values);
             }
         }
@@ -335,8 +331,12 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
             let index_ref = index;
             let n_bases_processed_ref = &n_bases_processed;
             let handle = scope.spawn(move || {
+                let mut metric_processors: Vec<Box<dyn PseudoalignmentMetricProcessor<CSS>>> = vec![];
+                for metric in metrics {
+                    metric_processors.push(create_metric_processor(*metric, index.get_set_storage().n_colors()));
+                }
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref, metrics);
+                    let json = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors);
                     results_send_clone.send(json).unwrap();
                 }
             });

@@ -2,8 +2,9 @@ use std::{cmp::min, iter::Map};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
-trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
+pub trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
     fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize>;
+    fn metric_id(&self) -> Metric;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -15,10 +16,10 @@ pub enum Metric {
     ShortestGap
 }
 
-fn create_processor<CSS: ColorSetStorage>(metric: Metric, n_colors: usize) -> Box<dyn PseudoalignmentMetricProcessor<CSS>> {
+pub fn create_metric_processor<CSS: ColorSetStorage>(metric: Metric, n_colors: usize) -> Box<dyn PseudoalignmentMetricProcessor<CSS>> {
     match metric {
         Metric::KmerHits => Box::new(HitCountProcessor::new(n_colors)),
-        Metric::BasesCovered => todo!(),
+        Metric::BasesCovered => Box::new(BasesCoveredProcessor::new(n_colors)),
         Metric::AlignmentLength => todo!(),
         Metric::LongestMatchRun => todo!(),
         Metric::ShortestGap => todo!(),
@@ -94,6 +95,11 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProce
         result.sort(); // Sort by color
         result.into_iter().map(|(_, val)| val).collect()
     }
+    
+    fn metric_id(&self) -> Metric {
+        Metric::KmerHits
+    }
+    
 }
 
 struct BasesCoveredProcessor {
@@ -154,6 +160,12 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredP
         result.sort(); // Sort by color
         result.into_iter().map(|(_, val)| val).collect()
     }
+    
+    fn metric_id(&self) -> Metric {
+        Metric::BasesCovered 
+    }
+
+    
 }
 
 
@@ -183,7 +195,7 @@ mod tests {
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
 
-        let mut processor = HitCountProcessor::new(index.get_set_storage().n_colors());
+        let mut processor = create_metric_processor(Metric::KmerHits, index.get_set_storage().n_colors());
         let hit_counts = processor.process(&cset_ids, &index);
 
         dbg!(&hit_counts);
@@ -213,7 +225,7 @@ mod tests {
         let query = s0;
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
-        let mut processor = BasesCoveredProcessor::new(index.get_set_storage().n_colors());
+        let mut processor = create_metric_processor(Metric::BasesCovered, index.get_set_storage().n_colors());
         let bases_covered = processor.process(&cset_ids, &index);
 
         dbg!(&bases_covered);
