@@ -38,6 +38,7 @@ impl NonzeroTrackingIntArray {
     }
 
     // Iterates pairs (index, value)
+    #[allow(dead_code)]
     pub fn iter_nonzero<'a>(&'a self) -> Map<std::slice::Iter<'a, usize>, impl FnMut(&'a usize) -> (usize, usize)> {
         self.nonzero_indices.iter().map(|&i| (i, self.data[i]))
     }
@@ -50,16 +51,8 @@ impl NonzeroTrackingIntArray {
     }
 }
 
-pub struct PseudoalignmentMetricCalculator {
-    hits: Vec<usize>,
-    nonzero_hit_indicies: Vec<usize>,
-
-    bases_covered: Vec<usize>,
-    nonzero_bases_covered_indices: Vec<usize>,
-}
-
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut hits = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors());
+    let mut hits = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
     for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
         assert!(run_len > 0);
@@ -77,8 +70,12 @@ pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_id
 }
 
 pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut bases_covered = vec![0; index.get_set_storage().n_colors()];
-    let mut end_of_last_covered_kmer = vec![0; index.get_set_storage().n_colors()]; // For each color. Exclusive end.
+
+     // For each color.
+    let mut bases_covered = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
+
+     // For each color. Exclusive end.
+    let mut end_of_last_covered_kmer = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
 
     for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
@@ -92,19 +89,24 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
             for color in color_set.iter() {
 
                 // New bases covered by the first k-mer
-                let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer[color], index.get_k());
+                let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer.get(color), index.get_k());
 
                 // Add new bases covered by the rest of the k-mers (1 base each)
                 n_new_covered += run_len - 1;
 
-                bases_covered[color] += n_new_covered;
-                end_of_last_covered_kmer[color] = last_kmer_end;
+                bases_covered.add_positive_number(color, n_new_covered);
+
+                // Set end of last covered k-mer. Here we use add_positive_integer because
+                // there is no method to set a value, because if there was, tracking nonzeros
+                // would be more complicated.
+                let old_end = end_of_last_covered_kmer.get(color);
+                end_of_last_covered_kmer.add_positive_number(color, last_kmer_end - old_end);
             }
         } // Runs of None are ignored
     });
     
     // Return only counts to compatible colors
-    compatible_colors.iter().map(|&c| bases_covered[c]).collect()
+    compatible_colors.iter().map(|&c| bases_covered.get(c)).collect()
 }
 
 #[cfg(test)]
