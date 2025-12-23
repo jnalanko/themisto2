@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::{cmp::min, iter::Map};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
@@ -11,7 +11,37 @@ pub enum Metric {
     ShortestGap
 }
 
-#[allow(clippy::manual_flatten)]
+// An array of integers that tracks which indices have been touched.
+pub struct AccessTrackingIntArray {
+    data: Vec<usize>,
+    modified_indices: Vec<usize>,
+} 
+
+impl AccessTrackingIntArray {
+    pub fn get_mut(&mut self, idx: usize) -> &mut usize {
+        &mut self.data[idx]
+    }
+
+    pub fn reset(&mut self) {
+        for &i in self.modified_indices.iter() {
+            self.data[i] = 0;
+        }
+        self.modified_indices.clear();
+    }
+
+    pub fn iter_touched<'a>(&'a self) -> Map<std::slice::Iter<'a, usize>, impl FnMut(&'a usize) -> (usize, usize)> {
+        self.modified_indices.iter().map(|&i| (i, self.data[i]))
+    }
+}
+
+pub struct PseudoalignmentMetricCalculator {
+    hits: Vec<usize>,
+    nonzero_hit_indicies: Vec<usize>,
+
+    bases_covered: Vec<usize>,
+    nonzero_bases_covered_indices: Vec<usize>,
+}
+
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
     let mut hits = vec![0; index.get_set_storage().n_colors()];
     for_each_run(color_set_ids, |run_range| {
