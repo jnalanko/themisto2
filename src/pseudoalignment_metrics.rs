@@ -2,8 +2,8 @@ use std::{cmp::min, iter::Map};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
-trait PseudoalignmentMetricProcessor {
-    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize>;
+trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize>;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -13,6 +13,16 @@ pub enum Metric {
     AlignmentLength,
     LongestMatchRun,
     ShortestGap
+}
+
+fn create_processor<CSS: ColorSetStorage>(metric: Metric, n_colors: usize) -> Box<dyn PseudoalignmentMetricProcessor<CSS>> {
+    match metric {
+        Metric::KmerHits => Box::new(HitCountProcessor::new(n_colors)),
+        Metric::BasesCovered => todo!(),
+        Metric::AlignmentLength => todo!(),
+        Metric::LongestMatchRun => todo!(),
+        Metric::ShortestGap => todo!(),
+    }
 }
 
 // An array of integers that tracks which indices have been touched.
@@ -65,8 +75,8 @@ impl HitCountProcessor {
     }
 }
 
-impl PseudoalignmentMetricProcessor for HitCountProcessor {
-    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProcessor {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
         self.hits.reset();
         for_each_run(color_set_ids, |run_range| {
             let run_len = run_range.len(); 
@@ -106,8 +116,8 @@ impl BasesCoveredProcessor {
     }
 }
 
-impl PseudoalignmentMetricProcessor for BasesCoveredProcessor {
-    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredProcessor {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
 
         self.bases_covered.reset();
         self.end_of_last_covered_kmer.reset();
