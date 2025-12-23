@@ -2,6 +2,10 @@ use std::{cmp::min, iter::Map};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
+trait PseudoalignmentMetricProcessor {
+    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize>;
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum Metric {
     KmerHits,
@@ -51,62 +55,92 @@ impl NonzeroTrackingIntArray {
     }
 }
 
-pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut hits = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
-    for_each_run(color_set_ids, |run_range| {
-        let run_len = run_range.len(); 
-        assert!(run_len > 0);
-
-        let first_id = color_set_ids[run_range.start];
-        if let Some(set_id) = first_id {
-            for color in index.set_id_to_set(set_id).iter() {
-                hits.add_positive_number(color, run_len);
-            }
-        } // Runs of None are ignored
-    });
-
-    // Return only hits to compatible colors
-    compatible_colors.iter().map(|&c| hits.get(c)).collect()
+struct HitCountProcessor {
+    hits: NonzeroTrackingIntArray,
 }
 
-pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+impl HitCountProcessor {
+    fn new(n_colors: usize) -> Self {
+        Self { hits: NonzeroTrackingIntArray::new(n_colors) }
+    }
+}
 
-     // For each color.
-    let mut bases_covered = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
+impl PseudoalignmentMetricProcessor for HitCountProcessor {
+    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+        self.hits.reset();
+        for_each_run(color_set_ids, |run_range| {
+            let run_len = run_range.len(); 
+            assert!(run_len > 0);
 
-     // For each color. Exclusive end.
-    let mut end_of_last_covered_kmer = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors()); // TODO: pass into the function
+            let first_id = color_set_ids[run_range.start];
+            if let Some(set_id) = first_id {
+                for color in index.set_id_to_set(set_id).iter() {
+                    self.hits.add_positive_number(color, run_len);
+                }
+            } // Runs of None are ignored
+        });
 
-    for_each_run(color_set_ids, |run_range| {
-        let run_len = run_range.len(); 
-        assert!(run_len > 0);
-        let first_id = color_set_ids[run_range.start];
+        let mut result: Vec<(usize, usize)> = self.hits.iter_nonzero().collect(); // Pair color, value
+        result.sort(); // Sort by color
+        result.into_iter().map(|(_, val)| val).collect()
+    }
+}
 
-        let first_kmer_end = run_range.start + index.get_k();
-        let last_kmer_end = run_range.end + index.get_k() - 1;
-        if let Some(set_id) = first_id {
-            let color_set = index.set_id_to_set(set_id);
-            for color in color_set.iter() {
+struct BasesCoveredProcessor {
+    // For each color.
+    bases_covered: NonzeroTrackingIntArray,
 
-                // New bases covered by the first k-mer
-                let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer.get(color), index.get_k());
+    // For each color. Exclusive end.
+    end_of_last_covered_kmer: NonzeroTrackingIntArray,
+}
 
-                // Add new bases covered by the rest of the k-mers (1 base each)
-                n_new_covered += run_len - 1;
+impl BasesCoveredProcessor {
+    fn new(n_colors: usize) -> Self {
+        Self { 
+            bases_covered: NonzeroTrackingIntArray::new(n_colors),
+            end_of_last_covered_kmer: NonzeroTrackingIntArray::new(n_colors),
+        }
+    }
+}
 
-                bases_covered.add_positive_number(color, n_new_covered);
+impl PseudoalignmentMetricProcessor for BasesCoveredProcessor {
+    fn process<CSS: ColorSetStorage>(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
 
-                // Set end of last covered k-mer. Here we use add_positive_integer because
-                // there is no method to set a value, because if there was, tracking nonzeros
-                // would be more complicated.
-                let old_end = end_of_last_covered_kmer.get(color);
-                end_of_last_covered_kmer.add_positive_number(color, last_kmer_end - old_end);
-            }
-        } // Runs of None are ignored
-    });
-    
-    // Return only counts to compatible colors
-    compatible_colors.iter().map(|&c| bases_covered.get(c)).collect()
+        self.bases_covered.reset();
+        self.end_of_last_covered_kmer.reset();
+
+        for_each_run(color_set_ids, |run_range| {
+            let run_len = run_range.len(); 
+            assert!(run_len > 0);
+            let first_id = color_set_ids[run_range.start];
+
+            let first_kmer_end = run_range.start + index.get_k();
+            let last_kmer_end = run_range.end + index.get_k() - 1;
+            if let Some(set_id) = first_id {
+                let color_set = index.set_id_to_set(set_id);
+                for color in color_set.iter() {
+
+                    // New bases covered by the first k-mer
+                    let mut n_new_covered = min(first_kmer_end - self.end_of_last_covered_kmer.get(color), index.get_k());
+
+                    // Add new bases covered by the rest of the k-mers (1 base each)
+                    n_new_covered += run_len - 1;
+
+                    self.bases_covered.add_positive_number(color, n_new_covered);
+
+                    // Set end of last covered k-mer. Here we use add_positive_integer because
+                    // there is no method to set a value, because if there was, tracking nonzeros
+                    // would be more complicated.
+                    let old_end = self.end_of_last_covered_kmer.get(color);
+                    self.end_of_last_covered_kmer.add_positive_number(color, last_kmer_end - old_end);
+                }
+            } // Runs of None are ignored
+        });
+        
+        let mut result: Vec<(usize, usize)> = self.bases_covered.iter_nonzero().collect(); // Pair color, value
+        result.sort(); // Sort by color
+        result.into_iter().map(|(_, val)| val).collect()
+    }
 }
 
 
