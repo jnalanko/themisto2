@@ -3,7 +3,9 @@ use std::{cmp::min, iter::Map};
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
 pub trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize>;
+    /// Returns pairs (color, metric value) for those colors that were found
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)>;
+
     fn metric_id(&self) -> Metric;
 }
 
@@ -77,7 +79,7 @@ impl HitCountProcessor {
 }
 
 impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProcessor {
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)> {
         self.hits.reset();
         for_each_run(color_set_ids, |run_range| {
             let run_len = run_range.len(); 
@@ -91,9 +93,7 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProce
             } // Runs of None are ignored
         });
 
-        let mut result: Vec<(usize, usize)> = self.hits.iter_nonzero().collect(); // Pair color, value
-        result.sort(); // Sort by color
-        result.into_iter().map(|(_, val)| val).collect()
+        self.hits.iter_nonzero().collect() // Pair color, value
     }
     
     fn metric_id(&self) -> Metric {
@@ -123,7 +123,7 @@ impl BasesCoveredProcessor {
 }
 
 impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredProcessor {
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<usize> {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)> {
 
         self.bases_covered.reset();
         self.end_of_last_covered_kmer.reset();
@@ -156,9 +156,7 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredP
             } // Runs of None are ignored
         });
         
-        let mut result: Vec<(usize, usize)> = self.bases_covered.iter_nonzero().collect(); // Pair color, value
-        result.sort(); // Sort by color
-        result.into_iter().map(|(_, val)| val).collect()
+        self.bases_covered.iter_nonzero().collect() // Pair color, value
     }
     
     fn metric_id(&self) -> Metric {
@@ -196,14 +194,15 @@ mod tests {
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
 
         let mut processor = create_metric_processor(Metric::KmerHits, index.get_set_storage().n_colors());
-        let hit_counts = processor.process(&cset_ids, &index);
+        let mut hit_counts = processor.process(&cset_ids, &index);
+        hit_counts.sort();
 
         dbg!(&hit_counts);
 
-        assert_eq!(hit_counts[0], s0.len()-k+1);
-        assert_eq!(hit_counts[1], s1.len()-k+1);
-        assert_eq!(hit_counts[2], s2.len()-k+1);
-        assert_eq!(hit_counts[3], s3.len()-k+1);
+        assert_eq!(hit_counts[0], (0, s0.len()-k+1));
+        assert_eq!(hit_counts[1], (1, s1.len()-k+1));
+        assert_eq!(hit_counts[2], (2, s2.len()-k+1));
+        assert_eq!(hit_counts[3], (3, s3.len()-k+1));
     }
 
     #[test]
@@ -226,14 +225,15 @@ mod tests {
         let mut cset_ids = Vec::new();
         index.push_color_set_ids_to_buffer(query, &mut cset_ids);
         let mut processor = create_metric_processor(Metric::BasesCovered, index.get_set_storage().n_colors());
-        let bases_covered = processor.process(&cset_ids, &index);
+        let mut bases_covered = processor.process(&cset_ids, &index);
+        bases_covered.sort();
 
         dbg!(&bases_covered);
 
-        assert_eq!(bases_covered[0], s0.len());
-        assert_eq!(bases_covered[1], s1.len()-5);
-        assert_eq!(bases_covered[2], s2.len());
-        assert_eq!(bases_covered[3], s3.len()-3);
+        assert_eq!(bases_covered[0], (0, s0.len()));
+        assert_eq!(bases_covered[1], (1, s1.len()-5));
+        assert_eq!(bases_covered[2], (2, s2.len()));
+        assert_eq!(bases_covered[3], (3, s3.len()-3));
 
     }
 }
