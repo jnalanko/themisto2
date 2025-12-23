@@ -1,4 +1,4 @@
-use std::{cmp::min, ops::Range};
+use std::cmp::min;
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
@@ -64,7 +64,8 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
 #[cfg(test)]
 mod tests {
 
-    use crate::{colex_colored_kmers, pseudoalignment_metrics::{compute_bases_covered, compute_kmer_hits_to_compatible_colors}, sparse_dense_storage::SparseDenseStorage};
+    use crate::{colex_colored_kmers, sparse_dense_storage::SparseDenseStorage};
+
     use super::*;
 
     #[test]
