@@ -109,6 +109,7 @@ pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize
     compatible_colors.iter().map(|&c| bases_covered.get(c)).collect()
 }
 
+
 #[cfg(test)]
 mod tests {
 
