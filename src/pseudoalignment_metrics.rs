@@ -56,7 +56,7 @@ impl NonzeroTrackingIntArray {
 }
 
 struct HitCountProcessor {
-    hits: NonzeroTrackingIntArray,
+    hits: NonzeroTrackingIntArray, // Reused space between calls
 }
 
 impl HitCountProcessor {
@@ -87,6 +87,9 @@ impl PseudoalignmentMetricProcessor for HitCountProcessor {
 }
 
 struct BasesCoveredProcessor {
+
+    // Reused space between calls
+
     // For each color.
     bases_covered: NonzeroTrackingIntArray,
 
