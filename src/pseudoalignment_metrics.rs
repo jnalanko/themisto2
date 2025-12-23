@@ -12,25 +12,41 @@ pub enum Metric {
 }
 
 // An array of integers that tracks which indices have been touched.
-pub struct AccessTrackingIntArray {
+pub struct NonzeroTrackingIntArray {
     data: Vec<usize>,
-    modified_indices: Vec<usize>,
+    nonzero_indices: Vec<usize>,
 } 
 
-impl AccessTrackingIntArray {
-    pub fn get_mut(&mut self, idx: usize) -> &mut usize {
-        &mut self.data[idx]
+impl NonzeroTrackingIntArray {
+    pub fn get(&self, idx: usize) -> usize {
+        self.data[idx]
+    }
+
+    pub fn add_positive_number(&mut self, idx: usize, value: usize) {
+        debug_assert!(value > 0);
+        if self.data[idx] == 0 {
+            self.nonzero_indices.push(idx)
+        }
+        self.data[idx] += value;
     }
 
     pub fn reset(&mut self) {
-        for &i in self.modified_indices.iter() {
+        for &i in self.nonzero_indices.iter() {
             self.data[i] = 0;
         }
-        self.modified_indices.clear();
+        self.nonzero_indices.clear();
     }
 
-    pub fn iter_touched<'a>(&'a self) -> Map<std::slice::Iter<'a, usize>, impl FnMut(&'a usize) -> (usize, usize)> {
-        self.modified_indices.iter().map(|&i| (i, self.data[i]))
+    // Iterates pairs (index, value)
+    pub fn iter_nonzero<'a>(&'a self) -> Map<std::slice::Iter<'a, usize>, impl FnMut(&'a usize) -> (usize, usize)> {
+        self.nonzero_indices.iter().map(|&i| (i, self.data[i]))
+    }
+
+    pub fn new(len: usize) -> Self {
+        Self {
+            data: vec![0; len],
+            nonzero_indices: vec![],
+        }
     }
 }
 
@@ -43,7 +59,7 @@ pub struct PseudoalignmentMetricCalculator {
 }
 
 pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
-    let mut hits = vec![0; index.get_set_storage().n_colors()];
+    let mut hits = NonzeroTrackingIntArray::new(index.get_set_storage().n_colors());
     for_each_run(color_set_ids, |run_range| {
         let run_len = run_range.len(); 
         assert!(run_len > 0);
@@ -51,13 +67,13 @@ pub fn compute_kmer_hits_to_compatible_colors<CSS: ColorSetStorage>(color_set_id
         let first_id = color_set_ids[run_range.start];
         if let Some(set_id) = first_id {
             for color in index.set_id_to_set(set_id).iter() {
-                hits[color] += run_len;
+                hits.add_positive_number(color, run_len);
             }
         } // Runs of None are ignored
     });
 
     // Return only hits to compatible colors
-    compatible_colors.iter().map(|&c| hits[c]).collect()
+    compatible_colors.iter().map(|&c| hits.get(c)).collect()
 }
 
 pub fn compute_bases_covered<CSS: ColorSetStorage>(color_set_ids: &[Option<usize>], compatible_colors: &[usize], index: &CompactColexKmers<CSS>) -> Vec<usize> {
