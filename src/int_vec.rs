@@ -2,15 +2,20 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 #[derive(Debug, Clone)]
 pub struct CompactIntVec {
-    pub data: Vec<u64>,
-    pub len: usize, // Number of stored integers. The last word may be only partially used.
-    pub bit_width: usize,
+    data: Vec<u64>,
+    len: usize, // Number of stored integers. The last word may be only partially used.
+    bit_width: usize,
 }
 
 impl CompactIntVec {
     #[allow(clippy::manual_div_ceil)] // I don't want to touch it
-    pub fn new(len: usize, bit_width: usize) -> Self {
+    pub fn new(len: usize, mut bit_width: usize) -> Self {
         assert!(bit_width <= 64);
+        if bit_width == 0 {
+            log::warn!("Int vector with bit width 0 -> setting bit width to 1");
+            bit_width = 1;
+        }
+
         let n_words = (len * bit_width + 63) / 64;
         let data = vec![0; n_words];
         Self {data, len, bit_width}
@@ -69,9 +74,14 @@ impl CompactIntVec {
     }
 
     pub fn from_vec(v: Vec::<usize>) -> Self {
-        let bit_width = if let Some(v_max) = v.iter().max() {
+        let mut bit_width = if let Some(v_max) = v.iter().max() {
             (v_max+1).next_power_of_two().trailing_zeros()
         } else { 0 };
+
+        if bit_width == 0 {
+            log::warn!("Int vector with bit width 0 -> setting bit width to 1");
+            bit_width = 1;
+        }
 
         let mut ret = Self::new(v.len(), bit_width as usize);
         for (i, x) in v.into_iter().enumerate() {
@@ -148,15 +158,20 @@ impl CompactIntVec {
 
 /// This is atomic only in a limited sense! See comments at member functions get and set.
 pub struct AtomicCompactIntVec {
-    pub data: Vec<std::sync::atomic::AtomicU64>,
-    pub len: usize, // Number of stored integers. The last word may be only partially used.
-    pub bit_width: usize,
+    data: Vec<std::sync::atomic::AtomicU64>,
+    len: usize, // Number of stored integers. The last word may be only partially used.
+    bit_width: usize,
 }
 
 impl AtomicCompactIntVec {
     #[allow(clippy::manual_div_ceil)] // I don't want to touch it
-    pub fn new(len: usize, bit_width: usize) -> Self {
+    pub fn new(len: usize, mut bit_width: usize) -> Self {
         assert!(bit_width <= 64);
+        if bit_width == 0 {
+            log::warn!("Int vector with bit width 0 -> setting bit width to 1");
+            bit_width = 1;
+        }
+
         let n_words = (len * bit_width + 63) / 64;
         let data = (0..n_words).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
         Self {data, len, bit_width}
@@ -164,7 +179,12 @@ impl AtomicCompactIntVec {
 
     #[allow(dead_code)]
     pub fn new_with_universe_size(len: usize, universe_size: usize) -> Self {
-        let bit_width = universe_size.next_power_of_two().trailing_zeros() as usize;
+        let mut bit_width = universe_size.next_power_of_two().trailing_zeros() as usize;
+        if bit_width == 0 {
+            log::warn!("Int vector with bit width 0 -> setting bit width to 1");
+            bit_width = 1;
+        }
+
         Self::new(len, bit_width)
     }
 

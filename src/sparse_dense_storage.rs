@@ -352,6 +352,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut sparse_set_starts: Vec<usize> = sparse_set_insertion_points.into_iter().map(
             |x| x.load(Acquire) as usize
         ).collect();
+
         // After inserting everything, the insertion points are now that the starts of
         // the next set. Let's add the start of the first set to the beginning:
         sparse_set_starts.insert(0, 0);
