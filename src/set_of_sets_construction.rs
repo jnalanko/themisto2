@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Re
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
 use simple_sds_sbwt::ops::{BitVec, Rank, Select};
-use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec};
+use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec, util};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {
@@ -80,7 +80,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         set_quadruples[fp_idx].2 = colex;
     }
 
-    // Make sizes not atomic
+    // Make sizes not atomic and add to the quadruples
     for (idx, sz) in set_sizes.into_iter().enumerate() {
         set_quadruples[idx].3 = sz.load(Acquire) as usize;
     }
@@ -89,43 +89,35 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     thread_pool.install(|| set_quadruples.par_sort_unstable());
 
     log::info!("Building mapping from original set id to new set id");
-    // Build original set id -> new set id vector
-    let mut set_id = 0_usize;
-    let mut key_kmer_idx_to_new_id: Vec<usize> = vec![0; n_key_kmers];
-    for (quadruple_idx, (fp1, fp2, colex, _size)) in set_quadruples.iter().enumerate() {
-        if quadruple_idx > 0 && (set_quadruples[quadruple_idx-1].0, set_quadruples[quadruple_idx-1].1) != (*fp1, *fp2) {
-            // New fingerprint pair
-            set_id += 1;
+    let mut sufficient_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
+    util::for_each_run_with_key_mut(&mut set_quadruples, |x| (x.0, x.1), |run| {
+        let min_colex = run.iter().map(|x| x.2).min().unwrap(); // Min colex in the run. Unwrap is okay because there can not be empty runs
+        for x in run {
+            x.0 = min_colex as u64; // Store the min colex over the first fingerprint
         }
-        let key_kmer_idx = key_kmer_marks.rank(*colex);
-        key_kmer_idx_to_new_id[key_kmer_idx] = set_id;
-    }
+        sufficient_kmer_marks.set(min_colex, true);
+    });
 
-    log::info!("Building sparsified key k-mer marks");
-    // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
-    set_quadruples.dedup_by_key(|x| (x.0, x.1));
-    set_quadruples.shrink_to_fit();
-    let n_distinct_sets_found = set_quadruples.len();
-    let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
-    let mut total_set_size = 0_usize;
-    for (_fp1, _fp2, colex, size) in set_quadruples.iter() {
-        sparsified_key_kmer_marks.set(*colex, true); 
-        total_set_size += size;
-    }
-    thread_pool.install(|| set_quadruples.par_sort_unstable_by_key(|x| x.2)); // By colex
+    thread_pool.install(|| set_quadruples.par_sort_unstable()); // Sort by min colex
+    let mut key_kmer_idx_to_new_id: Vec<usize> = vec![0; n_key_kmers]; 
+    let mut set_sizes: Vec<usize> = vec![0; sufficient_kmer_marks.count_ones()];
+    let mut set_id = 0_usize;
+    util::for_each_run(&set_quadruples, |run| {
+        let mut set_size = 0;
+        for (_, _, key_kmer_colex, size) in &set_quadruples[run.clone()] {
+            let key_kmer_idx = key_kmer_marks.rank(*key_kmer_colex);
+            key_kmer_idx_to_new_id[key_kmer_idx] = set_id;
+            set_size = *size; // The size should be the same for all lets since this is a run
+        }
+        set_sizes[set_id] = set_size;
+        set_id += 1;
+    });
 
-    log::info!("Storing distinct set sizes");
-    let mut sparsified_marked_set_sizes = Vec::<usize>::with_capacity(set_quadruples.len());
-    for (_fp1, _fp2, _colex, size) in set_quadruples.iter() {
-        sparsified_marked_set_sizes.push(*size);
-    }
+    let n_sets = set_id;
+    log::info!("{} distinct color sets found", n_sets);
+    log::info!("Average color set size: {:.2}", (set_sizes.iter().sum::<usize>() as f64) / (n_sets as f64));
 
-    drop(key_kmer_marks); // Free memory
-
-    log::info!("{} distinct color sets found", n_distinct_sets_found);
-    log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_sets_found as f64));
-
-    (sparsified_key_kmer_marks, sparsified_marked_set_sizes, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
+    (sufficient_kmer_marks, set_sizes, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
 
 }
 
