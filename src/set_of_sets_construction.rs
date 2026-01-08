@@ -95,6 +95,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         for x in run {
             x.0 = min_colex as u64; // Store the min colex over the first fingerprint
         }
+        assert!(!sufficient_kmer_marks[min_colex]);
         sufficient_kmer_marks.set(min_colex, true);
     });
 
@@ -102,7 +103,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     let mut key_kmer_idx_to_new_id: Vec<usize> = vec![0; n_key_kmers]; 
     let mut set_sizes: Vec<usize> = vec![0; sufficient_kmer_marks.count_ones()];
     let mut set_id = 0_usize;
-    util::for_each_run(&set_quadruples, |run| {
+    util::for_each_run_with_key(&set_quadruples, |x| x.0, |run| { // Run with the same min colex
         let mut set_size = 0;
         for (_, _, key_kmer_colex, size) in &set_quadruples[run.clone()] {
             let key_kmer_idx = key_kmer_marks.rank(*key_kmer_colex);
