@@ -69,7 +69,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
 
     drop(element_fingerprints); // Free memory
 
-    log::info!("Collecting and sorting set fingerprints and metadata");
+    log::info!("Sorting by fingerprint");
     // Make set fingeprints not atomic and add colex positions as the third element and the set
     // size as the fourth element
     let mut set_quadruples: Vec<(u64, u64, usize, usize)> = set_fingerprints.into_iter().map(
@@ -79,16 +79,14 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     for (fp_idx, colex) in key_kmer_marks.one_iter() {
         set_quadruples[fp_idx].2 = colex;
     }
-
     // Make sizes not atomic and add to the quadruples
     for (idx, sz) in set_sizes.into_iter().enumerate() {
         set_quadruples[idx].3 = sz.load(Acquire) as usize;
     }
-
     let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
     thread_pool.install(|| set_quadruples.par_sort_unstable());
 
-    log::info!("Building mapping from original set id to new set id");
+    log::info!("Assigning representative k-mers");
     let mut sufficient_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
     util::for_each_run_with_key_mut(&mut set_quadruples, |x| (x.0, x.1), |run| {
         let min_colex = run.iter().map(|x| x.2).min().unwrap(); // Min colex in the run. Unwrap is okay because there can not be empty runs
@@ -99,10 +97,12 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         sufficient_kmer_marks.set(min_colex, true);
     });
 
+    log::info!("Sorting by representative id");
     thread_pool.install(|| set_quadruples.par_sort_unstable()); // Sort by min colex
     let mut key_kmer_idx_to_new_id: Vec<usize> = vec![0; n_key_kmers]; 
     let mut set_sizes: Vec<usize> = vec![0; sufficient_kmer_marks.count_ones()];
     let mut set_id = 0_usize;
+    log::info!("Collecting set ids and sizes");
     util::for_each_run_with_key(&set_quadruples, |x| x.0, |run| { // Run with the same min colex
         let mut set_size = 0;
         for (_, _, key_kmer_colex, size) in &set_quadruples[run.clone()] {
