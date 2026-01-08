@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
+use rayon::slice::ParallelSliceMut;
 use simple_sds_sbwt::ops::{BitVec, Rank, Select};
 use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec};
 
@@ -39,6 +40,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     let key_kmer_marks = crate::util::bitvec_to_simple_sds_raw_bitvec(key_kmer_marks);
     let mut key_kmer_marks = simple_sds_sbwt::bit_vector::BitVector::from(key_kmer_marks);
     key_kmer_marks.enable_rank();
+    let n_key_kmers = key_kmer_marks.count_ones();
 
     log::info!("Building color set fingerprints");
     // Assign a 128-bit fingerprint for each possible element id. 128-bit integers can not be
@@ -65,53 +67,58 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
 
     gen.run(callback, n_threads);
 
-    // Make set fingeprints not atomic
-    let set_fingerprints: Vec<(u64, u64)> = set_fingerprints.into_iter().map(
-        |pair| (pair.0.load(Acquire), pair.1.load(Acquire))
+    drop(element_fingerprints); // Free memory
+
+    log::info!("Collecting and sorting set fingerprints and metadata");
+    // Make set fingeprints not atomic and add colex positions as the third element and the set
+    // size as the fourth element
+    let mut set_quadruples: Vec<(u64, u64, usize, usize)> = set_fingerprints.into_iter().map(
+        |pair| (pair.0.load(Acquire), pair.1.load(Acquire), 0, 0) // Colex and set size will be filled in next
         // The Acquire here means that the Release-writes above must be visible before these loads (I think).
     ).collect();
+    for (fp_idx, colex) in key_kmer_marks.one_iter() {
+        set_quadruples[fp_idx].2 = colex;
+    }
 
     // Make sizes not atomic
-    let set_sizes: Vec<usize> = set_sizes.into_iter().map(
-        |sz| sz.load(Acquire) as usize
-    ).collect();
-
-    // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
-    let mut distinct_fingerprints = HashMap::<(u64,u64), usize>::new(); // Maps fingerprint to new set id
-    let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
-    let mut sparsified_marked_set_sizes = Vec::<usize>::new();
-    let mut n_distinct_sets_found = 0_usize;
-    let mut total_set_size = 0_usize;
-    for (key_kmer_idx, key_kmer_colex) in key_kmer_marks.one_iter() {
-        let fp1 = set_fingerprints[key_kmer_idx].0;
-        let fp2 = set_fingerprints[key_kmer_idx].1;
-        let fp = (fp1, fp2);
-
-        if let std::collections::hash_map::Entry::Vacant(e) = distinct_fingerprints.entry(fp) {
-            e.insert(n_distinct_sets_found);
-            n_distinct_sets_found += 1;
-            sparsified_key_kmer_marks.set(key_kmer_colex, true);
-            sparsified_marked_set_sizes.push(set_sizes[key_kmer_idx]);
-            total_set_size += set_sizes[key_kmer_idx];
-        }
+    for (idx, sz) in set_sizes.into_iter().enumerate() {
+        set_quadruples[idx].3 = sz.load(Acquire) as usize;
     }
-    sparsified_marked_set_sizes.shrink_to_fit();
+
+    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+    thread_pool.install(|| set_quadruples.par_sort_unstable());
+
+    log::info!("Building mapping from original set id to new set id");
+    // Build original set id -> new set id vector
+    let mut set_id = 0_usize;
+    let mut key_kmer_idx_to_new_id: Vec<usize> = vec![n_key_kmers];
+    for (quadruple_idx, (fp1, fp2, colex, _size)) in set_quadruples.iter().enumerate() {
+        if quadruple_idx > 0 && (set_quadruples[quadruple_idx-1].0, set_quadruples[quadruple_idx-1].1) != (*fp1, *fp2) {
+            // New fingerprint pair
+            set_id += 1;
+        }
+        let key_kmer_idx = key_kmer_marks.rank(*colex);
+        key_kmer_idx_to_new_id[key_kmer_idx] = set_id;
+    }
+
+    log::info!("Building sparsified key k-mer marks and set sizes");
+    // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
+    set_quadruples.dedup_by_key(|x| (x.0, x.1));
+    set_quadruples.shrink_to_fit();
+    let n_distinct_sets_found = set_quadruples.len();
+    let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
+    let mut sparsified_marked_set_sizes = Vec::<usize>::with_capacity(set_quadruples.len());
+    let mut total_set_size = 0_usize;
+    for (set_id, (fp1, fp2, colex, size)) in set_quadruples.into_iter().enumerate() {
+        sparsified_key_kmer_marks.set(colex, true); 
+        sparsified_marked_set_sizes[set_id] = size;
+        total_set_size += size;
+    }
+
+    drop(key_kmer_marks); // Free memory
 
     log::info!("{} distinct color sets found", n_distinct_sets_found);
     log::info!("Average color set size: {:.2}", (total_set_size as f64)/(n_distinct_sets_found as f64));
-
-    // Free memory
-    drop(key_kmer_marks);
-    drop(set_sizes);
-    drop(element_fingerprints);
-
-    // Build original set id -> new set id vector
-    let key_kmer_idx_to_new_id: Vec<usize> = set_fingerprints.iter().map(
-        |fingerprint| distinct_fingerprints[fingerprint])
-        .collect();
-
-    // Free memory
-    drop(set_fingerprints);
 
     (sparsified_key_kmer_marks, sparsified_marked_set_sizes, CompactIntVec::from_vec(key_kmer_idx_to_new_id))
 
