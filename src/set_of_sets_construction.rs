@@ -101,18 +101,23 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         key_kmer_idx_to_new_id[key_kmer_idx] = set_id;
     }
 
-    log::info!("Building sparsified key k-mer marks and set sizes");
+    log::info!("Building sparsified key k-mer marks");
     // Mark the colex-lowest key k-mer where each distinct fingerprint occurs 
     set_quadruples.dedup_by_key(|x| (x.0, x.1));
     set_quadruples.shrink_to_fit();
     let n_distinct_sets_found = set_quadruples.len();
     let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
-    let mut sparsified_marked_set_sizes = Vec::<usize>::with_capacity(set_quadruples.len());
     let mut total_set_size = 0_usize;
-    for (_fp1, _fp2, colex, size) in set_quadruples.into_iter() {
-        sparsified_key_kmer_marks.set(colex, true); 
-        sparsified_marked_set_sizes.push(size);
+    for (_fp1, _fp2, colex, size) in set_quadruples.iter() {
+        sparsified_key_kmer_marks.set(*colex, true); 
         total_set_size += size;
+    }
+    thread_pool.install(|| set_quadruples.par_sort_unstable_by_key(|x| x.2)); // By colex
+
+    log::info!("Storing distinct set sizes");
+    let mut sparsified_marked_set_sizes = Vec::<usize>::with_capacity(set_quadruples.len());
+    for (_fp1, _fp2, _colex, size) in set_quadruples.iter() {
+        sparsified_marked_set_sizes.push(*size);
     }
 
     drop(key_kmer_marks); // Free memory
