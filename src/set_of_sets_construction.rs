@@ -91,7 +91,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     log::info!("Building mapping from original set id to new set id");
     // Build original set id -> new set id vector
     let mut set_id = 0_usize;
-    let mut key_kmer_idx_to_new_id: Vec<usize> = vec![n_key_kmers];
+    let mut key_kmer_idx_to_new_id: Vec<usize> = vec![0; n_key_kmers];
     for (quadruple_idx, (fp1, fp2, colex, _size)) in set_quadruples.iter().enumerate() {
         if quadruple_idx > 0 && (set_quadruples[quadruple_idx-1].0, set_quadruples[quadruple_idx-1].1) != (*fp1, *fp2) {
             // New fingerprint pair
@@ -109,9 +109,9 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     let mut sparsified_key_kmer_marks = bitvec::bitvec![0; key_kmer_marks.len()];
     let mut sparsified_marked_set_sizes = Vec::<usize>::with_capacity(set_quadruples.len());
     let mut total_set_size = 0_usize;
-    for (set_id, (fp1, fp2, colex, size)) in set_quadruples.into_iter().enumerate() {
+    for (_fp1, _fp2, colex, size) in set_quadruples.into_iter() {
         sparsified_key_kmer_marks.set(colex, true); 
-        sparsified_marked_set_sizes[set_id] = size;
+        sparsified_marked_set_sizes.push(size);
         total_set_size += size;
     }
 
