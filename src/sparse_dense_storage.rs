@@ -547,8 +547,13 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
  // set with integer bit width sparse_bit_width, or as a dense set supporting up
  // to n_colors.
 fn is_dense_formula(n_elements: usize, sparse_bit_width: usize, n_colors: usize) -> bool {
-    let intvec_size = n_elements * sparse_bit_width;
+
+    // sparse_bit_width bits per element, plus 64 bits to encode the offset in the concatenation
+    let intvec_size = n_elements * sparse_bit_width + 64;
+
+    // One bit per color
     let bitmap_size = n_colors;
+
     bitmap_size <= intvec_size
 }
 
