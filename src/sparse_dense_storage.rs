@@ -631,33 +631,31 @@ impl SparseDenseStorage {
         let total_bitvec_len = metadata[1] as usize;
         let total_n_colors = metadata[2] as usize;
 
-        let individual_bitvec_len = color_id_range.len();
-
         log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
         let file_raw_data_start_offset: usize = 8*3;
 
         let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
-        let max_n_bits_in_buf = max_n_sets_in_buf * individual_bitvec_len;
-        let mut buf_bitmap = BitMaps::new_with_zero_init(individual_bitvec_len, max_n_sets_in_buf);
+        let max_n_bits_in_buf = max_n_sets_in_buf * total_n_colors;
+        let mut buf_bitmap = BitMaps::new_with_zero_init(total_n_colors, max_n_sets_in_buf);
         // ^ todo: min(...) in case the whole data is smaller than the buffer
 
         let mut file_offset = file_raw_data_start_offset;
 
         // Read raw data from disk and put to a bitmap
         let mut buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
-        dense_file.read_exact(&mut buf_bytes).unwrap();
+        dense_file.read_exact(buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
 
         let mut n_bits_in_past_buffers = 0_usize;
         for (dense_id, color_set_id) in piece.is_dense_marks.one_iter() {
             let set_view = piece.get_set_view(color_set_id);
-            let bit_slice = match set_view {
+            let piece_bit_slice = match set_view {
                 SparseDenseColorSetView::Dense(bit_slice) => bit_slice,
                 SparseDenseColorSetView::Sparse(_) => panic!("Expected dense set, got sparse"),
             };
-            assert_eq!(bit_slice.len(), color_id_range.len());
-            let mut start_bit = dense_id*n_colors - n_bits_in_past_buffers;
-            while start_bit > max_n_bits_in_buf {
+            assert_eq!(piece_bit_slice.len(), color_id_range.len());
+            let mut start_bit = dense_id*total_n_colors - n_bits_in_past_buffers;
+            while start_bit >= max_n_bits_in_buf {
                 let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
                 let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
                 dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
@@ -680,7 +678,7 @@ impl SparseDenseStorage {
             let target_set = buf_bitmap.get_mut(dense_id);
             let target_range = &mut target_set[color_id_range.clone()];
             assert!(target_range.count_ones() == 0); // Must not have been set before
-            target_range.copy_from_bitslice(bit_slice);
+            target_range.copy_from_bitslice(piece_bit_slice);
         }
 
         // Remaining buffer
