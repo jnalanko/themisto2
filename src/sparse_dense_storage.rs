@@ -714,7 +714,7 @@ impl SparseDenseStorage {
         // 64. This guarantees that the last word of the buffer is aligned with the
         // end of the bits of the last element. Unless it's the last buffer, but that's ok.
         //log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
-        let max_buf_cap_elements = 100_00_usize.next_multiple_of(64);
+        let max_buf_cap_elements = 1000_000_usize.next_multiple_of(64);
         let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
         let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
         let mut file_offset = file_raw_data_start_offset;
