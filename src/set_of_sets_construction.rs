@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
+use std::{collections::HashMap, ops::Range, path::Path, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
@@ -130,10 +130,22 @@ pub fn build_color_set_storage<CSS: ColorSetStorage + Send>(n_colors: usize, col
     let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
     colex_sample_marks.enable_rank();
 
-    // Filter the second element iterator
     gen.set_filter(colex_sample_marks);
 
     *CSS::new_parallel(gen, n_colors, &sampled_set_sizes, n_threads)
+}
+
+// The generator must not provide duplicate elements! Otherwise the final data structure will be corrupted because
+// the sampled_set_sizes is not correct.
+pub fn build_color_set_storage_to_disk<CSS: ColorSetStorage + Send>(n_colors: usize, colex_sample_marks: bitvec::vec::BitVec, sampled_set_sizes: Vec<usize>, mut element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, out_prefix: &Path, n_threads: usize) {
+    let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
+    colex_sample_marks.enable_rank();
+
+    for (gen, _) in element_gens.iter_mut() {
+        gen.set_filter(colex_sample_marks);
+    }
+
+    CSS::new_parallel_to_disk(element_gens, sampled_set_sizes, out_prefix, n_threads);
 }
 
 pub fn compute_set_sizes_assuming_no_duplicate_elements(element_gen: &mut impl ParallelElementGenerator, n_set_ids: usize, n_threads: usize) -> Vec<usize> {

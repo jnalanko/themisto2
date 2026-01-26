@@ -6,7 +6,7 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
-use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, time::Instant};
+use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, time::Instant};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
@@ -101,6 +101,9 @@ pub enum Subcommands {
 
         #[arg(long = "index-type")]
         index_type: ColoringType,
+
+        #[arg(long = "in-pieces", default_value = "1", help = "Build the final sets in this many pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once")]
+        n_pieces: usize,
 
         // Hidden because index import and export assume that reverse complements are indexed.
         // The main purpose for this flag currently is to build the index for
@@ -265,7 +268,14 @@ pub enum Subcommands {
     },
 }
 
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool) -> CompactColexKmers<CSS> {
+enum BuildMode {
+    InMemory,
+    ToDisk(PathBuf, usize), // Output path prefix, number of pieces
+}
+
+// Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to
+// disk.
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
 
     let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
@@ -292,25 +302,52 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     };
 
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
-    let css = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
-        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
-    } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
-        set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
-    };
+    match build_mode {
+        BuildMode::InMemory => {
+            let css = if from_unitigs {
+                let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+                set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+            } else {
+                let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
+                set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+            };
 
-    log::info!("Building rank support for key k-mer marks");
-    let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
-    key_kmer_marks.enable_rank();
-    assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
-    let colex_map = ColexToColorSetMap {
-        sampling: key_kmer_marks, 
-        color_set_ids: key_kmer_idx_to_set_id,
-    };
+            log::info!("Building rank support for key k-mer marks");
+            let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
+            key_kmer_marks.enable_rank();
+            assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
+            let colex_map = ColexToColorSetMap {
+                sampling: key_kmer_marks, 
+                color_set_ids: key_kmer_idx_to_set_id,
+            };
 
-    let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names))
+            let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+            let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names));
+            return Some(cck) 
+        },
+        BuildMode::ToDisk(out_prefix, n_pieces) => {
+            assert!(n_pieces != 0);
+            let chunk_size = input_paths.len().div_ceil(n_pieces);
+            if from_unitigs {
+                let mut gens = Vec::<(MsElementGenerator, Range::<usize>)>::new();
+                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
+                    let gen = MsElementGenerator::new(chunk.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
+                    gens.push((gen, color_id_range));
+                }
+                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(n_colors, repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
+            } else {
+                let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
+                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
+                    let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, chunk.to_owned(), !forward_only);
+                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
+                    gens.push((gen, color_id_range));
+                }
+                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(n_colors, repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
+            };
+            return None;
+        },
+    }
 }
 
 #[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
@@ -586,7 +623,7 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only} => {
+        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -599,12 +636,12 @@ fn main() {
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only);
+                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, n_pieces);
                     log::info!("Serializing bitmap index to {}", output.display());
                     write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only);
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, n_pieces);
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },

@@ -30,6 +30,10 @@ pub trait ColorSetStorage {
     // Construct in parallel from a generator of set_of_sets_construction::SetElement
     fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self>;
 
+    // Construct in parallel in chunks, one element generator for each, and write the data
+    // directly to disk in chunks.
+    fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, std::ops::Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &std::path::Path, n_threads: usize);
+
     fn n_sets(&self) -> usize;
     fn n_colors(&self) -> usize;
 
