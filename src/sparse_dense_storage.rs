@@ -641,7 +641,7 @@ impl SparseDenseStorage {
         for (sparse_id, color_set_id) in piece.is_dense_marks.zero_iter() {
             for color in piece.get_set_view(color_set_id).iter() { // TODO: this does an unnecessary rank.
                 let mut buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
-                if buf_insertion_point > buf_cap_elements {
+                while buf_insertion_point > buf_cap_elements {
                     let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
                     let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
@@ -663,6 +663,7 @@ impl SparseDenseStorage {
                     buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
                 }
                 assert!(buf_compact_int_vec.get(buf_insertion_point) == 0); // This must not have been written yet
+                eprintln!("Insert at {}", buf_insertion_point);
                 buf_compact_int_vec.set(buf_insertion_point, color);
                 sparse_set_insertion_points[sparse_id] += 1;
             }
