@@ -609,7 +609,7 @@ impl SparseDenseStorage {
         // File format copied from above:
         // * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
 
-        sparse_file.rewind();
+        sparse_file.rewind().unwrap();
 
         // Read metadata
         let mut metadata = [0u64; 5];
