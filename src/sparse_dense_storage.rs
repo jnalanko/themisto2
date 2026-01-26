@@ -344,15 +344,15 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let dense_filename = crate::util::append_to_filename(output_prefix, ".dense");
         let marks_filename = crate::util::append_to_filename(output_prefix, ".marks");
 
-        let mut sparse_file = std::fs::File::create(sparse_filename).unwrap();
+        let mut sparse_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(sparse_filename).unwrap();
         let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
         sparse_file.set_len(total_sparse_bits.next_multiple_of(8) as u64).unwrap();
 
-        let mut dense_file = std::fs::File::create(dense_filename).unwrap();
+        let mut dense_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dense_filename).unwrap();
         let total_dense_bits: usize = 64 + 64 + 64 + n_dense_sets * n_colors;
         dense_file.set_len(total_dense_bits.next_multiple_of(8) as u64).unwrap();
 
-        let mut marks_file = std::fs::File::create(marks_filename).unwrap();
+        let mut marks_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(marks_filename).unwrap();
         let total_marks_bits = 64 + 64 + is_dense_marks.len();
         marks_file.set_len(total_marks_bits.next_multiple_of(8) as u64).unwrap();
 
@@ -635,6 +635,7 @@ impl SparseDenseStorage {
                     let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
                     sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+                    log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
                     sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
                     file_offset += buf_bytes.len();
