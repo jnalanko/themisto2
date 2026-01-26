@@ -2,6 +2,10 @@
 #![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
 #![allow(clippy::manual_is_multiple_of)] // Oh please
 
+// We assume that usize is 64 bits in many places
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
+
 use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, path::{Path, PathBuf}, time::Instant};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};

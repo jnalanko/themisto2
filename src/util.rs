@@ -2,6 +2,7 @@ use std::{cmp::min, io::{Cursor, Read}, ops::Range};
 
 use bitvec::{array::BitArray, order::Lsb0};
 use simple_sds_sbwt::serialize::Serialize;
+use std::path::{Path, PathBuf};
 
 // This bit vector of length 256 marks the ascii values of these characters: acgtACGT
 pub const IS_DNA: BitArray<[u32; 8]> = bitvec::bitarr![const u32, Lsb0; 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
@@ -116,6 +117,32 @@ pub fn for_each_run_with_key_mut<T: Eq, KeyType: Eq, F1: Fn(&T) -> KeyType, F2: 
     // Final run
     callback(&mut items[run_start..n]);
 }
+
+/*
+pub fn std_vec_size_in_bytes(sizeof_element_bytes: usize, len: usize) -> usize {
+    #[cfg(not(target_pointer_width = "64"))]
+    compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
+    let bits = (sizeof_element_bytes * len).next_multiple_of(8) + 64 + 64; // Elements, len, capacity
+    bits / 8
+}
+*/
+
+pub fn append_to_filename(path: &Path, suffix: &str) -> PathBuf {
+    let mut new_path = path.to_path_buf();
+
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) => {
+            new_path.set_file_name(format!("{}{}", name, suffix));
+        }
+        None => {
+            // No filename → treat suffix as the filename
+            new_path.push(suffix);
+        }
+    }
+
+    new_path
+}
+
 
 
 #[cfg(test)]
