@@ -76,6 +76,10 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
         self.filter = Some(filter);
     }
+
+    fn rewind(&mut self) {
+        // Nothing needs to done, calling run() again already works
+    }
 }
 
 struct DeduplicatingBuffer {
@@ -264,6 +268,10 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
         self.filter = Some(filter)
     }
+
+    fn rewind(&mut self) {
+        // Nothing needs to done, calling run() again already works
+    }
 }
 
 pub struct ElementGeneratorFromMergeInterleaving<'a, CSS: ColorSetStorage + Sync + Send> {
@@ -357,5 +365,9 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
 
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
         self.filter = Some(filter);
+    }
+
+    fn rewind(&mut self) {
+        // Nothing needs to done, calling run() again already works
     }
 }

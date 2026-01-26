@@ -18,6 +18,8 @@ pub trait ParallelElementGenerator {
     // to the callback of run. The set ids will be remapped so that the first set that
     // passes the filter gets id 0, the second that passes the filter gets id 1, and so on.
     fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector);
+
+    fn rewind(&mut self); // Rewind to the start for another run
 }
 
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
@@ -190,6 +192,10 @@ mod tests{
 
         fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
             self.filter = Some(filter);
+        }
+
+        fn rewind(&mut self) {
+            // Nothing needs to done, calling run() again already works
         }
     }
 

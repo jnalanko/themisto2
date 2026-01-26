@@ -203,6 +203,10 @@ impl<'a,'c, F: for<'b> Fn(&'b [u8]) -> (usize, usize) + Sync + Send> crate::set_
     fn set_filter(&mut self, _filter: simple_sds_sbwt::bit_vector::BitVector) {
         unimplemented!()
     }
+
+    fn rewind(&mut self) {
+        // Nothing needs to done, calling run() again already works
+    }
 }
 
 struct Stats{
