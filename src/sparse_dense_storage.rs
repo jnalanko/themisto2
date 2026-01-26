@@ -336,7 +336,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         // Create three files:
         /*
-            * A file for dense sets: `[data_n_words: usize][bitvec_len: usize][n_colors: usize][data]`
+            * A file for dense sets: `[data_n_words: usize][total_bitvec_len: usize][n_colors: usize][data]`
             * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
             * A file for is_dense_marks: [data n_words: usize][bitvec_len: usize][data]
             (No rank support serialized for now)
@@ -359,6 +359,10 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut dense_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dense_filename).unwrap();
         let total_dense_bits: usize = 64 + 64 + 64 + (n_dense_sets * n_colors).next_multiple_of(64);
         dense_file.set_len((total_dense_bits/8) as u64).unwrap();
+        dense_file.write_all(&((n_dense_sets * n_colors).div_ceil(64) as u64).to_le_bytes()).unwrap(); // data_n_words
+        dense_file.write_all(&((n_dense_sets * n_colors) as u64).to_le_bytes()).unwrap(); // n_sets
+        dense_file.write_all(&(n_colors as u64).to_le_bytes()).unwrap(); // n_colors
+        dense_file.rewind().unwrap();
 
         let mut marks_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(marks_filename).unwrap();
         let total_marks_bits = 64 + 64 + is_dense_marks.len().next_multiple_of(64);
@@ -606,6 +610,34 @@ impl SparseDenseStorage {
 
 
     fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+        Self::write_sparse_sets_piece(&piece, color_id_range.clone(), sparse_file, sparse_set_insertion_points, n_threads);
+        Self::write_dense_sets_piece(&piece, color_id_range, dense_file, n_threads);
+    }
+
+    fn write_dense_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, dense_file: &mut File, n_threads: usize) {
+        dense_file.rewind().unwrap();
+
+        // Copy-paste from above:
+        // * A file for dense sets: `[data_n_words: usize][total_bitvec_len: usize][n_colors: usize][data]`
+
+        // Read metadata
+        let mut metadata = [0u64; 3];
+        dense_file.read_exact(bytemuck::cast_slice_mut(&mut metadata)).unwrap();
+        let data_n_words = metadata[0] as usize;
+        let total_bitvec_len = metadata[1] as usize;
+        let n_colors = metadata[2] as usize;
+
+        let individual_bitvec_len = n_colors;
+
+        log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
+        let file_raw_data_start_offset: usize = 8*3;
+
+        ...
+
+    }
+
+    fn write_sparse_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+
         // Write sparse sets.
         // File format copied from above:
         // * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
@@ -621,14 +653,14 @@ impl SparseDenseStorage {
         let n_colors = metadata[3] as usize;
         let n_sets = metadata[4] as usize;
 
-        log::warn!("Bytes in data according to metadata: {}", data_n_words * 8);
+        log::warn!("Bytes in sparse data according to metadata: {}", data_n_words * 8);
 
         let file_raw_data_start_offset: usize = 8*5;
     
         // We want a buffer that can hold a number of elements m such that m*bit_width is a multiple of
         // 64. This guarantees that the last word of the buffer is aligned with the
         // end of the bits of the last element. Unless it's the last buffer, but that's ok.
-        log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
+        //log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
         let max_buf_cap_elements = 100_00_usize.next_multiple_of(64);
         let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
         let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
@@ -687,19 +719,6 @@ impl SparseDenseStorage {
         log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
         sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
-        /*
-        // Testing...
-        for i in 0..20 {
-            for color in piece.get(i).iter() {
-                print!("{} ", color);
-            }
-            println!();
-        }
-        // For now, for testing, let's just serialize
-        let filename = format!("temp/{}-{}.sds", color_id_range.start, color_id_range.end);
-        let mut out = BufWriter::new(File::create(&filename).unwrap());
-        piece.serialize(&mut out);
-        */
     }
 
     // If given_dense_marks is given, uses those, otherwise decides itself which sets are dense and which are sparse
