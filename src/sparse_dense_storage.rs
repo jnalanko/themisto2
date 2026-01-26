@@ -349,7 +349,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + (total_sparse_size*color_id_bit_width).next_multiple_of(64) + (n_sparse_sets + 1) * 64;
         sparse_file.set_len((total_sparse_bits/8) as u64).unwrap();
         // Write metadata
-        sparse_file.write_all(&(((n_sparse_sets*color_id_bit_width).div_ceil(64)) as u64).to_le_bytes()).unwrap(); // data_n_words
+        sparse_file.write_all(&(((total_sparse_size*color_id_bit_width).div_ceil(64)) as u64).to_le_bytes()).unwrap(); // data_n_words
         sparse_file.write_all(&(total_sparse_size as u64).to_le_bytes()).unwrap(); // data_n_elements
         sparse_file.write_all(&(color_id_bit_width as u64).to_le_bytes()).unwrap(); // bit_width
         sparse_file.write_all(&(n_colors as u64).to_le_bytes()).unwrap(); // n_colors
