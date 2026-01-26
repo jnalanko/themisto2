@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
 
+use simple_sds_sbwt::ops::{Select, SelectZero};
 use simple_sds_sbwt::raw_vector::AccessRaw;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::PushRaw};
@@ -280,124 +281,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         })
     }
 
-    fn new_parallel(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
-
-        // TODO This function has a ton of repetition. Should clean this up
-
-        log::info!("Encoding color sets");
-
-        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
-        let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
-
-        let mut n_dense_sets = 0;
-        let mut n_sparse_sets = 0;
-        let mut total_sparse_size = 0;
-        for &size in set_sizes.iter() {
-            if is_dense_formula(size, color_id_bit_width, n_colors) {
-                is_dense_marks.push_bit(true);
-                n_dense_sets += 1;
-            } else {
-                is_dense_marks.push_bit(false);
-                n_sparse_sets += 1;
-                total_sparse_size += size;
-            }
-        }
-        // Todo: shrink to fit dense marks
-
-        dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
-
-        // Zero-initialized data with atomic updates 
-        let sparse_set_concat = AtomicCompactIntVec::new(total_sparse_size, color_id_bit_width);
-        let dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
-
-        let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
-        let mut total_sparse_set_size = 0_usize;
-        let mut ugly_sparse_id_again = 0_usize;
-        for (i, s) in set_sizes.iter().enumerate() {
-            if !is_dense_marks.bit(i) {
-                sparse_set_insertion_points[ugly_sparse_id_again].store(total_sparse_set_size as u64, Release);
-                total_sparse_set_size += s;
-                ugly_sparse_id_again += 1;
-            }
-        }
-
-        log::info!("Building rank support for dense marks");
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-        is_dense_marks.enable_rank();
-
-        // Fill in the set elements to the zero-initialized data
-        log::info!("Encoding sets");
-        let callback = |element: crate::set_of_sets_construction::SetElement| {
-            let set_id = element.set_id;
-            let color_id = element.color;
-            if is_dense_marks.get(set_id) {
-                let dense_id = is_dense_marks.rank(set_id);
-                dense_sets.set(dense_id * n_colors + color_id, true);
-            } else {
-                let sparse_id = is_dense_marks.rank_zero(set_id);
-                
-                // Increment the insertion point. If I understand correctly, fetch_update will
-                // fetch the value, apply a function to it, and try to compare-and-swap it in.
-                // If the value has changed, it will fetch and try again until it succeeds.
-                // When succesful, it will return the old value that was updated.
-                // TODO: fetch_add instead?
-
-                let insertion_point = sparse_set_insertion_points[sparse_id].fetch_update(SeqCst, SeqCst, |x| Some(x+1)).unwrap();
-
-                // Hooray, we have succeeded in incrementing the insertion point. This means
-                // that no other thread can write at the point, so we can safely write it. 
-
-                sparse_set_concat.set(insertion_point as usize, color_id);
-            }
-        };
-        element_gen.run(callback, n_threads);
-
-        // Atomicity no longer needed
-        let sparse_set_concat = CompactIntVec::from_atomic(sparse_set_concat);
-        let mut sparse_set_starts: Vec<usize> = sparse_set_insertion_points.into_iter().map(
-            |x| x.load(Acquire) as usize
-        ).collect();
-
-        // After inserting everything, the insertion points are now that the starts of
-        // the next set. Let's add the start of the first set to the beginning:
-        sparse_set_starts.insert(0, 0);
-
-        // Make a SortedIntVecs out of the sparse set concatenation
-        sparse_set_starts.shrink_to_fit();
-        let mut sorted_sparse_sets = SortedIntVecs {
-            concat: sparse_set_concat,
-            starts: sparse_set_starts,
-        };
-
-        log::info!("Sorting sparse sets");
-        let mut sort_buf = Vec::<usize>::new();
-        for sparse_id in 0..sorted_sparse_sets.n_sets() {
-            sort_buf.clear();
-
-            let piece = sorted_sparse_sets.get(sparse_id);
-            for i in piece.start..piece.end {
-                sort_buf.push(piece.vec.get(i));
-            }
-            sort_buf.sort();
-            for offset in 0..sort_buf.len() {
-                sorted_sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
-            }
-        }
-        log::info!("Sparse sets sorted");
-
-        Box::new(Self {
-            dense_sets: BitMaps { 
-                bitmap_data: dense_sets.into_bitvec(), 
-                individual_length: n_colors
-            },
-            sparse_sets: sorted_sparse_sets,
-            n_colors,
-            is_dense_marks,
-        })
+    fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
+        Self::construct(element_gen, n_colors, set_sizes, None, n_threads) // No dense marks given
     }
 
     // The Range<usize> associates to each element generator gives the color id range of that generator
-    fn new_parallel_to_disk(mut element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &Path, n_threads: usize) {
+    fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &Path, n_threads: usize) {
         log::info!("Encoding color sets to disk in {} pieces", element_gens.len());
 
         assert!(element_gens.len() > 0);
@@ -686,6 +575,131 @@ impl SparseDenseStorage {
         let filename = format!("temp/{}-{}.sds", color_id_range.start, color_id_range.end);
         let mut out = BufWriter::new(File::create(&filename).unwrap());
         piece.serialize(&mut out);
+    }
+
+    // If given_dense_marks is given, uses those, otherwise decides itself which sets are dense and which are sparse
+    fn construct(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], given_dense_marks: Option<simple_sds_sbwt::raw_vector::RawVector>, n_threads: usize) -> Box<Self> {
+
+        // TODO This function has a ton of repetition. Should clean this up
+
+        log::info!("Encoding color sets");
+
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+
+        let is_dense_marks = match given_dense_marks {
+            Some(marks) => marks,
+            None => {
+                let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
+
+                for &size in set_sizes.iter() {
+                    if is_dense_formula(size, color_id_bit_width, n_colors) {
+                        is_dense_marks.push_bit(true);
+                    } else {
+                        is_dense_marks.push_bit(false);
+                    }
+                }
+                // Todo: shrink to fit?
+                is_dense_marks
+            },
+        };
+
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
+
+        let mut total_sparse_size = 0;
+        for (_, i) in is_dense_marks.zero_iter() {
+            total_sparse_size += set_sizes[i];
+        }
+
+        let n_dense_sets = is_dense_marks.count_ones();
+        let n_sparse_sets = is_dense_marks.len() - n_dense_sets;
+
+        dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
+
+        // Zero-initialized data with atomic updates 
+        let sparse_set_concat = AtomicCompactIntVec::new(total_sparse_size, color_id_bit_width);
+        let dense_sets = AtomicBitmap::new(n_colors * n_dense_sets);
+
+        let sparse_set_insertion_points: Vec<AtomicU64> = (0..n_sparse_sets).map(|_| std::sync::atomic::AtomicU64::new(0)).collect();
+        let mut total_sparse_set_size = 0_usize;
+        let mut ugly_sparse_id_again = 0_usize;
+        for (i, s) in set_sizes.iter().enumerate() {
+            if !is_dense_marks.get(i) {
+                sparse_set_insertion_points[ugly_sparse_id_again].store(total_sparse_set_size as u64, Release);
+                total_sparse_set_size += s;
+                ugly_sparse_id_again += 1;
+            }
+        }
+
+        // Fill in the set elements to the zero-initialized data
+        log::info!("Encoding sets");
+        let callback = |element: crate::set_of_sets_construction::SetElement| {
+            let set_id = element.set_id;
+            let color_id = element.color;
+            if is_dense_marks.get(set_id) {
+                let dense_id = is_dense_marks.rank(set_id);
+                dense_sets.set(dense_id * n_colors + color_id, true);
+            } else {
+                let sparse_id = is_dense_marks.rank_zero(set_id);
+                
+                // Increment the insertion point. If I understand correctly, fetch_update will
+                // fetch the value, apply a function to it, and try to compare-and-swap it in.
+                // If the value has changed, it will fetch and try again until it succeeds.
+                // When succesful, it will return the old value that was updated.
+                // TODO: fetch_add instead?
+
+                let insertion_point = sparse_set_insertion_points[sparse_id].fetch_update(SeqCst, SeqCst, |x| Some(x+1)).unwrap();
+
+                // Hooray, we have succeeded in incrementing the insertion point. This means
+                // that no other thread can write at the point, so we can safely write it. 
+
+                sparse_set_concat.set(insertion_point as usize, color_id);
+            }
+        };
+        element_gen.run(callback, n_threads);
+
+        // Atomicity no longer needed
+        let sparse_set_concat = CompactIntVec::from_atomic(sparse_set_concat);
+        let mut sparse_set_starts: Vec<usize> = sparse_set_insertion_points.into_iter().map(
+            |x| x.load(Acquire) as usize
+        ).collect();
+
+        // After inserting everything, the insertion points are now that the starts of
+        // the next set. Let's add the start of the first set to the beginning:
+        sparse_set_starts.insert(0, 0);
+
+        // Make a SortedIntVecs out of the sparse set concatenation
+        sparse_set_starts.shrink_to_fit();
+        let mut sorted_sparse_sets = SortedIntVecs {
+            concat: sparse_set_concat,
+            starts: sparse_set_starts,
+        };
+
+        log::info!("Sorting sparse sets");
+        let mut sort_buf = Vec::<usize>::new();
+        for sparse_id in 0..sorted_sparse_sets.n_sets() {
+            sort_buf.clear();
+
+            let piece = sorted_sparse_sets.get(sparse_id);
+            for i in piece.start..piece.end {
+                sort_buf.push(piece.vec.get(i));
+            }
+            sort_buf.sort();
+            for offset in 0..sort_buf.len() {
+                sorted_sparse_sets.assign_element(sparse_id, offset, sort_buf[offset]);
+            }
+        }
+        log::info!("Sparse sets sorted");
+
+        Box::new(Self {
+            dense_sets: BitMaps { 
+                bitmap_data: dense_sets.into_bitvec(), 
+                individual_length: n_colors
+            },
+            sparse_sets: sorted_sparse_sets,
+            n_colors,
+            is_dense_marks,
+        })
     }
 
 }
