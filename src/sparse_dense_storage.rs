@@ -624,6 +624,7 @@ impl SparseDenseStorage {
         let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
         let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
         sparse_file.read_exact(buf_bytes).unwrap();
+        let mut real_bytes_in_buf = buf_bytes.len();
         
         let mut n_elements_in_past_buffers = 0_usize;
         for (sparse_id, color_set_id) in piece.is_dense_marks.zero_iter() {
@@ -634,7 +635,7 @@ impl SparseDenseStorage {
                     let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
                     sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-                    sparse_file.write_all(buf_bytes).unwrap(); // TODO: last one may run over
+                    sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
                     file_offset += buf_bytes.len();
 
@@ -642,7 +643,9 @@ impl SparseDenseStorage {
                     assert!(n_elements_in_past_buffers*bit_width % 64 == 0);
                     let words_remaining = data_n_words - n_elements_in_past_buffers*bit_width / 64; 
                     let bytes_remaining = words_remaining * 8;
-                    sparse_file.read_exact(&mut buf_bytes[0..bytes_remaining]).unwrap();
+                    let bytes_to_read = min(bytes_remaining, buf_bytes.len());
+                    sparse_file.read_exact(&mut buf_bytes[0..bytes_to_read]).unwrap();
+                    real_bytes_in_buf = bytes_to_read;
 
                     n_elements_in_past_buffers += max_buf_cap_elements;
                 }
