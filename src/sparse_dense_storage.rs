@@ -1,5 +1,6 @@
+use std::cmp::min;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, ErrorKind, Read, Seek, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
@@ -335,7 +336,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         // Create three files:
         /*
             * A file for dense sets: `[data_n_words: usize][bitvec_len: usize][n_colors: usize][data]`
-            * A file for sparse sets: `[data_n_words: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
+            * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
             * A file for is_dense_marks: [data n_words: usize][bitvec_len: usize][data]
             (No rank support serialized for now)
         */
@@ -344,7 +345,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let marks_filename = crate::util::append_to_filename(output_prefix, ".marks");
 
         let mut sparse_file = std::fs::File::create(sparse_filename).unwrap();
-        let total_sparse_bits = 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
+        let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
         sparse_file.set_len(total_sparse_bits.next_multiple_of(8) as u64).unwrap();
 
         let mut dense_file = std::fs::File::create(dense_filename).unwrap();
@@ -596,6 +597,61 @@ impl SparseDenseStorage {
 
 
     fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+        // Write sparse sets.
+        // File format copied from above:
+        // * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
+
+        // Read metadata
+        let mut metadata = [0u64; 5];
+        sparse_file.read_exact(bytemuck::cast_slice_mut(&mut metadata)).unwrap();
+        let data_n_words = metadata[0] as usize;
+        let data_n_elements = metadata[1] as usize;
+        let bit_width = metadata[2] as usize;
+        let n_colors = metadata[3] as usize;
+        let n_sets = metadata[4] as usize;
+
+        let file_raw_data_start_offset: usize = 8*5;
+    
+        // We want a buffer that can hold a number of elements m such that m*bit_width is a multiple of
+        // 64. This guarantees that the last word of the buffer is aligned with the
+        // end of the bits of the last element. Unless it's the last buffer, but that's ok.
+        let max_buf_cap_elements = 1_000_000_usize.next_multiple_of(64);
+        let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
+        let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
+        let mut file_offset = file_raw_data_start_offset;
+
+        // Read raw data from disk and put to buf_compact_int_vec
+        let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
+        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
+        sparse_file.read_exact(buf_bytes).unwrap();
+        
+        let mut n_elements_in_past_buffers = 0_usize;
+        for (sparse_id, color_set_id) in piece.is_dense_marks.zero_iter() {
+            for color in piece.get_set_view(color_set_id).iter() { // TODO: this does an unnecessary rank.
+                let buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
+                if buf_insertion_point > buf_cap_elements {
+                    let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
+                    let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
+
+                    sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+                    sparse_file.write_all(buf_bytes).unwrap(); // TODO: last one may run over
+
+                    file_offset += buf_bytes.len();
+
+                    sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+                    assert!(n_elements_in_past_buffers*bit_width % 64 == 0);
+                    let words_remaining = data_n_words - n_elements_in_past_buffers*bit_width / 64; 
+                    let bytes_remaining = words_remaining * 8;
+                    sparse_file.read_exact(&mut buf_bytes[0..bytes_remaining]).unwrap();
+
+                    n_elements_in_past_buffers += max_buf_cap_elements;
+                }
+                buf_compact_int_vec.set(buf_insertion_point, color);
+                sparse_set_insertion_points[sparse_id] += 1;
+            }
+        }
+
+        /*
         // Testing...
         for i in 0..20 {
             for color in piece.get(i).iter() {
@@ -607,6 +663,7 @@ impl SparseDenseStorage {
         let filename = format!("temp/{}-{}.sds", color_id_range.start, color_id_range.end);
         let mut out = BufWriter::new(File::create(&filename).unwrap());
         piece.serialize(&mut out);
+        */
     }
 
     // If given_dense_marks is given, uses those, otherwise decides itself which sets are dense and which are sparse

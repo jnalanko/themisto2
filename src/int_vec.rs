@@ -132,6 +132,7 @@ impl CompactIntVec {
         Self{ data, len, bit_width }
     }
 
+    // Number of stored integers
     pub fn len(&self) -> usize {
         self.len
     }
@@ -151,6 +152,10 @@ impl CompactIntVec {
         let new_n_words = (new_len * self.bit_width).div_ceil(64);
         self.data.resize(new_n_words, 0);
         self.len = new_len;
+    }
+
+    pub fn get_mut_raw_data(&mut self) -> &mut [u64] {
+        &mut self.data
     }
 
 }
