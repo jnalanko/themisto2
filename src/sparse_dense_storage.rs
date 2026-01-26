@@ -608,6 +608,7 @@ impl SparseDenseStorage {
         log::info!("Encoding color sets to disk in {} pieces", element_gens.len());
 
         assert!(element_gens.len() > 0);
+        assert!(element_gens.first().unwrap().1.start == 0);
         for i in 1..element_gens.len() {
             assert!(element_gens[i-1].1.end == element_gens[i].1.start);
         }
