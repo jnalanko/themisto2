@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::BufWriter;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
@@ -12,7 +13,7 @@ use bitvec::bitvec;
 
 use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::{AtomicCompactIntVec, CompactIntVec};
-use crate::coloring_interface::{ColorSetOwned, ColorSetView};
+use crate::coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView};
 use crate::iterators::{USizeIterator, USizeIteratorGenerator};
 use crate::set_of_sets_construction;
 
@@ -681,7 +682,10 @@ impl SparseDenseStorage {
 
 
     fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
-        todo!();
+        // For now, for testing, let's just serialize
+        let filename = format!("temp/{}-{}.sds", color_id_range.start, color_id_range.end);
+        let mut out = BufWriter::new(File::create(&filename).unwrap());
+        piece.serialize(&mut out);
     }
 
 }
