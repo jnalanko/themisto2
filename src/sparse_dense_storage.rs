@@ -632,8 +632,72 @@ impl SparseDenseStorage {
         log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
         let file_raw_data_start_offset: usize = 8*3;
 
-        ...
+        let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
+        let max_n_bits_in_buf = max_n_sets_in_buf * n_colors;
+        let mut buf_bitmap = BitMaps::new_with_zero_init(n_colors, max_n_sets_in_buf);
 
+        let mut file_offset = file_raw_data_start_offset;
+
+        // Read raw data from disk and put to buf_compact_int_vec
+        let mut buf_words: Vec<usize> = vec![0; max_n_bits_in_buf / 64]; 
+        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut buf_words);
+        dense_file.read_exact(buf_bytes).unwrap();
+        let mut real_bytes_in_buf = buf_bytes.len();
+
+        let mut n_bits_in_past_buffers = 0_usize;
+        for (dense_id, color_set_id) in piece.is_dense_marks.one_iter() {
+            let set_view = piece.get_set_view(color_set_id);
+            let bit_slice = match set_view {
+                SparseDenseColorSetView::Dense(bit_slice) => bit_slice,
+                SparseDenseColorSetView::Sparse(_) => panic!("Expected dense set, got sparse"),
+            };
+            assert!(bit_slice.len() == color_id_range.len());
+            let start_bit = dense_id*n_colors - n_bits_in_past_buffers;
+            while start_bit > max_n_bits_in_buf {
+                // TODO: Write buffer and load more bits
+            }
+            let target_set = buf_bitmap.get_mut(dense_id);
+            let target_range = &target_set[color_id_range];
+            assert!(target_range.count_ones() == 0); // Must not have been set before
+            target_range = bit_slice;
+
+            /*
+            for color in piece.get_set_view(color_set_id).iter() { // TODO: this does an unnecessary rank.
+                let mut buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
+                while buf_insertion_point >= buf_cap_elements {
+                    let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
+                    let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
+
+                    sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+                    log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
+                    sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
+
+                    file_offset += buf_bytes.len();
+                    n_elements_in_past_buffers += buf_cap_elements;
+
+                    sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+                    assert!(n_elements_in_past_buffers*bit_width % 64 == 0);
+                    let words_remaining = data_n_words - n_elements_in_past_buffers*bit_width / 64; 
+                    let bytes_remaining = words_remaining * 8;
+                    let bytes_to_read = min(bytes_remaining, buf_bytes.len());
+                    log::warn!("Bytes remaining: {}", bytes_remaining);
+                    log::warn!("Reading bytes {}-{}", file_offset, file_offset + bytes_to_read);
+                    sparse_file.read_exact(&mut buf_bytes[0..bytes_to_read]).unwrap();
+                    real_bytes_in_buf = bytes_to_read;
+
+                    buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
+                }
+            }
+            */
+        }
+
+        // Remaining buffer
+        let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
+        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
+
+        sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+        log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
+        sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
     }
 
     fn write_sparse_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
