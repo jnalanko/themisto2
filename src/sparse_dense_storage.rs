@@ -346,8 +346,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let marks_filename = crate::util::append_to_filename(output_prefix, ".marks");
 
         let mut sparse_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(sparse_filename).unwrap();
-        let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
-        sparse_file.set_len((total_sparse_bits.next_multiple_of(8)/8) as u64).unwrap();
+        let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + (total_sparse_size*color_id_bit_width).next_multiple_of(64) + (n_sparse_sets + 1) * 64;
+        sparse_file.set_len((total_sparse_bits/8) as u64).unwrap();
         // Write metadata
         sparse_file.write_all(&((n_sparse_sets*color_id_bit_width.div_ceil(64)) as u64).to_le_bytes()).unwrap(); // data_n_words
         sparse_file.write_all(&(total_sparse_size as u64).to_le_bytes()).unwrap(); // data_n_elements
@@ -357,12 +357,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         sparse_file.rewind().unwrap();
 
         let mut dense_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dense_filename).unwrap();
-        let total_dense_bits: usize = 64 + 64 + 64 + n_dense_sets * n_colors;
-        dense_file.set_len((total_dense_bits.next_multiple_of(8)/8) as u64).unwrap();
+        let total_dense_bits: usize = 64 + 64 + 64 + (n_dense_sets * n_colors).next_multiple_of(64);
+        dense_file.set_len((total_dense_bits/8) as u64).unwrap();
 
         let mut marks_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(marks_filename).unwrap();
-        let total_marks_bits = 64 + 64 + is_dense_marks.len();
-        marks_file.set_len((total_marks_bits.next_multiple_of(8)/8) as u64).unwrap();
+        let total_marks_bits = 64 + 64 + is_dense_marks.len().next_multiple_of(64);
+        marks_file.set_len((total_marks_bits/8) as u64).unwrap();
 
         // Process each element generator one by one and write the data to the disk files
         // after processing each generator.
