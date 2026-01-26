@@ -329,24 +329,18 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             assert!(n_pieces != 0);
             let chunk_size = input_paths.len().div_ceil(n_pieces);
             if from_unitigs {
-                let mut gens = Vec::<(GenWithColorIdOffset<MsElementGenerator>, Range::<usize>)>::new();
+                let mut gens = Vec::<(MsElementGenerator, Range::<usize>)>::new();
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
-                    let gen = GenWithColorIdOffset {
-                        inner: MsElementGenerator::new(chunk.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only),
-                        offset: color_id_range.start
-                    };
+                    let gen = MsElementGenerator::new(chunk.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
                     gens.push((gen, color_id_range));
                 }
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             } else {
-                let mut gens = Vec::<(GenWithColorIdOffset<DeduplicatingColorElementGenerator>, Range::<usize>)>::new();
+                let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
-                    let gen = GenWithColorIdOffset {
-                        inner: DeduplicatingColorElementGenerator::new(&sbwt, &lcs, chunk.to_owned(), !forward_only),
-                        offset: color_id_range.start
-                    };
+                    let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, chunk.to_owned(), !forward_only);
                     gens.push((gen, color_id_range));
                 }
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);

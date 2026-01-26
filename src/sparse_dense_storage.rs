@@ -284,7 +284,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
     }
 
     fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self> {
-        Self::construct(element_gen, n_colors, set_sizes, None, n_threads) // No dense marks given
+
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        Self::construct(element_gen, color_id_bit_width, n_colors, set_sizes, None, n_threads) // No dense marks given
     }
 
     // The Range<usize> associates to each element generator gives the color id range of that generator
@@ -383,7 +385,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             // Here we need to clone the is_dense_marks because the SparseDenseStorage takes ownership of it. So we
             // have it in memory twice, which is not ideal. This could be avoid by returning the bit vector from
             // the storage at the end of Self::write_piece. TODO.
-            let piece = Self::construct(element_gen, n_colors, &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
+
+            let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+            let piece = Self::construct(element_gen, color_id_bit_width, n_colors, &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
 
             Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
         }
@@ -773,13 +777,11 @@ impl SparseDenseStorage {
     }
 
     // If given_dense_marks is given, uses those, otherwise decides itself which sets are dense and which are sparse
-    fn construct(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], given_dense_marks: Option<simple_sds_sbwt::bit_vector::BitVector>, n_threads: usize) -> Box<Self> {
+    fn construct(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, color_id_bit_width: usize, n_colors: usize, set_sizes: &[usize], given_dense_marks: Option<simple_sds_sbwt::bit_vector::BitVector>, n_threads: usize) -> Box<Self> {
 
         // TODO This function has a ton of repetition. Should clean this up
 
         log::info!("Encoding color sets");
-
-        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
 
         let is_dense_marks = match given_dense_marks {
             Some(marks) => marks,
