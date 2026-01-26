@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
@@ -630,7 +631,9 @@ impl SparseDenseStorage {
         }
 
         // Todo: shrink to fit dense marks
-        let sparse_set_insertion_points: Vec<usize> = vec![0; n_sparse_sets];
+
+        // Find out sparse set insertion points for adding the elements to them
+        let mut sparse_set_insertion_points: Vec<usize> = vec![0; n_sparse_sets];
         let mut n_sparse_sets_again = 0;
         let mut total_sparse_size = 0;
         for (i, size) in set_sizes.iter().enumerate() {
@@ -655,24 +658,30 @@ impl SparseDenseStorage {
         let dense_filename = crate::util::append_to_filename(output_prefix, ".dense");
         let marks_filename = crate::util::append_to_filename(output_prefix, ".marks");
 
-        let sparse_file = std::fs::File::create(sparse_filename).unwrap();
+        let mut sparse_file = std::fs::File::create(sparse_filename).unwrap();
         let total_sparse_bits = 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
         sparse_file.set_len(total_sparse_bits.next_multiple_of(8) as u64).unwrap();
 
-        let dense_file = std::fs::File::create(dense_filename).unwrap();
+        let mut dense_file = std::fs::File::create(dense_filename).unwrap();
         let total_dense_bits: usize = 64 + 64 + 64 + n_dense_sets * n_colors;
         dense_file.set_len(total_dense_bits.next_multiple_of(8) as u64).unwrap();
 
-        let marks_file = std::fs::File::create(marks_filename).unwrap();
+        let mut marks_file = std::fs::File::create(marks_filename).unwrap();
         let total_marks_bits = 64 + 64 + is_dense_marks.len();
         marks_file.set_len(total_marks_bits.next_multiple_of(8) as u64).unwrap();
 
-        for (element_gen, color_id_range) in element_gens {
+        // Process each element generator one by one and write the data to the disk files
+        // after processing each generator.
+        for (mut element_gen, color_id_range) in element_gens {
             let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, is_dense_marks.len(), n_threads);
             element_gen.rewind();
             let piece = <Self as crate::coloring_interface::ColorSetStorage>::new_parallel(element_gen, n_colors, &slice_set_sizes, n_threads);
-            Self::write_piece(piece, color_id_range, &mut sparse_file, &mut dense_file, sparse_write_pointers, n_threads);
+            Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
         }
+    }
+
+    fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+        todo!();
     }
 
 }
