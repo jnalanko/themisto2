@@ -611,7 +611,7 @@ impl SparseDenseStorage {
         for i in 1..element_gens.len() {
             assert!(element_gens[i-1].1.end == element_gens[i].1.start);
         }
-        let n_colors = element_gens.last().unwrap().len();
+        let n_colors = element_gens.last().unwrap().1.end;
 
         let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
         let mut is_dense_marks = simple_sds_sbwt::raw_vector::RawVector::new();
