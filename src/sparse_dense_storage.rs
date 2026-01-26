@@ -330,6 +330,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             } 
         }
         drop(set_sizes); // Free memory
+        log::warn!("Last insertion point byte offset: {}", sparse_set_insertion_points.last().unwrap() * color_id_bit_width / 8);
 
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
@@ -346,9 +347,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut sparse_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(sparse_filename).unwrap();
         let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + total_sparse_size*color_id_bit_width + (n_sparse_sets + 1) * 64;
-        sparse_file.set_len(total_sparse_bits.next_multiple_of(8) as u64).unwrap();
+        sparse_file.set_len((total_sparse_bits.next_multiple_of(8)/8) as u64).unwrap();
         // Write metadata
-        sparse_file.write_all(&((n_sparse_sets*color_id_bit_width) as u64).to_le_bytes()).unwrap(); // data_n_words
+        sparse_file.write_all(&((n_sparse_sets*color_id_bit_width.div_ceil(64)) as u64).to_le_bytes()).unwrap(); // data_n_words
         sparse_file.write_all(&(total_sparse_size as u64).to_le_bytes()).unwrap(); // data_n_elements
         sparse_file.write_all(&(color_id_bit_width as u64).to_le_bytes()).unwrap(); // bit_width
         sparse_file.write_all(&(n_colors as u64).to_le_bytes()).unwrap(); // n_colors
@@ -357,11 +358,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut dense_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dense_filename).unwrap();
         let total_dense_bits: usize = 64 + 64 + 64 + n_dense_sets * n_colors;
-        dense_file.set_len(total_dense_bits.next_multiple_of(8) as u64).unwrap();
+        dense_file.set_len((total_dense_bits.next_multiple_of(8)/8) as u64).unwrap();
 
         let mut marks_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(marks_filename).unwrap();
         let total_marks_bits = 64 + 64 + is_dense_marks.len();
-        marks_file.set_len(total_marks_bits.next_multiple_of(8) as u64).unwrap();
+        marks_file.set_len((total_marks_bits.next_multiple_of(8)/8) as u64).unwrap();
 
         // Process each element generator one by one and write the data to the disk files
         // after processing each generator.
@@ -626,7 +627,7 @@ impl SparseDenseStorage {
         // 64. This guarantees that the last word of the buffer is aligned with the
         // end of the bits of the last element. Unless it's the last buffer, but that's ok.
         log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
-        let max_buf_cap_elements = 100_000_usize.next_multiple_of(64);
+        let max_buf_cap_elements = 100_00_usize.next_multiple_of(64);
         let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
         let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
         let mut file_offset = file_raw_data_start_offset;
@@ -650,17 +651,18 @@ impl SparseDenseStorage {
                     sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
                     file_offset += buf_bytes.len();
+                    n_elements_in_past_buffers += buf_cap_elements;
 
                     sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
                     assert!(n_elements_in_past_buffers*bit_width % 64 == 0);
                     let words_remaining = data_n_words - n_elements_in_past_buffers*bit_width / 64; 
                     let bytes_remaining = words_remaining * 8;
                     let bytes_to_read = min(bytes_remaining, buf_bytes.len());
+                    log::warn!("Bytes remaining: {}", bytes_remaining);
                     log::warn!("Reading bytes {}-{}", file_offset, file_offset + bytes_to_read);
                     sparse_file.read_exact(&mut buf_bytes[0..bytes_to_read]).unwrap();
                     real_bytes_in_buf = bytes_to_read;
 
-                    n_elements_in_past_buffers += max_buf_cap_elements;
                     buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
                 }
                 //log::warn!("Insert at {}", buf_insertion_point);
