@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Range, path::PathBuf};
+use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
@@ -9,7 +9,7 @@ use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSe
 pub struct MsElementGenerator<'a> {
     input_files: Vec<PathBuf>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
+    filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
 }
 
@@ -73,7 +73,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
         });
     }
     
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
+    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
         self.filter = Some(filter);
     }
 
@@ -225,7 +225,7 @@ pub struct DeduplicatingColorElementGenerator<'a> {
     input_files: Vec<PathBuf>,
     sbwt: &'a SbwtIndex<SubsetMatrix>,
     lcs: &'a LcsArray,
-    filter: Option<simple_sds_sbwt::bit_vector::BitVector>,
+    filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
 }
 
@@ -265,8 +265,8 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
         });
     }
 
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-        self.filter = Some(filter)
+    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
+        self.filter = Some(filter.clone())
     }
 
     fn rewind(&mut self) {
@@ -279,7 +279,7 @@ pub struct ElementGeneratorFromMergeInterleaving<'a, CSS: ColorSetStorage + Sync
     pub coloring1: &'a CompactColexKmers<CSS>,
     pub coloring2: &'a CompactColexKmers<CSS>,
     pub merged_key_kmer_marks: &'a bitvec::vec::BitVec, // Only reporting set elements for these
-    pub filter: Option<simple_sds_sbwt::bit_vector::BitVector>, // With rank support
+    pub filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, // With rank support
 }
 
 struct ThreadInput {
@@ -363,8 +363,8 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
         bar.finish();
     }
 
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-        self.filter = Some(filter);
+    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
+        self.filter = Some(filter.clone());
     }
 
     fn rewind(&mut self) {

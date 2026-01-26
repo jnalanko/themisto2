@@ -171,8 +171,10 @@ impl crate::coloring_interface::ColorSetStorage for BitmapStorage {
     fn n_colors(&self) -> usize {
         self.n_colors
     }
-
     
+    fn new_parallel_to_disk(_element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, std::ops::Range<usize>)>, _set_sizes: Vec<usize>, _output_prefix: &std::path::Path, _n_threads: usize) {
+        unimplemented!()
+    }
 }
 
 /*

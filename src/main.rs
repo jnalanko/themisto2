@@ -727,7 +727,7 @@ fn main() -> std::process::ExitCode {
 
             if sbwt.k() != metadata.k {
                 log::error!("SBWT k does not match the index dump k ({} vs {})", sbwt.k(), metadata.k);
-                return;
+                return ExitCode::FAILURE;
             }
 
             let mut out = BufWriter::new(File::create(&out_path).unwrap());

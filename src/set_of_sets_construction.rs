@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, path::Path, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
+use std::{collections::HashMap, ops::Range, path::Path, sync::{Arc, atomic::{AtomicU64, Ordering::{Acquire, Release}}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
@@ -17,7 +17,9 @@ pub trait ParallelElementGenerator {
     // Takes a bit vector with rank support that indicates which sets should be passed
     // to the callback of run. The set ids will be remapped so that the first set that
     // passes the filter gets id 0, the second that passes the filter gets id 1, and so on.
-    fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector);
+    // It's Arc because if we have multiple generators, we need them to be able to share
+    // the filter.
+    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>);
 
     fn rewind(&mut self); // Rewind to the start for another run
 }
@@ -130,7 +132,7 @@ pub fn build_color_set_storage<CSS: ColorSetStorage + Send>(n_colors: usize, col
     let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
     colex_sample_marks.enable_rank();
 
-    gen.set_filter(colex_sample_marks);
+    gen.set_filter(Arc::new(colex_sample_marks));
 
     *CSS::new_parallel(gen, n_colors, &sampled_set_sizes, n_threads)
 }
@@ -141,8 +143,10 @@ pub fn build_color_set_storage_to_disk<CSS: ColorSetStorage + Send>(n_colors: us
     let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
     colex_sample_marks.enable_rank();
 
+    let colex_sample_marks = Arc::new(colex_sample_marks);
+
     for (gen, _) in element_gens.iter_mut() {
-        gen.set_filter(colex_sample_marks);
+        gen.set_filter(colex_sample_marks.clone());
     }
 
     CSS::new_parallel_to_disk(element_gens, sampled_set_sizes, out_prefix, n_threads);
@@ -202,8 +206,8 @@ mod tests{
             }
         }
 
-        fn set_filter(&mut self, filter: simple_sds_sbwt::bit_vector::BitVector) {
-            self.filter = Some(filter);
+        fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
+            self.filter = Some((*filter).clone());
         }
 
         fn rewind(&mut self) {
