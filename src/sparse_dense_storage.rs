@@ -379,6 +379,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             // have it in memory twice, which is not ideal. This could be avoid by returning the bit vector from
             // the storage at the end of Self::write_piece. TODO.
             let piece = Self::construct(element_gen, n_colors, &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
+
             Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
         }
     }
@@ -607,6 +608,8 @@ impl SparseDenseStorage {
         // Write sparse sets.
         // File format copied from above:
         // * A file for sparse sets: `[data_n_words: usize][data_n_elements: usize][bit_width: usize][n_colors: usize][n_sets: usize][data][starts]`
+
+        sparse_file.rewind();
 
         // Read metadata
         let mut metadata = [0u64; 5];
