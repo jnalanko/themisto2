@@ -629,16 +629,16 @@ impl SparseDenseStorage {
         dense_file.read_exact(bytemuck::cast_slice_mut(&mut metadata)).unwrap();
         let data_n_words = metadata[0] as usize;
         let total_bitvec_len = metadata[1] as usize;
-        let n_colors = metadata[2] as usize;
+        let total_n_colors = metadata[2] as usize;
 
-        let individual_bitvec_len = n_colors;
+        let individual_bitvec_len = color_id_range.len();
 
         log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
         let file_raw_data_start_offset: usize = 8*3;
 
         let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
-        let max_n_bits_in_buf = max_n_sets_in_buf * n_colors;
-        let mut buf_bitmap = BitMaps::new_with_zero_init(n_colors, max_n_sets_in_buf);
+        let max_n_bits_in_buf = max_n_sets_in_buf * individual_bitvec_len;
+        let mut buf_bitmap = BitMaps::new_with_zero_init(individual_bitvec_len, max_n_sets_in_buf);
         // ^ todo: min(...) in case the whole data is smaller than the buffer
 
         let mut file_offset = file_raw_data_start_offset;
