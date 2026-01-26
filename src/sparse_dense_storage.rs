@@ -625,7 +625,8 @@ impl SparseDenseStorage {
         // We want a buffer that can hold a number of elements m such that m*bit_width is a multiple of
         // 64. This guarantees that the last word of the buffer is aligned with the
         // end of the bits of the last element. Unless it's the last buffer, but that's ok.
-        let max_buf_cap_elements = 1_000_000_usize.next_multiple_of(64);
+        log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
+        let max_buf_cap_elements = 1_000_usize.next_multiple_of(64);
         let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
         let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
         let mut file_offset = file_raw_data_start_offset;
@@ -645,7 +646,7 @@ impl SparseDenseStorage {
                     let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
                     sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-                    log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
+                    log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
                     sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
                     file_offset += buf_bytes.len();
