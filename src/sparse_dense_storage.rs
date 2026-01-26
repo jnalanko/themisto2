@@ -660,6 +660,7 @@ impl SparseDenseStorage {
 
                     n_elements_in_past_buffers += max_buf_cap_elements;
                 }
+                assert!(buf_compact_int_vec.get(buf_insertion_point) == 0); // This must not have been written yet
                 buf_compact_int_vec.set(buf_insertion_point, color);
                 sparse_set_insertion_points[sparse_id] += 1;
             }
