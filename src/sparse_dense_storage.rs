@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
@@ -603,7 +604,7 @@ impl SparseDenseStorage {
     }
 
     // The Range<usize> associates to each element generator gives the color id range of that generator
-    fn new_parallel_to_disk(mut element_gens: Vec<impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>>, set_sizes: &[usize], output_prefix: &Path, n_threads: usize) {
+    fn new_parallel_to_disk(mut element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &Path, n_threads: usize) {
         log::info!("Encoding color sets to disk in {} pieces", element_gens.len());
 
         assert!(element_gens.len() > 0);
@@ -618,7 +619,7 @@ impl SparseDenseStorage {
         let mut n_dense_sets = 0;
         let mut n_sparse_sets = 0;
         let mut total_sparse_size = 0;
-        for &size in set_sizes.iter() {
+        for size in set_sizes { // This takes ownership so set_sizes is free after this
             if is_dense_formula(size, color_id_bit_width, n_colors) {
                 is_dense_marks.push_bit(true);
                 n_dense_sets += 1;
@@ -656,9 +657,9 @@ impl SparseDenseStorage {
         marks_file.set_len(total_marks_bits.next_multiple_of(8) as u64).unwrap();
 
         for (element_gen, color_id_range) in element_gens {
-            let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes(&mut element_gen, max_color_set_id_plus_1, n_threads);
+            let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, is_dense_marks.len(), n_threads);
             element_gen.rewind();
-            let piece = <Self as crate::coloring_interface::ColorSetStorage>::new_parallel(element_gen, n_colors, slice_set_sizes, n_threads);
+            let piece = <Self as crate::coloring_interface::ColorSetStorage>::new_parallel(element_gen, n_colors, &slice_set_sizes, n_threads);
             Self::write_piece(piece, color_id_range, &mut sparse_file, &mut dense_file, sparse_write_pointers, n_threads);
         }
     }
