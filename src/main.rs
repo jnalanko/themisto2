@@ -335,7 +335,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
                     gens.push((gen, color_id_range));
                 }
-                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(n_colors, repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
+                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             } else {
                 let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
@@ -343,7 +343,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
                     gens.push((gen, color_id_range));
                 }
-                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(n_colors, repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
+                set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             };
             return None;
         },

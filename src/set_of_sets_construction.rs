@@ -139,7 +139,7 @@ pub fn build_color_set_storage<CSS: ColorSetStorage + Send>(n_colors: usize, col
 
 // The generator must not provide duplicate elements! Otherwise the final data structure will be corrupted because
 // the sampled_set_sizes is not correct.
-pub fn build_color_set_storage_to_disk<CSS: ColorSetStorage + Send>(n_colors: usize, colex_sample_marks: bitvec::vec::BitVec, sampled_set_sizes: Vec<usize>, mut element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, out_prefix: &Path, n_threads: usize) {
+pub fn build_color_set_storage_to_disk<CSS: ColorSetStorage + Send>(colex_sample_marks: bitvec::vec::BitVec, sampled_set_sizes: Vec<usize>, mut element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, out_prefix: &Path, n_threads: usize) {
     let mut colex_sample_marks = crate::util::bitvec_to_simple_sds_bitvec(colex_sample_marks);
     colex_sample_marks.enable_rank();
 
