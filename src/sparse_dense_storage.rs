@@ -640,7 +640,7 @@ impl SparseDenseStorage {
         let mut file_offset = file_raw_data_start_offset;
 
         // Read raw data from disk and put to a bitmap
-        let buf_bytes: &[u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
+        let mut buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
         dense_file.read_exact(&mut buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
 
@@ -652,11 +652,11 @@ impl SparseDenseStorage {
                 SparseDenseColorSetView::Sparse(_) => panic!("Expected dense set, got sparse"),
             };
             assert!(bit_slice.len() == color_id_range.len());
-            let start_bit = dense_id*n_colors - n_bits_in_past_buffers;
+            let mut start_bit = dense_id*n_colors - n_bits_in_past_buffers;
             while start_bit > max_n_bits_in_buf {
                 let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
                 let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
-                dense_file.seek(std::io::SeekFrom::Start(file_offset as u64));
+                dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
                 log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
                 dense_file.write_all(&raw_bytes[0..real_bytes_in_buf]).unwrap();
                 file_offset += real_bytes_in_buf;
@@ -671,9 +671,10 @@ impl SparseDenseStorage {
                 log::warn!("Reading bytes {}-{}", file_offset, file_offset + bytes_to_read);
                 dense_file.read_exact(&mut raw_bytes[0..bytes_to_read]).unwrap();
                 real_bytes_in_buf = bytes_to_read;
+                start_bit -= max_n_bits_in_buf;
             }
             let target_set = buf_bitmap.get_mut(dense_id);
-            let target_range = &mut target_set[color_id_range];
+            let target_range = &mut target_set[color_id_range.clone()];
             assert!(target_range.count_ones() == 0); // Must not have been set before
             target_range.copy_from_bitslice(bit_slice);
         }
