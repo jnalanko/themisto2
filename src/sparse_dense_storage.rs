@@ -682,7 +682,7 @@ impl SparseDenseStorage {
         // Remaining buffer
         let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
         let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
-        dense_file.seek(std::io::SeekFrom::Start(file_offset as u64));
+        dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
         log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
         dense_file.write_all(&raw_bytes[0..real_bytes_in_buf]).unwrap();
     }
