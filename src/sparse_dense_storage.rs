@@ -635,13 +635,13 @@ impl SparseDenseStorage {
         let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
         let max_n_bits_in_buf = max_n_sets_in_buf * n_colors;
         let mut buf_bitmap = BitMaps::new_with_zero_init(n_colors, max_n_sets_in_buf);
+        // ^ todo: min(...) in case the whole data is smaller than the buffer
 
         let mut file_offset = file_raw_data_start_offset;
 
-        // Read raw data from disk and put to buf_compact_int_vec
-        let mut buf_words: Vec<usize> = vec![0; max_n_bits_in_buf / 64]; 
-        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut buf_words);
-        dense_file.read_exact(buf_bytes).unwrap();
+        // Read raw data from disk and put to a bitmap
+        let buf_bytes: &[u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
+        dense_file.read_exact(&mut buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
 
         let mut n_bits_in_past_buffers = 0_usize;
@@ -654,7 +654,10 @@ impl SparseDenseStorage {
             assert!(bit_slice.len() == color_id_range.len());
             let start_bit = dense_id*n_colors - n_bits_in_past_buffers;
             while start_bit > max_n_bits_in_buf {
-                // TODO: Write buffer and load more bits
+                let raw_data = buf_bitmap.bitmap_data.as_raw_slice();
+                let raw_bytes: &[u8] = bytemuck::cast_slice(raw_data);
+                dense_file.seek(std::io::SeekFrom::Start(file_offset as u64));
+                log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
             }
             let target_set = buf_bitmap.get_mut(dense_id);
             let target_range = &target_set[color_id_range];
