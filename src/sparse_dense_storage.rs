@@ -675,8 +675,11 @@ impl SparseDenseStorage {
                 real_bytes_in_buf = bytes_to_read;
                 start_bit -= max_n_bits_in_buf;
             }
-            let target_set = buf_bitmap.get_mut(dense_id);
+            log::warn!("{} {:?}", dense_id, color_id_range.clone());
+            let target_set = buf_bitmap.get_mut(start_bit / total_n_colors);
+            log::warn!("Here 1");
             let target_range = &mut target_set[color_id_range.clone()];
+            log::warn!("Here 2");
             assert!(target_range.count_ones() == 0); // Must not have been set before
             target_range.copy_from_bitslice(piece_bit_slice);
         }
