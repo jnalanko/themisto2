@@ -619,18 +619,28 @@ impl SparseDenseStorage {
 
         let mut n_dense_sets = 0;
         let mut n_sparse_sets = 0;
-        let mut total_sparse_size = 0;
-        for size in set_sizes { // This takes ownership so set_sizes is free after this
+        for size in set_sizes.iter() {
             if is_dense_formula(size, color_id_bit_width, n_colors) {
                 is_dense_marks.push_bit(true);
                 n_dense_sets += 1;
-            } else {
+            } else { // Sparse
                 is_dense_marks.push_bit(false);
                 n_sparse_sets += 1;
-                total_sparse_size += size;
             }
         }
+
         // Todo: shrink to fit dense marks
+        let sparse_set_insertion_points: Vec<usize> = vec![0; n_sparse_sets];
+        let mut n_sparse_sets_again = 0;
+        let mut total_sparse_size = 0;
+        for (i, size) in set_sizes.iter().enumerate() {
+            if !is_dense_marks.bit(i) {
+                sparse_set_insertion_points[n_sparse_sets_again] = total_sparse_size;
+                total_sparse_size += size;
+                n_sparse_sets_again += 1;
+            } 
+        }
+        drop(set_sizes); // Free memory
 
         dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
