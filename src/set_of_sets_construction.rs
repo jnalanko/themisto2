@@ -24,6 +24,29 @@ pub trait ParallelElementGenerator {
     fn rewind(&mut self); // Rewind to the start for another run
 }
 
+
+// A generator the wraps a generator and adds an offset to all color ids
+pub struct GenWithColorIdOffset<ParallelElementGenerator> {
+    pub inner: ParallelElementGenerator,
+    pub offset: usize,
+}
+
+impl<T: ParallelElementGenerator> ParallelElementGenerator for GenWithColorIdOffset<T> {
+    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
+        self.inner.run(|x| {
+            callback(SetElement { set_id: x.set_id, color: x.color + self.offset});
+        }, n_threads);
+    }
+
+    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
+        self.inner.set_filter(filter);
+    }
+
+    fn rewind(&mut self) {
+        self.inner.rewind();
+    }
+}
+
 /// Takes a generator of SetElement structs with set_id in 0..max_n_sets and element in 0..max_n_elements.
 /// There must not be duplicate elements in the same set! The callback only has to return ids for
 /// sets that are marked in the key_kmer_marks bitvector.

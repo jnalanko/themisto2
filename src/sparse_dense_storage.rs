@@ -302,8 +302,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         let mut n_dense_sets = 0;
         let mut n_sparse_sets = 0;
+        log::warn!("USING SPARSE-DENSE FORMULA WITHOUT OVERHEAD TERM"); // Testing purposes. Otherwise all sets tend to be dense in small inputs.
         for size in set_sizes.iter() {
-            if is_dense_formula(size, color_id_bit_width, n_colors) {
+            if is_dense_formula_without_overhead(size, color_id_bit_width, n_colors) {
                 is_dense_marks.push_bit(true);
                 n_dense_sets += 1;
             } else { // Sparse
@@ -359,6 +360,11 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let N = is_dense_marks.len();
         for (mut element_gen, color_id_range) in element_gens {
             let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, N, n_threads);
+            print!("Sizes");
+            for i in 0..20 {
+                print!(" {}", slice_set_sizes[i]);
+            }
+            println!();
             element_gen.rewind();
 
             // Here we need to clone the is_dense_marks because the SparseDenseStorage takes ownership of it. So we
@@ -534,6 +540,17 @@ fn is_dense_formula(n_elements: usize, sparse_bit_width: usize, n_colors: usize)
     bitmap_size <= intvec_size
 }
 
+// Formula without the 64-bit overhead for the offset of the sets in the sparse concatenation
+fn is_dense_formula_without_overhead(n_elements: usize, sparse_bit_width: usize, n_colors: usize) -> bool {
+
+    let intvec_size = n_elements * sparse_bit_width;
+
+    // One bit per color
+    let bitmap_size = n_colors;
+
+    bitmap_size <= intvec_size
+}
+
 impl SparseDenseStorage {
 
     pub fn get(&self, id: usize) -> SparseDenseColorSetView<'_> {
@@ -579,6 +596,13 @@ impl SparseDenseStorage {
 
 
     fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+        // Testing...
+        for i in 0..20 {
+            for color in piece.get(i).iter() {
+                print!("{} ", color);
+            }
+            println!();
+        }
         // For now, for testing, let's just serialize
         let filename = format!("temp/{}-{}.sds", color_id_range.start, color_id_range.end);
         let mut out = BufWriter::new(File::create(&filename).unwrap());
