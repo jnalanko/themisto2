@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::ops::Range;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
 
@@ -310,6 +311,8 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
                 n_sparse_sets += 1;
             }
         }
+        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+        is_dense_marks.enable_rank();
 
         // Todo: shrink to fit dense marks
 
@@ -318,7 +321,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut n_sparse_sets_again = 0;
         let mut total_sparse_size = 0;
         for (i, size) in set_sizes.iter().enumerate() {
-            if !is_dense_marks.bit(i) {
+            if !is_dense_marks.get(i) {
                 sparse_set_insertion_points[n_sparse_sets_again] = total_sparse_size;
                 total_sparse_size += size;
                 n_sparse_sets_again += 1;
@@ -353,10 +356,15 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
 
         // Process each element generator one by one and write the data to the disk files
         // after processing each generator.
+        let N = is_dense_marks.len();
         for (mut element_gen, color_id_range) in element_gens {
-            let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, is_dense_marks.len(), n_threads);
+            let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, N, n_threads);
             element_gen.rewind();
-            let piece = <Self as crate::coloring_interface::ColorSetStorage>::new_parallel(element_gen, n_colors, &slice_set_sizes, n_threads);
+
+            // Here we need to clone the is_dense_marks because the SparseDenseStorage takes ownership of it. So we
+            // have it in memory twice, which is not ideal. This could be avoid by returning the bit vector from
+            // the storage at the end of Self::write_piece. TODO.
+            let piece = Self::construct(element_gen, n_colors, &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
             Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
         }
     }
@@ -578,7 +586,7 @@ impl SparseDenseStorage {
     }
 
     // If given_dense_marks is given, uses those, otherwise decides itself which sets are dense and which are sparse
-    fn construct(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], given_dense_marks: Option<simple_sds_sbwt::raw_vector::RawVector>, n_threads: usize) -> Box<Self> {
+    fn construct(mut element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], given_dense_marks: Option<simple_sds_sbwt::bit_vector::BitVector>, n_threads: usize) -> Box<Self> {
 
         // TODO This function has a ton of repetition. Should clean this up
 
@@ -599,12 +607,12 @@ impl SparseDenseStorage {
                     }
                 }
                 // Todo: shrink to fit?
+                let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
+                is_dense_marks.enable_rank();
                 is_dense_marks
             },
         };
 
-        let mut is_dense_marks = simple_sds_sbwt::bit_vector::BitVector::from(is_dense_marks);
-        is_dense_marks.enable_rank();
 
         let mut total_sparse_size = 0;
         for (_, i) in is_dense_marks.zero_iter() {
