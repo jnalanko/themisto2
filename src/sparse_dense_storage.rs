@@ -387,7 +387,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             // the storage at the end of Self::write_piece. TODO.
 
             let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
-            let piece = Self::construct(element_gen, color_id_bit_width, n_colors, &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
+            let piece = Self::construct(element_gen, color_id_bit_width, color_id_range.len(), &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
 
             Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
         }
@@ -655,7 +655,7 @@ impl SparseDenseStorage {
                 SparseDenseColorSetView::Dense(bit_slice) => bit_slice,
                 SparseDenseColorSetView::Sparse(_) => panic!("Expected dense set, got sparse"),
             };
-            assert!(bit_slice.len() == color_id_range.len());
+            assert_eq!(bit_slice.len(), color_id_range.len());
             let mut start_bit = dense_id*n_colors - n_bits_in_past_buffers;
             while start_bit > max_n_bits_in_buf {
                 let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
