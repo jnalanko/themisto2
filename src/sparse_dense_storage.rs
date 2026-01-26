@@ -662,6 +662,14 @@ impl SparseDenseStorage {
             }
         }
 
+        // Remaining buffer
+        let buf_words: &mut [u64] = buf_compact_int_vec.get_mut_raw_data();
+        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
+
+        sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
+        log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
+        sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
+
         /*
         // Testing...
         for i in 0..20 {
