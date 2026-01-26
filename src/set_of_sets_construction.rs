@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
+use std::{collections::HashMap, ops::Range, sync::atomic::{AtomicU64, Ordering::{Acquire, Release}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
@@ -132,6 +132,22 @@ pub fn build_color_set_storage<CSS: ColorSetStorage + Send>(n_colors: usize, col
     gen.set_filter(colex_sample_marks);
 
     *CSS::new_parallel(gen, n_colors, &sampled_set_sizes, n_threads)
+}
+
+pub fn compute_set_sizes_assuming_no_duplicate_elements(element_gen: &mut impl ParallelElementGenerator, n_set_ids: usize, n_threads: usize) -> Vec<usize> {
+    let mut sizes = Vec::<AtomicU64>::new(); // TODO: could be U32?
+    sizes.resize_with(n_set_ids, || AtomicU64::new(0));
+
+    let callback = |e: SetElement| {
+        sizes[e.set_id].fetch_add(1, Release);
+    };
+
+    element_gen.run(callback, n_threads);
+
+    let sizes = sizes.into_iter().map(
+        |x| x.load(Acquire) as usize
+    ).collect();
+    sizes
 }
 
 #[cfg(test)]
