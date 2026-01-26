@@ -6,7 +6,7 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
-use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, time::Instant};
+use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, time::Instant};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
@@ -81,7 +81,7 @@ pub enum Subcommands {
         #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
         lcs_path: Option<PathBuf>,
 
-        #[arg(help = "Output filename", short, long, required = true)]
+        #[arg(help = "Output filename. If --to-disk-in-pieces is given, this is interpreted as a filename prefix.", short, long, required = true)]
         output: PathBuf,
 
         #[arg(help = "Optional: Build from unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", short, long)]
@@ -102,8 +102,8 @@ pub enum Subcommands {
         #[arg(long = "index-type")]
         index_type: ColoringType,
 
-        #[arg(long = "in-pieces", default_value = "1", help = "Build the final sets in this many pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once")]
-        n_pieces: usize,
+        #[arg(long = "to-disk-in-pieces", help = "Build the final sets in pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once.")]
+        n_pieces: Option<usize>,
 
         // Hidden because index import and export assume that reverse complements are indexed.
         // The main purpose for this flag currently is to build the index for
@@ -614,7 +614,7 @@ fn into_metric_list(report_hit_counts: bool, report_bases_covered: bool) -> Vec<
     metrics
 }
 
-fn main() {
+fn main() -> std::process::ExitCode {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
@@ -630,20 +630,42 @@ fn main() {
 
             let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
-            let mut out = BufWriter::new(File::create(&output).unwrap());
+
+            // Check that the output file can be created
+            let out_test = File::create(&output).unwrap();
+            std::fs::remove_file(&output).unwrap();
 
             let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, forward_only, n_threads);
 
             match index_type {
                 ColoringType::Bitmaps => {
-                    let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, n_pieces);
-                    log::info!("Serializing bitmap index to {}", output.display());
-                    write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
+                    match n_pieces {
+                        None => {
+                            let mut out = BufWriter::new(File::create(&output).unwrap());
+                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = index.unwrap(); // Ok because we passed in InMemory
+                            log::info!("Serializing bitmap index to {}", output.display());
+                            write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
+                        },
+                        Some(_) => {
+                            eprintln!("Error: direct construction to disk not implemented for BitmapStorage");
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 },
                 ColoringType::SparseDense => {
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, n_pieces);
-                    log::info!("Serializing sparse-dense index to {}", output.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+                    match n_pieces {
+                        None => {
+                            let mut out = BufWriter::new(File::create(&output).unwrap());
+                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = index.unwrap(); // Ok because we passed in InMemory
+                            log::info!("Serializing sparse-dense index to {}", output.display());
+                            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+                        },
+                        Some(n_pieces) => {
+                            build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
+                        }
+                    }
                 },
             }
 
@@ -764,4 +786,6 @@ fn main() {
             };
         },
     }
+
+    ExitCode::SUCCESS
 }
