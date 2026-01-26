@@ -639,6 +639,11 @@ impl SparseDenseStorage {
         let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
         sparse_file.read_exact(buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
+
+        for i in 0..100 {
+            print!("{} ", buf_compact_int_vec.get(i));
+        }
+        println!();
         
         let mut n_elements_in_past_buffers = 0_usize;
         for (sparse_id, color_set_id) in piece.is_dense_marks.zero_iter() {
