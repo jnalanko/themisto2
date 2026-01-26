@@ -761,7 +761,7 @@ impl SparseDenseStorage {
                 }
                 //log::warn!("Insert at {}", buf_insertion_point);
                 assert!(buf_compact_int_vec.get(buf_insertion_point) == 0); // This must not have been written yet
-                buf_compact_int_vec.set(buf_insertion_point, color);
+                buf_compact_int_vec.set(buf_insertion_point, color + color_id_range.start);
                 sparse_set_insertion_points[sparse_id] += 1;
             }
         }
