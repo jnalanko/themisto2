@@ -4,6 +4,28 @@ mod int_vec;
 
 use std::{fs::File, io::{BufReader, Read}, path::Path};
 
+// A set of sets encoded as bitmaps.
+#[derive(Clone, Debug)]
+struct BitMaps {
+    raw_data: Vec<u64>,
+    n_colors: usize,
+}
+
+impl BitMaps {
+    fn get_set(&self, set_id: usize) -> Vec<usize> {
+        let start_bit = set_id * self.n_colors;
+        let mut set = vec![];
+        for color in 0..self.n_colors {
+            let word = (start_bit+color) / 64;
+            let off = (start_bit+color) % 64;
+            if ((self.raw_data[word] >> off) & 1) == 1 {
+                set.push(color);
+            }
+        }
+        set
+    }
+}
+
 fn parse_sparse_file(filename: impl AsRef<Path>) {
     let mut file = BufReader::new(File::open(filename).unwrap());
 
@@ -35,6 +57,7 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
     file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
 
     let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
+
     for set_id in 0..n_sets {
         print!("{}:", set_id);
         for i in starts[set_id]..starts[set_id+1] {
@@ -67,15 +90,17 @@ fn parse_dense_file(filename: impl AsRef<Path>) {
 
     assert!(n_bits % n_colors == 0);
     let n_sets = n_bits / n_colors;
+
+    let bitmaps = BitMaps {
+        raw_data,
+        n_colors,
+    };
+
     for set_id in 0..n_sets {
         print!("{}:", set_id);
-        let start_bit = set_id * n_colors;
-        for color in 0..n_colors {
-            let word = (start_bit+color) / 64;
-            let off = (start_bit+color) % 64;
-            if ((raw_data[word] >> off) & 1) == 1 {
-                print!(" {}", color); 
-            }
+        let set = bitmaps.get_set(set_id);
+        for color in set {
+            print!(" {}", color);
         }
         println!();
     }
@@ -108,4 +133,5 @@ fn main() {
     marks_filename.push_str(".marks");
 
     parse_sparse_file(sparse_filename);
+    parse_dense_file(dense_filename);
 }
