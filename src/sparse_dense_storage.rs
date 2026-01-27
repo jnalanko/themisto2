@@ -387,11 +387,6 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let N = is_dense_marks.len();
         for (mut element_gen, color_id_range) in element_gens {
             let slice_set_sizes: Vec<usize> = set_of_sets_construction::compute_set_sizes_assuming_no_duplicate_elements(&mut element_gen, N, n_threads);
-            print!("Sizes");
-            for i in 0..20 {
-                print!(" {}", slice_set_sizes[i]);
-            }
-            println!();
             element_gen.rewind();
 
             // Here we need to clone the is_dense_marks because the SparseDenseStorage takes ownership of it. So we
