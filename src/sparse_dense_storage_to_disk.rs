@@ -11,20 +11,12 @@ struct BitMaps {
 }
 
 impl BitMaps {
-    fn new(individual_length: usize) -> Self {
-        BitMaps{bitmap_data: bitvec::vec::BitVec::new(), individual_length}
-    }
-
     fn new_with_zero_init(individual_length: usize, n_sets: usize) -> Self {
         BitMaps{bitmap_data: bitvec![0; n_sets*individual_length], individual_length}
     }
 
     fn get_mut(&mut self, bitmap_idx: usize) -> &mut BitSlice {
         &mut self.bitmap_data[bitmap_idx*self.individual_length .. (bitmap_idx + 1) * self.individual_length]
-    }
-
-    fn n_sets(&self) -> usize {
-        self.bitmap_data.len() / self.individual_length
     }
 }
 
