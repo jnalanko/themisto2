@@ -62,7 +62,6 @@ pub fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construct
         } 
     }
     drop(set_sizes); // Free memory
-    log::warn!("Last insertion point byte offset: {}", sparse_set_insertion_points.last().unwrap() * color_id_bit_width / 8);
 
     dbg!(&n_sparse_sets, &n_dense_sets, &color_id_bit_width, &n_colors);
 
