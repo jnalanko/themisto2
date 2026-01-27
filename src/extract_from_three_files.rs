@@ -191,11 +191,11 @@ fn main() {
     let mut sparse_id = 0_usize;
     for set_id in 0..is_dense_marks.len() {
         if is_dense_marks[set_id] {
-            println!("{} {:?}", set_id, sparse_sets.get_set(sparse_id));
-            sparse_id += 1;
-        } else {
             println!("{} {:?}", set_id, bitmaps.get_set(dense_id));
             dense_id += 1;
+        } else {
+            println!("{} {:?}", set_id, sparse_sets.get_set(sparse_id));
+            sparse_id += 1;
         }
     }
 
