@@ -5,6 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "extract_from_three_files"
+path = "src/extract_from_three_files.rs"
+
+[[bin]]
+name = "themisto2"
+path = "src/main.rs"
+
+
 [dependencies]
 
 statrs = "0.16"
