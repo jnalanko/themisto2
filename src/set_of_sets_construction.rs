@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, path::Path, sync::{Arc, atomic::{AtomicU64, Ordering::{Acquire, Release}}}};
+use std::{ops::Range, path::Path, sync::{Arc, atomic::{AtomicU64, Ordering::{Acquire, Release}}}};
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
@@ -26,6 +26,7 @@ pub trait ParallelElementGenerator {
 
 
 // A generator the wraps a generator and adds an offset to all color ids
+#[allow(dead_code)] // Could be useful in the future
 pub struct GenWithColorIdOffset<ParallelElementGenerator> {
     pub inner: ParallelElementGenerator,
     pub offset: usize,
@@ -185,10 +186,9 @@ pub fn compute_set_sizes_assuming_no_duplicate_elements(element_gen: &mut impl P
 
     element_gen.run(callback, n_threads);
 
-    let sizes = sizes.into_iter().map(
+    sizes.into_iter().map(
         |x| x.load(Acquire) as usize
-    ).collect();
-    sizes
+    ).collect()
 }
 
 #[cfg(test)]
