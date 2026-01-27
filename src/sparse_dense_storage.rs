@@ -1,14 +1,12 @@
 use std::cmp::min;
 use std::fs::File;
-use std::io::{BufWriter, ErrorKind, Read, Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::ops::Range;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
 
 use simple_sds_sbwt::ops::{Select, SelectZero};
-use simple_sds_sbwt::raw_vector::AccessRaw;
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::PushRaw};
 use bitvec::slice::BitSlice;
@@ -396,7 +394,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
             let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
             let piece = Self::construct(element_gen, color_id_bit_width, color_id_range.len(), &slice_set_sizes, Some(is_dense_marks.clone()), n_threads);
 
-            Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points, n_threads);
+            Self::write_piece(*piece, color_id_range, &mut sparse_file, &mut dense_file, &mut sparse_set_insertion_points);
         }
     }
 
@@ -620,12 +618,12 @@ impl SparseDenseStorage {
     }
 
 
-    fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
-        Self::write_sparse_sets_piece(&piece, color_id_range.clone(), sparse_file, sparse_set_insertion_points, n_threads);
-        Self::write_dense_sets_piece(&piece, color_id_range, dense_file, n_threads);
+    fn write_piece(piece: SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, dense_file: &mut File, sparse_set_insertion_points: &mut [usize]) {
+        Self::write_sparse_sets_piece(&piece, color_id_range.clone(), sparse_file, sparse_set_insertion_points);
+        Self::write_dense_sets_piece(&piece, color_id_range, dense_file);
     }
 
-    fn write_dense_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, dense_file: &mut File, n_threads: usize) {
+    fn write_dense_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, dense_file: &mut File) {
         dense_file.rewind().unwrap();
 
         // Copy-paste from above:
@@ -698,7 +696,7 @@ impl SparseDenseStorage {
         dense_file.write_all(&raw_bytes[0..real_bytes_in_buf]).unwrap();
     }
 
-    fn write_sparse_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, sparse_set_insertion_points: &mut [usize], n_threads: usize) {
+    fn write_sparse_sets_piece(piece: &SparseDenseStorage, color_id_range: Range<usize>, sparse_file: &mut File, sparse_set_insertion_points: &mut [usize]) {
 
         // Write sparse sets.
         // File format copied from above:
@@ -712,8 +710,8 @@ impl SparseDenseStorage {
         let data_n_words = metadata[0] as usize;
         let data_n_elements = metadata[1] as usize;
         let bit_width = metadata[2] as usize;
-        let n_colors = metadata[3] as usize;
-        let n_sets = metadata[4] as usize;
+        let _n_colors = metadata[3] as usize;
+        let _n_sets = metadata[4] as usize;
 
         log::warn!("Bytes in sparse data according to metadata: {}", data_n_words * 8);
 
@@ -723,7 +721,7 @@ impl SparseDenseStorage {
         // 64. This guarantees that the last word of the buffer is aligned with the
         // end of the bits of the last element. Unless it's the last buffer, but that's ok.
         //log::warn!("USING SMALL BUFFER FOR DEBUG PURPOSES");
-        let max_buf_cap_elements = 1000_000_usize.next_multiple_of(64);
+        let max_buf_cap_elements = 1_000_000_usize.next_multiple_of(64);
         let buf_cap_elements = min(max_buf_cap_elements, data_n_elements);
         let mut buf_compact_int_vec = CompactIntVec::new(buf_cap_elements, bit_width);
         let mut file_offset = file_raw_data_start_offset;

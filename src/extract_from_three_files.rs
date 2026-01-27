@@ -73,23 +73,11 @@ fn parse_sparse_file(filename: impl AsRef<Path>) -> SparseSets {
     file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
 
     let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
-    let sparse_sets = SparseSets {
+
+    SparseSets {
         concat,
         starts,
-    };
-
-    /*
-    for set_id in 0..n_sets {
-        print!("{}:", set_id);
-        let set = sparse_sets.get_set(set_id);
-        for color in set {
-            print!(" {}", color);
-        }
-        println!();
     }
-    */
-
-    sparse_sets
 }
 
 fn parse_dense_file(filename: impl AsRef<Path>) -> BitMaps {
@@ -115,23 +103,10 @@ fn parse_dense_file(filename: impl AsRef<Path>) -> BitMaps {
 
     assert!(n_bits % n_colors == 0);
 
-    let bitmaps = BitMaps {
+    BitMaps {
         raw_data,
         n_colors,
-    };
-
-    /*
-    for set_id in 0..n_sets {
-        print!("{}:", set_id);
-        let set = bitmaps.get_set(set_id);
-        for color in set {
-            print!(" {}", color);
-        }
-        println!();
     }
-    */
-
-    bitmaps
 
 }
 
