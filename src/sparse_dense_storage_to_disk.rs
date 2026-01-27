@@ -35,9 +35,9 @@ pub fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construct
 
     let mut n_dense_sets = 0;
     let mut n_sparse_sets = 0;
-    log::warn!("USING SPARSE-DENSE FORMULA WITHOUT OVERHEAD TERM"); // Testing purposes. Otherwise all sets tend to be dense in small inputs.
+    //log::warn!("USING SPARSE-DENSE FORMULA WITHOUT OVERHEAD TERM"); // Testing purposes. Otherwise all sets tend to be dense in small inputs.
     for size in set_sizes.iter() {
-        if crate::sparse_dense_storage::is_dense_formula_without_overhead(*size, color_id_bit_width, n_colors) {
+        if crate::sparse_dense_storage::is_dense_formula(*size, color_id_bit_width, n_colors) {
             is_dense_marks.push_bit(true);
             n_dense_sets += 1;
         } else { // Sparse
