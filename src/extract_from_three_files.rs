@@ -32,13 +32,8 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
     let mut starts: Vec<usize> = vec![0; n_sets+1];
     file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
 
-    for i in 0..20 {
-        eprintln!("Set {} starts at {}", i, starts[i]);
-    }
-    return;
-
     let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
-    for set_id in 0..data_n_elements {
+    for set_id in 0..n_sets {
         print!("{}", set_id);
         for i in starts[set_id]..starts[set_id+1] {
             print!(" {}", concat.get(i));
@@ -46,6 +41,9 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
         println!();
     }
 }
+
+// Metadata: data_n_words=4790, data_n_elements=51084, bit_width=6, n_colors=43, n_sets=10260
+
 
 fn main() {
     // CLI that takes an input file prefix
