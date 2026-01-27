@@ -38,6 +38,7 @@ mod util;
 mod merge;
 mod pseudoalignment;
 mod pseudoalignment_metrics;
+mod sparse_dense_storage_to_disk;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
