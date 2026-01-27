@@ -187,14 +187,21 @@ fn main() {
     let bitmaps = parse_dense_file(dense_filename);
     let is_dense_marks = parse_marks_file(marks_filename);
 
+    let print = |set_id: usize, set: &[usize]| {
+        print!("color_set_id={} size={}", set_id, set.len());
+        for c in set {
+            print!(" {}", c);
+        }
+        println!();
+    };
     let mut dense_id = 0_usize;
     let mut sparse_id = 0_usize;
     for set_id in 0..is_dense_marks.len() {
         if is_dense_marks[set_id] {
-            println!("{} {:?}", set_id, bitmaps.get_set(dense_id));
+            print(set_id, &bitmaps.get_set(dense_id));
             dense_id += 1;
         } else {
-            println!("{} {:?}", set_id, sparse_sets.get_set(sparse_id));
+            print(set_id, &sparse_sets.get_set(sparse_id));
             sparse_id += 1;
         }
     }
