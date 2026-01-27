@@ -378,6 +378,9 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let mut marks_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(marks_filename).unwrap();
         let total_marks_bits = 64 + 64 + is_dense_marks.len().next_multiple_of(64);
         marks_file.set_len((total_marks_bits/8) as u64).unwrap();
+        marks_file.write_all(&(is_dense_marks.len().div_ceil(64) as u64).to_le_bytes()).unwrap(); // data_n_words
+        marks_file.write_all(&(is_dense_marks.len() as u64).to_le_bytes()).unwrap(); // number of bits
+        marks_file.write_all(bytemuck::cast_slice(is_dense_marks.as_ref().get_words())).unwrap();
 
         // Process each element generator one by one and write the data to the disk files
         // after processing each generator.
