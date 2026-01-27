@@ -4,6 +4,8 @@ mod int_vec;
 
 use std::{fs::File, io::{BufReader, Read}, path::Path};
 
+use rand_chacha::rand_core::le;
+
 // A set of sets encoded as bitmaps.
 #[derive(Clone, Debug)]
 struct BitMaps {
@@ -21,6 +23,21 @@ impl BitMaps {
             if ((self.raw_data[word] >> off) & 1) == 1 {
                 set.push(color);
             }
+        }
+        set
+    }
+}
+
+struct SparseSets {
+    concat: int_vec::CompactIntVec,
+    starts: Vec<usize>,
+}
+
+impl SparseSets {
+    fn get_set(&self, set_id: usize) -> Vec<usize> {
+        let mut set = vec![];
+        for i in self.starts[set_id]..self.starts[set_id+1] {
+            set.push(self.concat.get(i));
         }
         set
     }
@@ -57,11 +74,16 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
     file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
 
     let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
+    let sparse_sets = SparseSets {
+        concat,
+        starts,
+    };
 
     for set_id in 0..n_sets {
         print!("{}:", set_id);
-        for i in starts[set_id]..starts[set_id+1] {
-            print!(" {}", concat.get(i));
+        let set = sparse_sets.get_set(set_id);
+        for color in set {
+            print!(" {}", color);
         }
         println!();
     }
