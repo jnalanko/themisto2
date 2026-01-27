@@ -638,18 +638,20 @@ impl SparseDenseStorage {
         let total_bitvec_len = metadata[1] as usize;
         let total_n_colors = metadata[2] as usize;
 
+        assert!(total_bitvec_len % total_n_colors == 0);
+        let total_n_sets = total_bitvec_len / total_n_colors;
+
         log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
         let file_raw_data_start_offset: usize = 8*3;
 
         let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
         let max_n_bits_in_buf = max_n_sets_in_buf * total_n_colors;
-        let mut buf_bitmap = BitMaps::new_with_zero_init(total_n_colors, max_n_sets_in_buf);
-        // ^ todo: min(...) in case the whole data is smaller than the buffer
+        let mut buf_bitmap = BitMaps::new_with_zero_init(total_n_colors, min(max_n_sets_in_buf, total_n_sets));
 
         let mut file_offset = file_raw_data_start_offset;
 
         // Read raw data from disk and put to a bitmap
-        let mut buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
+        let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_bitmap.bitmap_data.as_raw_mut_slice());
         dense_file.read_exact(buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
 
