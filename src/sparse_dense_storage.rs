@@ -287,7 +287,7 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         Self::construct(element_gen, color_id_bit_width, n_colors, set_sizes, None, n_threads) // No dense marks given
     }
 
-    // The Range<usize> associates to each element generator gives the color id range of that generator
+    // The Range<usize> associated to each element generator gives the color id range of that generator
     fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &Path, n_threads: usize) {
         log::info!("Encoding color sets to disk in {} pieces", element_gens.len());
 
@@ -662,6 +662,7 @@ impl SparseDenseStorage {
             assert_eq!(piece_bit_slice.len(), color_id_range.len());
             let mut start_bit = dense_id*total_n_colors - n_bits_in_past_buffers;
             while start_bit >= max_n_bits_in_buf {
+                // Write the current raw data back to disk, read the next chunk of raw data
                 let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
                 let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
                 dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
