@@ -26,7 +26,17 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
     let mut raw_data: Vec<u64> = vec![0; data_n_words];
     file.read_exact(bytemuck::cast_slice_mut(raw_data.as_mut_slice())).unwrap();
 
-    let mut concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
+    let mut starts: Vec<usize> = vec![0; n_sets+1];
+    file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
+
+    let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
+    for set_id in 0..data_n_elements {
+        print!("{}", set_id);
+        for i in starts[set_id]..starts[set_id+1] {
+            print!(" {}", concat.get(i));
+        }
+        println!();
+    }
 }
 
 fn main() {
