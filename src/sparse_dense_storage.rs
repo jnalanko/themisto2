@@ -639,7 +639,6 @@ impl SparseDenseStorage {
         assert!(total_bitvec_len % total_n_colors == 0);
         let total_n_sets = total_bitvec_len / total_n_colors;
 
-        log::warn!("Bytes in dense data according to metadata: {}", data_n_words * 8);
         let file_raw_data_start_offset: usize = 8*3;
 
         let max_n_sets_in_buf = 1000_usize.next_multiple_of(64);
@@ -666,7 +665,6 @@ impl SparseDenseStorage {
                 let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
                 let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
                 dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-                log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
                 dense_file.write_all(&raw_bytes[0..real_bytes_in_buf]).unwrap();
                 file_offset += real_bytes_in_buf;
                 n_bits_in_past_buffers += raw_bytes.len()*8;
@@ -676,8 +674,6 @@ impl SparseDenseStorage {
                 let words_remaining = data_n_words - n_bits_in_past_buffers / 64; 
                 let bytes_remaining = words_remaining * 8;
                 let bytes_to_read = min(bytes_remaining, raw_bytes.len());
-                log::warn!("Bytes remaining: {}", bytes_remaining);
-                log::warn!("Reading bytes {}-{}", file_offset, file_offset + bytes_to_read);
                 dense_file.read_exact(&mut raw_bytes[0..bytes_to_read]).unwrap();
                 real_bytes_in_buf = bytes_to_read;
                 start_bit -= max_n_bits_in_buf;
@@ -692,7 +688,6 @@ impl SparseDenseStorage {
         let raw_data = buf_bitmap.bitmap_data.as_raw_mut_slice();
         let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(raw_data);
         dense_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-        log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
         dense_file.write_all(&raw_bytes[0..real_bytes_in_buf]).unwrap();
     }
 
@@ -713,8 +708,6 @@ impl SparseDenseStorage {
         let _n_colors = metadata[3] as usize;
         let _n_sets = metadata[4] as usize;
 
-        log::warn!("Bytes in sparse data according to metadata: {}", data_n_words * 8);
-
         let file_raw_data_start_offset: usize = 8*5;
     
         // We want a buffer that can hold a number of elements m such that m*bit_width is a multiple of
@@ -731,11 +724,6 @@ impl SparseDenseStorage {
         let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
         sparse_file.read_exact(buf_bytes).unwrap();
         let mut real_bytes_in_buf = buf_bytes.len();
-
-        for i in 0..100 {
-            print!("{} ", buf_compact_int_vec.get(i));
-        }
-        println!();
         
         let mut n_elements_in_past_buffers = 0_usize;
         for (sparse_id, color_set_id) in piece.is_dense_marks.zero_iter() {
@@ -746,7 +734,6 @@ impl SparseDenseStorage {
                     let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
                     sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-                    log::warn!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
                     sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
                     file_offset += buf_bytes.len();
@@ -757,14 +744,11 @@ impl SparseDenseStorage {
                     let words_remaining = data_n_words - n_elements_in_past_buffers*bit_width / 64; 
                     let bytes_remaining = words_remaining * 8;
                     let bytes_to_read = min(bytes_remaining, buf_bytes.len());
-                    log::warn!("Bytes remaining: {}", bytes_remaining);
-                    log::warn!("Reading bytes {}-{}", file_offset, file_offset + bytes_to_read);
                     sparse_file.read_exact(&mut buf_bytes[0..bytes_to_read]).unwrap();
                     real_bytes_in_buf = bytes_to_read;
 
                     buf_insertion_point = sparse_set_insertion_points[sparse_id] - n_elements_in_past_buffers;
                 }
-                //log::warn!("Insert at {}", buf_insertion_point);
                 assert!(buf_compact_int_vec.get(buf_insertion_point) == 0); // This must not have been written yet
                 buf_compact_int_vec.set(buf_insertion_point, color + color_id_range.start);
                 sparse_set_insertion_points[sparse_id] += 1;
@@ -776,7 +760,6 @@ impl SparseDenseStorage {
         let buf_bytes: &mut [u8] = bytemuck::cast_slice_mut(buf_words);
 
         sparse_file.seek(std::io::SeekFrom::Start(file_offset as u64)).unwrap();
-        log::info!("Writing bytes {}-{}", file_offset, file_offset + real_bytes_in_buf);
         sparse_file.write_all(&buf_bytes[0..real_bytes_in_buf]).unwrap();
 
     }
