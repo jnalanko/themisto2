@@ -146,6 +146,11 @@ impl CompactIntVec {
         (self.data, self.len, self.bit_width)
     }
 
+    pub fn from_parts(data: Vec<u64>, len: usize, bit_width: usize) -> Self {
+        assert!(len*bit_width <= data.len()*64);
+        Self { data, len, bit_width }
+    }
+
     /// If new_len > current length, new elements are zero-initialized.
     /// If new_len < current length, the vector is truncated.
     pub fn resize(&mut self, new_len: usize) {
