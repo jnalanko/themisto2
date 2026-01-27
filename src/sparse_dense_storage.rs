@@ -348,7 +348,10 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         let marks_filename = crate::util::append_to_filename(output_prefix, ".marks");
 
         let mut sparse_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(sparse_filename).unwrap();
-        let total_sparse_bits = 64 + 64 + 64 + 64 + 64 + (total_sparse_size*color_id_bit_width).next_multiple_of(64) + (n_sparse_sets + 1) * 64;
+        let sparse_metadata_len = 64 + 64 + 64 + 64 + 64;
+        let sparse_concat_len = (total_sparse_size*color_id_bit_width).next_multiple_of(64);
+        let sparse_starts_len = (n_sparse_sets + 1) * 64;
+        let total_sparse_bits = sparse_metadata_len + sparse_concat_len + sparse_starts_len;
         sparse_file.set_len((total_sparse_bits/8) as u64).unwrap();
         // Write metadata
         sparse_file.write_all(&(((total_sparse_size*color_id_bit_width).div_ceil(64)) as u64).to_le_bytes()).unwrap(); // data_n_words
@@ -356,6 +359,12 @@ impl crate::coloring_interface::ColorSetStorage for SparseDenseStorage {
         sparse_file.write_all(&(color_id_bit_width as u64).to_le_bytes()).unwrap(); // bit_width
         sparse_file.write_all(&(n_colors as u64).to_le_bytes()).unwrap(); // n_colors
         sparse_file.write_all(&(n_sparse_sets as u64).to_le_bytes()).unwrap(); // n_sets
+
+        // Write set starts at the end.
+        sparse_file.seek(std::io::SeekFrom::Start((sparse_metadata_len + sparse_concat_len) as u64)).unwrap();
+        sparse_file.write_all(bytemuck::cast_slice(sparse_set_insertion_points.as_slice())).unwrap();
+        sparse_file.write_all(&(total_sparse_size as u64).to_le_bytes()).unwrap(); // The start of one-past-the-end
+
         sparse_file.rewind().unwrap();
 
         let mut dense_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(dense_filename).unwrap();
