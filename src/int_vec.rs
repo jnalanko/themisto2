@@ -43,6 +43,7 @@ impl CompactIntVec {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set(&mut self, i: usize, x: usize) {
         assert!(i < self.len);
         debug_assert!((x as u64) < (1_u64 << self.bit_width));
@@ -73,6 +74,7 @@ impl CompactIntVec {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_vec(v: Vec::<usize>) -> Self {
         let mut bit_width = if let Some(v_max) = v.iter().max() {
             (v_max+1).next_power_of_two().trailing_zeros()
@@ -90,7 +92,7 @@ impl CompactIntVec {
         ret
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::needless_range_loop)]
     pub fn to_vec(&self) -> Vec<usize> {
         let mut ret: Vec<usize> = vec![0; self.len];
         for i in 0..self.len {
@@ -99,6 +101,7 @@ impl CompactIntVec {
         ret 
     }
 
+    #[allow(dead_code)]
     pub fn from_atomic(other: AtomicCompactIntVec) -> Self {
         let len = other.len;
         let bit_width = other.bit_width;
@@ -106,6 +109,7 @@ impl CompactIntVec {
         Self{ data, len, bit_width }
     }
 
+    #[allow(dead_code)]
     pub fn serialize(&self, writer: &mut impl std::io::Write) {
         // Write length and bit width
         writer.write_all(&(self.len as u64).to_le_bytes()).unwrap();
@@ -115,6 +119,7 @@ impl CompactIntVec {
         bincode::serialize_into(writer, &self.data).unwrap();
     }
 
+    #[allow(dead_code)]
     pub fn load(reader: &mut impl std::io::Read) -> Self {
         let mut buf8 = [0_u8; 8];
 
@@ -133,10 +138,12 @@ impl CompactIntVec {
     }
 
     // Number of stored integers
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[allow(dead_code)]
     pub fn bit_width(&self) -> usize {
         self.bit_width
     }
@@ -146,6 +153,7 @@ impl CompactIntVec {
         (self.data, self.len, self.bit_width)
     }
 
+    #[allow(dead_code)]
     pub fn from_parts(data: Vec<u64>, len: usize, bit_width: usize) -> Self {
         assert!(len*bit_width <= data.len()*64);
         Self { data, len, bit_width }
@@ -153,12 +161,14 @@ impl CompactIntVec {
 
     /// If new_len > current length, new elements are zero-initialized.
     /// If new_len < current length, the vector is truncated.
+    #[allow(dead_code)]
     pub fn resize(&mut self, new_len: usize) {
         let new_n_words = (new_len * self.bit_width).div_ceil(64);
         self.data.resize(new_n_words, 0);
         self.len = new_len;
     }
 
+    #[allow(dead_code)]
     pub fn get_mut_raw_data(&mut self) -> &mut [u64] {
         &mut self.data
     }
@@ -229,6 +239,7 @@ impl AtomicCompactIntVec {
     /// the same value, then the result could be a mix of the two updates! This is
     /// atomic in the sense that modifying elements at nearby indices is ok even if
     /// they are in the same word.
+    #[allow(dead_code)]
     pub fn set(&self, i: usize, x: usize) {
         assert!(i < self.len);
         debug_assert!((x as u64) < (1_u64 << self.bit_width));
