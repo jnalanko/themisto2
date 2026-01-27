@@ -654,7 +654,7 @@ impl SparseDenseStorage {
 
         let mut n_bits_in_past_buffers = 0_usize;
         for (dense_id, color_set_id) in piece.is_dense_marks.one_iter() {
-            let set_view = piece.get_set_view(color_set_id);
+            let set_view = piece.get_set_view(color_set_id); // This implies a rank query, which is unnecessary since we're scanning the bit vector
             let piece_bit_slice = match set_view {
                 SparseDenseColorSetView::Dense(bit_slice) => bit_slice,
                 SparseDenseColorSetView::Sparse(_) => panic!("Expected dense set, got sparse"),
