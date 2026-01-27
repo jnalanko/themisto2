@@ -3,8 +3,7 @@
 mod int_vec;
 
 use std::{fs::File, io::{BufReader, Read}, path::Path};
-
-use rand_chacha::rand_core::le;
+use bitvec::prelude::*;
 
 // A set of sets encoded as bitmaps.
 #[derive(Clone, Debug)]
@@ -43,7 +42,7 @@ impl SparseSets {
     }
 }
 
-fn parse_sparse_file(filename: impl AsRef<Path>) {
+fn parse_sparse_file(filename: impl AsRef<Path>) -> SparseSets {
     let mut file = BufReader::new(File::open(filename).unwrap());
 
     let mut data_n_words = [0_u8; 8];
@@ -79,6 +78,7 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
         starts,
     };
 
+    /*
     for set_id in 0..n_sets {
         print!("{}:", set_id);
         let set = sparse_sets.get_set(set_id);
@@ -87,9 +87,12 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
         }
         println!();
     }
+    */
+
+    sparse_sets
 }
 
-fn parse_dense_file(filename: impl AsRef<Path>) {
+fn parse_dense_file(filename: impl AsRef<Path>) -> BitMaps {
     let mut file = BufReader::new(File::open(filename).unwrap());
 
     let mut data_n_words = [0_u8; 8];
@@ -111,13 +114,13 @@ fn parse_dense_file(filename: impl AsRef<Path>) {
     file.read_exact(bytemuck::cast_slice_mut(raw_data.as_mut_slice())).unwrap();
 
     assert!(n_bits % n_colors == 0);
-    let n_sets = n_bits / n_colors;
 
     let bitmaps = BitMaps {
         raw_data,
         n_colors,
     };
 
+    /*
     for set_id in 0..n_sets {
         print!("{}:", set_id);
         let set = bitmaps.get_set(set_id);
@@ -126,8 +129,34 @@ fn parse_dense_file(filename: impl AsRef<Path>) {
         }
         println!();
     }
+    */
 
+    bitmaps
 
+}
+
+fn parse_marks_file(filename: impl AsRef<Path>) -> BitVec<u64, Lsb0> {
+    let mut file = BufReader::new(File::open(filename).unwrap());
+
+    let mut n_words = [0_u8; 8];
+    let mut n_bits = [0_u8; 8];
+
+    file.read_exact(&mut n_words).unwrap();
+    file.read_exact(&mut n_bits).unwrap();
+
+    let n_words = usize::from_le_bytes(n_words);
+    let n_bits = usize::from_le_bytes(n_bits);
+
+    eprintln!("Marks metadata: n_words={}, n_bits={}",
+        n_words, n_bits);
+
+    let mut raw_data: Vec<u64> = vec![0; n_words];
+    file.read_exact(bytemuck::cast_slice_mut(raw_data.as_mut_slice())).unwrap();
+
+    // Load marks into bitvec
+    let mut bits: BitVec<u64, Lsb0> = BitVec::from_vec(raw_data);
+    bits.truncate(n_bits);
+    bits
 }
 
 // Metadata: data_n_words=4790, data_n_elements=51084, bit_width=6, n_colors=43, n_sets=10260
@@ -154,6 +183,20 @@ fn main() {
     let mut marks_filename = input_prefix.clone();
     marks_filename.push_str(".marks");
 
-    parse_sparse_file(sparse_filename);
-    parse_dense_file(dense_filename);
+    let sparse_sets = parse_sparse_file(sparse_filename);
+    let bitmaps = parse_dense_file(dense_filename);
+    let is_dense_marks = parse_marks_file(marks_filename);
+
+    let mut dense_id = 0_usize;
+    let mut sparse_id = 0_usize;
+    for set_id in 0..is_dense_marks.len() {
+        if is_dense_marks[set_id] {
+            println!("{} {:?}", set_id, sparse_sets.get_set(sparse_id));
+            sparse_id += 1;
+        } else {
+            println!("{} {:?}", set_id, bitmaps.get_set(dense_id));
+            dense_id += 1;
+        }
+    }
+
 }
