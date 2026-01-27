@@ -23,11 +23,19 @@ fn parse_sparse_file(filename: impl AsRef<Path>) {
     let n_colors = usize::from_le_bytes(n_colors);
     let n_sets = usize::from_le_bytes(n_sets);
 
+    eprintln!("Metadata: data_n_words={}, data_n_elements={}, bit_width={}, n_colors={}, n_sets={}",
+        data_n_words, data_n_elements, bit_width, n_colors, n_sets);
+
     let mut raw_data: Vec<u64> = vec![0; data_n_words];
     file.read_exact(bytemuck::cast_slice_mut(raw_data.as_mut_slice())).unwrap();
 
     let mut starts: Vec<usize> = vec![0; n_sets+1];
     file.read_exact(bytemuck::cast_slice_mut(starts.as_mut_slice())).unwrap();
+
+    for i in 0..20 {
+        eprintln!("Set {} starts at {}", i, starts[i]);
+    }
+    return;
 
     let concat = int_vec::CompactIntVec::from_parts(raw_data, data_n_elements, bit_width);
     for set_id in 0..data_n_elements {
