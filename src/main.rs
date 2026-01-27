@@ -17,7 +17,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator, set_of_sets_construction::{GenWithColorIdOffset}};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator};
 
 mod EM;
 mod bitmap_storage;
@@ -275,6 +275,7 @@ enum BuildMode {
 
 // Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to
 // disk.
+#[allow(clippy::too_many_arguments)]
 fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
 
     let n_colors = input_paths.len();
@@ -632,7 +633,7 @@ fn main() -> std::process::ExitCode {
             let input_stream = io::ChainedInputStream::new(input_paths.clone());
 
             // Check that the output file can be created
-            let out_test = File::create(&output).unwrap();
+            let _out_test = File::create(&output).unwrap();
             std::fs::remove_file(&output).unwrap();
 
             let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, forward_only, n_threads);
