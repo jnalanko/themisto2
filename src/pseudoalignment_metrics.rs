@@ -7,6 +7,8 @@ pub trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
     fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)>;
 
     fn metric_id(&self) -> Metric;
+
+    fn process_twice(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> (usize, Vec<(usize, usize)>);
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -96,8 +98,13 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProce
         self.hits.iter_nonzero().collect() // Pair color, value
     }
     
+    
     fn metric_id(&self) -> Metric {
         Metric::KmerHits
+    }
+    
+    fn process_twice(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> (usize, Vec<(usize, usize)>) {
+        todo!()
     }
     
 }
@@ -111,6 +118,11 @@ struct BasesCoveredProcessor {
 
     // For each color. Exclusive end.
     end_of_last_covered_kmer: NonzeroTrackingIntArray,
+
+    // Only one. Eclusive end.
+    max_end_of_last_covered_kmer: usize,
+
+    total_bases_covered: usize,
 }
 
 impl BasesCoveredProcessor {
@@ -118,7 +130,15 @@ impl BasesCoveredProcessor {
         Self { 
             bases_covered: NonzeroTrackingIntArray::new(n_colors),
             end_of_last_covered_kmer: NonzeroTrackingIntArray::new(n_colors),
+            max_end_of_last_covered_kmer: 0,
+            total_bases_covered: 0
         }
+    }
+}
+
+impl BasesCoveredProcessor {
+    pub fn total_bases_covered(&self) -> usize {
+        self.total_bases_covered
     }
 }
 
@@ -146,7 +166,6 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredP
                     n_new_covered += run_len - 1;
 
                     self.bases_covered.add_positive_number(color, n_new_covered);
-
                     // Set end of last covered k-mer. Here we use add_positive_integer because
                     // there is no method to set a value, because if there was, tracking nonzeros
                     // would be more complicated.
@@ -162,7 +181,52 @@ impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredP
     fn metric_id(&self) -> Metric {
         Metric::BasesCovered 
     }
+    
+    fn process_twice(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> (usize, Vec<(usize, usize)>) {
+        self.bases_covered.reset();
+        self.end_of_last_covered_kmer.reset();
 
+        self.total_bases_covered = 0;
+        for_each_run(color_set_ids, |run_range| {
+            let run_len = run_range.len(); 
+            assert!(run_len > 0);
+            let first_id = color_set_ids[run_range.start];
+
+            let first_kmer_end = run_range.start + index.get_k();
+            let last_kmer_end = run_range.end + index.get_k() - 1;
+            if let Some(set_id) = first_id {
+                let color_set = index.set_id_to_set(set_id);
+                
+                self.total_bases_covered += min(index.get_k(), first_kmer_end - self.max_end_of_last_covered_kmer);
+                self.total_bases_covered += run_len -1;
+                
+                for color in color_set.iter() {
+
+                    // New bases covered by the first k-mer
+                    let mut n_new_covered = min(first_kmer_end - self.end_of_last_covered_kmer.get(color), index.get_k());
+
+                    // Add new bases covered by the rest of the k-mers (1 base each)
+                    n_new_covered += run_len - 1;
+
+                    self.bases_covered.add_positive_number(color, n_new_covered);
+                    // Set end of last covered k-mer. Here we use add_positive_integer because
+                    // there is no method to set a value, because if there was, tracking nonzeros
+                    // would be more complicated.
+                    let old_end = self.end_of_last_covered_kmer.get(color);
+                    self.end_of_last_covered_kmer.add_positive_number(color, last_kmer_end - old_end);
+                    let new_end = last_kmer_end - old_end;
+                    if new_end > self.max_end_of_last_covered_kmer {
+                        self.max_end_of_last_covered_kmer = new_end;
+                    }
+                }
+            } // Runs of None are ignored
+        });
+        (
+            self.total_bases_covered,
+            self.bases_covered.iter_nonzero().collect() // Pair color, value
+
+        )
+    }
     
 }
 

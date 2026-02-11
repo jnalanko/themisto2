@@ -47,6 +47,7 @@ pub enum Denominator { // Options for the CLI
     All,
     Relevant,
     MaxHits,
+    MaxBasesCovered,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -438,6 +439,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
         Denominator::All => pseudoalignment::Denominator::All,
         Denominator::Relevant => pseudoalignment::Denominator::Relevant,
         Denominator::MaxHits => pseudoalignment::Denominator::MaxHits,
+        Denominator::MaxBasesCovered => pseudoalignment::Denominator::MaxBasesCovered,
     };
 
     let n_colors = index.get_set_storage().n_colors();

@@ -1,9 +1,10 @@
-use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}, cmp::min};
+
 
 use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, PseudoalignmentMetricProcessor, create_metric_processor}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, NonzeroTrackingIntArray, PseudoalignmentMetricProcessor, create_metric_processor}};
 
 struct SortedVec {
     v: Vec<usize>
@@ -30,6 +31,7 @@ pub enum Denominator {
     All,
     Relevant,
     MaxHits,
+    MaxBasesCovered,
 }
 
 #[derive(Clone)]
@@ -39,6 +41,7 @@ pub struct ThresholdPseudoaligner {
     threshold: f64,
     denominator: Denominator,
     min_hits: usize,
+    bases_covered: Vec<usize>,
 }
 
 impl ThresholdPseudoaligner {
@@ -49,6 +52,7 @@ impl ThresholdPseudoaligner {
             threshold,
             min_hits,
             denominator,
+            bases_covered: vec![0; n_colors],
         }
     }
 }
@@ -56,21 +60,52 @@ impl ThresholdPseudoaligner {
 impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
+        let mut total_bases_covered = 0_usize;
         let mut n_all = 0_usize;
+        let n_colors = self.counts.len();
 
         let mut color_set_ids = Vec::<Option::<usize>>::new();
         index.push_color_set_ids_to_buffer(seq, &mut color_set_ids);
+
+        let mut max_end_of_last_covered_kmer = 0;
+        let mut end_of_last_covered_kmer= NonzeroTrackingIntArray::new(n_colors);
+
         crate::util::for_each_run(&color_set_ids, |run_range| {
             let run_len = run_range.len(); 
             assert!(run_len > 0);
 
+
+            let first_kmer_end = run_range.start + index.get_k();
+            let last_kmer_end = run_range.end + index.get_k() - 1;
+
             let first_id = color_set_ids[run_range.start];
-            if let Some(set_id) = first_id {
+            if let Some(set_id) = first_id {                
+                total_bases_covered += min(index.get_k(), first_kmer_end - max_end_of_last_covered_kmer);
+                total_bases_covered += run_len -1;
+                
                 for color in index.set_id_to_set(set_id).iter() {
                     if self.counts[color] == 0 {
                         self.nonzero_count_indices.push(color);
                     }
                     self.counts[color] += run_len;
+                    
+                    // bases covered 
+                    // New bases covered by the first k-mer
+                    let mut n_new_covered = min(first_kmer_end - end_of_last_covered_kmer.get(color), index.get_k());
+
+                    // Add new bases covered by the rest of the k-mers (1 base each)
+                    n_new_covered += run_len - 1;
+
+                    self.bases_covered[color] += n_new_covered;
+                    // Set end of last covered k-mer. Here we use add_positive_integer because
+                    // there is no method to set a value, because if there was, tracking nonzeros
+                    // would be more complicated.
+                    let old_end = end_of_last_covered_kmer.get(color);
+                    end_of_last_covered_kmer.add_positive_number(color, last_kmer_end - old_end);
+                    let new_end = last_kmer_end - old_end;
+                    if new_end > max_end_of_last_covered_kmer {
+                        max_end_of_last_covered_kmer = new_end;
+                    }
                 }
                 n_relevant += run_len;
             }
@@ -78,21 +113,24 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
             n_all += run_len; // Runs of None count here
 
         });
+        // println!("Total bases covered: {}", total_bases_covered);
 
         self.nonzero_count_indices.sort_unstable(); // Sort to output in sorted order by colors 
 
         // Add to output all colors that pass the threshold
         if n_relevant >= self.min_hits && self.nonzero_count_indices.len() > 0 {
-            let den = match self.denominator {
-                Denominator::All => n_all as f64,
-                Denominator::Relevant => n_relevant as f64,
-                Denominator::MaxHits => {
-                    let maxhits = self.nonzero_count_indices.iter().map(|color| self.counts[color]).max();
-                    maxhits.unwrap() as f64 // Safe because here nonzero_count_indices.len() > 0
-                },
-            };
             for color in self.nonzero_count_indices.iter() {
-                if self.counts[color] as f64 / den >= self.threshold {
+                let (numerator, denominator) = match self.denominator {
+                    Denominator::All => (self.counts[color] as f64, n_all as f64),
+                    Denominator::Relevant => (self.counts[color] as f64, n_relevant as f64),
+                    Denominator::MaxHits => {
+                        let maxhits = self.nonzero_count_indices.iter().map(|c| self.counts[c]).max().unwrap() as f64;
+                        (self.counts[color] as f64, maxhits)
+                    },
+                    Denominator::MaxBasesCovered => (self.bases_covered[color] as f64, total_bases_covered as f64),
+                };
+                
+                if numerator / denominator >= self.threshold {
                     out.push(color);
                 }
             }
@@ -101,6 +139,7 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
         // Clean up
         for &color in &self.nonzero_count_indices {
             self.counts[color] = 0;
+            self.bases_covered[color] = 0;
         }
         self.nonzero_count_indices.clear();
     }
