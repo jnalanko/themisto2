@@ -1,0 +1,459 @@
+#![allow(non_snake_case)]
+
+use std::{fs::File, io::{BufRead, BufReader}, path::Path, sync::{Arc, Mutex}, thread};
+use jseqio::{reverse_complement, seq_db::SeqDB};
+use sha1::{Sha1, Digest};
+use rayon::prelude::*;
+
+fn ascii_to_int(ascii: &[u8]) -> usize {
+    std::str::from_utf8(ascii)
+    .expect("Unitig id is not valid utf-8").parse()
+    .expect("Could not convert unitig id string to unsigned integer")
+}
+
+fn get_color_set_id(fasta_header: &[u8]) -> usize {
+    // The fasta header should look like this " unitig_id=0 color_set_id=0".
+    // Note the space at the start.
+
+    let part = fasta_header[1..].split(|c| *c == b' ').nth(1).expect("Color set id missing");
+    let mut tokens = part.split(|c| *c == b'=');
+    assert_eq!(tokens.next().expect("Color set id missing"), b"color_set_id");
+    ascii_to_int(tokens.next().expect("Color set id missing"))
+}
+
+struct ColorSetBatch {
+    lines: Vec<String>
+}
+
+impl ColorSetBatch {
+    fn process(self) -> Vec::<(usize, [u8; 20])>{
+        let mut hashes = Vec::<(usize, [u8; 20])>::new(); // pairs (color set id, hash)
+        for line in self.lines {
+            let line_bytes = line.trim_end().as_bytes();
+            let mut tokens = line_bytes.split(|c| *c == b' ');
+
+            let first_token = tokens.next().unwrap();
+            assert_eq!(&first_token[0..13], b"color_set_id=");
+            let color_set_id: usize = ascii_to_int(&first_token[13..]);
+            //assert!(color_set_id < num_color_sets);
+
+            let second_token = tokens.next().unwrap();
+            assert_eq!(&second_token[0..5], b"size=");
+            let list_len = ascii_to_int(&second_token[5..]);
+
+            let color_set: Vec<usize> = tokens.map(ascii_to_int).collect();
+            assert_eq!(color_set.len(), list_len);
+
+            let hash = hash_color_set(&color_set);
+            hashes.push((color_set_id, hash))
+        }
+        hashes
+    }
+}
+
+fn hash_color_sets(filename: impl AsRef<Path>, num_color_sets: usize, n_threads: usize) -> Vec<[u8; 20]> {
+    // Lines should look like this:
+    // color_set_id=9 size=7 3 4 9 12 14 15 16
+
+
+    let hashes = thread::scope(|scope|{
+        let hashes = vec![[0_u8; 20]; num_color_sets];
+        let hashes_mutex = Arc::new(Mutex::new(hashes));
+
+        let mut reader = BufReader::new(File::open(filename).unwrap());
+        let (batch_send, batch_recv) = crossbeam::channel::bounded::<ColorSetBatch>(10);
+        let reader_handle = scope.spawn(move || {
+            let bar = indicatif::ProgressBar::new(num_color_sets as u64);
+            let mut line = String::new();
+            let mut batch = ColorSetBatch{ lines: vec![] };
+            let mut batch_total_len = 0_usize;
+            while reader.read_line(&mut line).unwrap() > 0 {
+                batch_total_len += line.len();
+                batch.lines.push(line.clone());
+                if batch_total_len > 1_000_000 {
+                    batch_send.send(batch).unwrap();
+                    batch = ColorSetBatch{ lines: vec![] };
+                    batch_total_len = 0;
+                }
+                line.clear();
+
+                bar.inc(1);
+            }
+
+            #[allow(clippy::len_zero)] // Shut up
+            if batch.lines.len() > 0 {
+                batch_send.send(batch).unwrap();
+            }
+            bar.finish();
+            drop(batch_send);
+        });
+
+        let mut hasher_handles = Vec::new();
+        for _ in 0..n_threads {
+            let recv_clone = batch_recv.clone();
+            let hashes_mutex_clone = hashes_mutex.clone();
+            let hasher_handle = scope.spawn(move || {
+                while let Ok(batch) = recv_clone.recv() {
+                    let hashes = batch.process();
+                    let mut table = hashes_mutex_clone.lock().unwrap();
+                    for (p, h) in hashes {
+                        table[p] = h;
+                    }
+                }
+            });
+            hasher_handles.push(hasher_handle);
+        }
+
+        reader_handle.join().unwrap();
+        for h in hasher_handles {
+            h.join().unwrap();
+        }
+
+        Arc::try_unwrap(hashes_mutex).unwrap().into_inner().unwrap()
+    });
+
+    hashes
+
+}
+
+#[allow(dead_code)]
+fn canonicalize_rotation_of_cyclic_unitig(unitig: &mut Vec<u8>, k: usize) {
+
+    assert!(unitig.len() >= k);
+
+    // Find the smallest k-mer
+    let min_kmer_start = (0..(unitig.len()-k+1)).min_by(|&i,&j| unitig[i..i+k].cmp(&unitig[j..j+k])).unwrap();
+
+    // Extend unitig so that all unitig rotations are substrings of it
+    let original_unitig_len = unitig.len();
+    for i in 0..original_unitig_len {
+        unitig.push(unitig[k-1+i]);
+    }
+
+    // Shift the smallest rotation to the start
+    for i in 0..original_unitig_len {
+        unitig[i] = unitig[min_kmer_start + i];
+    }
+    unitig.truncate(original_unitig_len);
+
+}
+
+#[allow(dead_code)]
+fn canonicalize_unitig(unitig: &mut Vec<u8>, k: usize) {
+    if unitig[0..k-1] == unitig[unitig.len()-(k-1) ..] {
+        // Cyclic unitig
+        canonicalize_rotation_of_cyclic_unitig(unitig, k);
+    }
+
+    let rc = jseqio::reverse_complement(unitig);
+    if rc < *unitig {
+        jseqio::reverse_complement_in_place(unitig);
+    }
+} 
+
+fn read_unitigs(filename: impl AsRef<Path>) -> SeqDB {
+    jseqio::reader::DynamicFastXReader::from_file(&filename).unwrap().into_db().unwrap()
+}
+
+#[allow(dead_code)]
+fn read_and_canonicalize_unitigs(filename: impl AsRef<Path>, k: usize) -> SeqDB {
+    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&filename).unwrap();
+    let mut db = jseqio::seq_db::SeqDB::new();
+
+    while let Some(rec) = reader.read_next().unwrap() {
+        assert!(rec.seq.len() >= k);
+
+        let mut rec = rec.to_owned();
+        canonicalize_unitig(&mut rec.seq, k);
+        db.push_record(rec);
+    }
+
+    db
+
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+struct Metadata {
+    num_unitigs: usize,
+    num_colors: usize,
+    num_color_sets: usize,
+    k: usize
+}
+
+fn read_metadata(filename: impl AsRef<Path>) -> Metadata {
+
+    // File should look like this:
+    // num_colors=3682
+    // num_unitigs=9314735
+    // num_color_sets=5591009
+    // k=31
+
+    let mut reader = BufReader::new(File::open(filename).unwrap());
+    let mut line = String::new();
+
+    let mut num_unitigs = None;
+    let mut num_colors = None;
+    let mut num_color_sets = None;
+    let mut k = None;
+
+    while reader.read_line(&mut line).unwrap() > 0 {
+        let line_bytes = line.trim_end().as_bytes();
+        let mut tokens = line_bytes.split(|c| *c == b'=');
+
+        let first_token = tokens.next().unwrap();
+        let second_token = tokens.next().unwrap();
+
+        match first_token {
+            b"num_colors" => num_colors = Some(ascii_to_int(second_token)),
+            b"num_unitigs" => num_unitigs = Some(ascii_to_int(second_token)),
+            b"num_color_sets" => num_color_sets = Some(ascii_to_int(second_token)),
+            b"k" => k = Some(ascii_to_int(second_token)),
+            _ => panic!("Unknown metadata field: {}", line)
+        }
+
+        line.clear();
+    }
+
+    Metadata {
+        num_unitigs: num_unitigs.expect("num_unitigs missing from metadata"),
+        num_colors: num_colors.expect("num_colors missing from metadata"),
+        num_color_sets: num_color_sets.expect("num_color_sets missing from metadata"),
+        k: k.expect("k missing from metadata")
+    }
+
+}
+
+fn sha1(data: &[u8]) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+fn xor_into<const N: usize>(target: &mut[u8; N], other: &[u8; N]) {
+    for i in 0..N {
+        target[i] ^= other[i];
+    }
+}
+
+// This should only be called for odd k because otherwise the rev. comp. of a k-mer may be equal to itself
+// Also returns the number of k-mers that were hashed.
+fn unitig_checksum(unitig: &[u8], k: usize) -> ([u8; 20], usize) {
+    let S = unitig.to_vec();
+    let Srev = reverse_complement(unitig);
+
+    let n = S.len();
+    assert!(n >= k);
+    assert!(Srev.len() == n);
+    assert!(k % 2 == 1); // Only works for odd k
+
+    let mut checksum = [0_u8; 20];
+    let mut n_hashes = 0_usize;
+
+    for i in 0..(n-k+1) {
+        let fw = &S[i..i+k];
+        let rc = &Srev[n-k-i..n-i];
+        let is_canonical = fw <= rc;
+
+        let hash = if is_canonical {
+            sha1(fw)
+        } else {
+            sha1(rc)
+        };
+
+        xor_into(&mut checksum, &hash);
+
+        n_hashes += 1;
+
+    }
+
+    (checksum, n_hashes)
+}
+
+fn kmers_in_nmer(k: usize, n: usize) -> usize {
+    let k = k as isize;
+    let n = n as isize;
+    let ans = std::cmp::max(n - k + 1, 0);
+    ans as usize
+}
+
+fn checksum_unitig_db(unitigs: &SeqDB, k: usize) -> ([u8; 20], usize) {
+    let bar = indicatif::ProgressBar::new(unitigs.sequence_count() as u64);
+    let par_fold = (0..unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let (unitig_checksum, _) = unitig_checksum(unitigs.get(i).seq, k);
+        xor_into(&mut acc, &unitig_checksum);
+        bar.inc(1);
+        acc
+    });
+    let checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+    bar.finish();
+
+    let total_kmer_count: usize = (0..unitigs.sequence_count())
+        .into_par_iter()
+        .map(|i| kmers_in_nmer(k, unitigs.get(i).seq.len()))
+        .sum();
+    (checksum, total_kmer_count)
+}
+
+fn hash_color_set(color_set: &[usize]) -> [u8; 20] {
+    let mut checksum = [0_u8; 20];
+    for color in color_set {
+        let hash = sha1(&color.to_le_bytes());
+        xor_into(&mut checksum, &hash);
+    }
+    checksum
+}
+
+fn sha1_kmer_into_color_set_hash(kmer: &[u8], color_set_hash: &[u8; 20]) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    hasher.update(kmer);
+    hasher.update(color_set_hash);
+    hasher.finalize().into()
+}
+
+// Assumes unitigs are a disjoint spectrum preserving string set (= no duplicate k-mers)
+fn checksum_unitig_kmers_and_colorsets(unitig: &[u8], color_set_hash: &[u8; 20], k: usize) -> [u8; 20] {
+
+    let n = unitig.len();
+    let unitig = unitig.to_owned();
+    let unitig_rc = reverse_complement(&unitig);
+
+    let mut checksum = [0_u8; 20];
+
+    for i in 0..(n-k+1) {
+        let fw = &unitig[i..i+k];
+        let rc = &unitig_rc[n-k-i..n-i];
+
+        let is_canonical = fw <= rc;
+
+        let combined_hash = if is_canonical {
+            sha1_kmer_into_color_set_hash(fw, color_set_hash)
+        } else {
+            sha1_kmer_into_color_set_hash(rc, color_set_hash)
+        };
+        xor_into(&mut checksum, &combined_hash);
+    }
+    checksum
+}
+
+fn compare_color_sets(A_unitigs: &SeqDB, B_unitigs: &SeqDB, A_color_set_hashes: &[[u8; 20]], B_color_set_hashes: &[[u8; 20]], k: usize) {
+
+    eprintln!("Computing A checksum...");
+    let bar = indicatif::ProgressBar::new(A_unitigs.sequence_count() as u64);
+    let par_fold = (0..A_unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let rec = A_unitigs.get(i);
+        let color_set_hash = A_color_set_hashes[get_color_set_id(rec.head)];
+        let checksum = checksum_unitig_kmers_and_colorsets(rec.seq, &color_set_hash, k);
+        xor_into(&mut acc, &checksum);
+        bar.inc(1);
+        acc
+    });
+    let A_checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+    bar.finish();
+
+    eprintln!("Computing B checksum...");
+    let bar = indicatif::ProgressBar::new(B_unitigs.sequence_count() as u64);
+    let par_fold = (0..B_unitigs.sequence_count()).into_par_iter().fold(|| [0_u8; 20], |mut acc, i| {
+        let rec = B_unitigs.get(i);
+        let color_set_hash = B_color_set_hashes[get_color_set_id(rec.head)];
+        let checksum = checksum_unitig_kmers_and_colorsets(rec.seq, &color_set_hash, k);
+        xor_into(&mut acc, &checksum);
+        bar.inc(1);
+        acc
+    });
+    let B_checksum = par_fold.reduce(|| [0_u8; 20], |mut a,b| {
+        xor_into(&mut a, &b);
+        a
+    });
+    bar.finish();
+
+    assert_eq!(A_checksum, B_checksum);
+    println!("Checksums match: {:?}", A_checksum);
+}
+
+fn main() {
+    let cli = clap::Command::new("compare_unitig_dumps")
+        .arg(clap::Arg::new("first_dump_prefix").required(true))
+        .arg(clap::Arg::new("second_dump_prefix").required(true))
+        .arg(clap::Arg::new("n_threads").short('t').value_parser(clap::value_parser!(usize)).default_value("4"));
+
+    let args = cli.get_matches();
+    let dump_A_file_prefix = args.get_one::<String>("first_dump_prefix").unwrap();
+    let dump_B_file_prefix = args.get_one::<String>("second_dump_prefix").unwrap();
+    let n_threads = *args.get_one::<usize>("n_threads").unwrap();
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(n_threads)       // customize number of threads
+        .build_global()
+        .unwrap();
+
+    eprintln!("Reading metadata...");
+    let A_metadata = read_metadata(format!("{}.metadata.txt", dump_A_file_prefix));
+    let B_metadata = read_metadata(format!("{}.metadata.txt", dump_B_file_prefix));
+    assert_eq!(A_metadata.k, B_metadata.k);
+    let k = A_metadata.k; 
+
+    eprintln!("Reading unitigs...");
+    // We're not canonicalizing the unitigs because the comparison algorithm works anyway.
+    let A_unitigs = read_unitigs(format!("{}.unitigs.fa", dump_A_file_prefix));
+    let B_unitigs = read_unitigs(format!("{}.unitigs.fa", dump_B_file_prefix)); 
+
+    eprintln!("Computing k-mer checksums...");
+
+    let (A_checksum, A_kmer_count) = &checksum_unitig_db(&A_unitigs, A_metadata.k);
+    let (B_checksum, B_kmer_count) = &checksum_unitig_db(&B_unitigs, B_metadata.k);
+
+    assert_eq!(A_kmer_count, B_kmer_count);
+    eprintln!("k-mer counts match: {}", A_kmer_count);
+
+    assert_eq!(A_checksum, B_checksum);
+    eprintln!("k-mer checksums match: {:?}", A_checksum);
+
+    eprintln!("Reading and hashing distinct color sets...");
+    let A_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_A_file_prefix), A_metadata.num_color_sets, n_threads);
+    let B_color_set_hashes = hash_color_sets(format!("{}.color_sets.txt", dump_B_file_prefix), B_metadata.num_color_sets, n_threads);
+
+    eprintln!("Comparing k-mer color sets...");
+    compare_color_sets(&A_unitigs, &B_unitigs, &A_color_set_hashes, &B_color_set_hashes, k);
+
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    /*
+    #[test]
+    fn test_unitig_checksum(){
+        let S = b"AACTCATACAGCTCTACTTACGACTGCGTCTACTGCTAGCTACA"; // Canonical unitig
+        let Srev = reverse_complement(S); // Non-canonical version
+
+        let k = 5;
+
+        let (X, _) = unitig_checksum(S, k, false); // Hashes the canonical version of all k-mers
+        
+        let (mut Y, _) = unitig_checksum(S, k, true); // Hashes only k-mers that are already canonical 
+        let (YRev, _) = unitig_checksum(&Srev, k, true); // Hashes only k-mers that are already canonical 
+        xor_into(&mut Y, &YRev);
+
+        assert_eq!(X, Y);
+    }
+
+    #[test]
+    fn test_cyclic_unitig_rotation(){
+        let k = 5;
+        let mut S = b"ATCTATCGAAATCACACACTGATCT".to_vec(); // Cyclic: first (k-1)-mer is equal to last (k-1)-mer
+        canonicalize_rotation_of_cyclic_unitig(&mut S, k);
+        eprintln!("{}", std::str::from_utf8(&S).unwrap());
+
+        assert_eq!(S, b"AAATCACACACTGATCTATCGAAAT");
+    }
+    */
+
+
+}
