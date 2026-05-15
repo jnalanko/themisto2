@@ -589,7 +589,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 
     fn serialization_version() -> u64 {
-        1_u64
+        2_u64
     }
 
     pub fn serialize(&self, out: &mut impl std::io::Write) {
