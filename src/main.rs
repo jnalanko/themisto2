@@ -733,8 +733,8 @@ fn main() -> std::process::ExitCode {
                     }
                 },
             }
-
         },
+
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
@@ -834,11 +834,11 @@ fn main() -> std::process::ExitCode {
                 IndexVariant::BitmapIndex(idx) => print_stats(&idx, n_threads),
                 IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
             };
-
         }
         Subcommands::Report { index: index_path, input, output } => {
             log::info!("Loading color names from index");
             let color_names = load_index_color_names_only(&index_path);
+            log::info!("Processing pseudoalignment file");
             match (input, output) {
                 (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap()), &color_names),
                 (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout()), &color_names),
