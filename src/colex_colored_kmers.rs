@@ -596,12 +596,8 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         out.write_all(Self::serialization_magic_string()).unwrap();
         out.write_all(&Self::serialization_version().to_le_bytes()).unwrap();
 
-        self.sbwt.serialize(out).unwrap();
-        self.lcs.serialize(out).unwrap();
-        self.sets.serialize(out);
-        self.map.serialize(out);
-        
-        // Serialize color names: first the number of names, then each name length and name
+        // Color names are written first (right after magic + version) so that
+        // they can be loaded without having to read the rest of the index.
         let n_names = self.color_names.len() as u64;
         out.write_all(&n_names.to_le_bytes()).unwrap();
         for name in self.color_names.iter() {
@@ -610,15 +606,15 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             out.write_all(&name_len.to_le_bytes()).unwrap();
             out.write_all(name_bytes).unwrap();
         }
+
+        self.sbwt.serialize(out).unwrap();
+        self.lcs.serialize(out).unwrap();
+        self.sets.serialize(out);
+        self.map.serialize(out);
     }
 
-    /// If this struct is going to be merged with [crate::coloring::merge_colorings], it will
-    /// need select support on the sbwt. We need to build it already during loading because
-    /// once the sbwt is put on to the heap into an Arc, it cannot be modified anymore.
-    /// Unless we make it an Arc<Refcell<...>>, but that might have overhead because then
-    /// it will do run-time borrow checking on every access if I understand correctly.
-    pub fn load(input: &mut impl std::io::Read, enable_select: bool) -> Self {
-        // Read and verify magic string
+    /// Reads and validates the magic string and serialization version from `input`.
+    fn check_magic_and_version(input: &mut impl std::io::Read) {
         let mut magic_string = [0_u8; 4];
         input.read_exact(&mut magic_string).unwrap();
         if magic_string != *Self::serialization_magic_string() {
@@ -630,22 +626,12 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         if version != Self::serialization_version() {
             panic!("Error loading CompactColexKmers: expected version {} but found {}", Self::serialization_version(), version);
         }
+    }
 
-        let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
-        if enable_select {
-            log::info!("Building select support");
-            sbwt.build_select();
-        }
-        let lcs = LcsArray::load(input).unwrap();
-        let sets = CSS::load(input);
-        let map = ColexToColorSetMap::load(input);
-        assert_eq!(map.sampling.len(), sbwt.n_sets());
-
-        // Load color names
+    fn load_color_names_internal(input: &mut impl std::io::Read) -> Vec<String> {
         let mut n_names_bytes = [0_u8; 8];
         input.read_exact(&mut n_names_bytes).unwrap();
         let n_names = u64::from_le_bytes(n_names_bytes) as usize;
-        assert_eq!(n_names, sets.n_colors());
         let mut color_names = Vec::<String>::with_capacity(n_names);
         for _ in 0..n_names {
             let mut name_len_bytes = [0_u8; 8];
@@ -656,6 +642,36 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             let name = String::from_utf8(name_bytes).unwrap();
             color_names.push(name);
         }
+        color_names
+    }
+
+    /// Loads only the color names from a serialized index, skipping the rest of
+    /// the on-disk structure. The remaining bytes of `input` are not consumed.
+    pub fn load_color_names_only(input: &mut impl std::io::Read) -> Vec<String> {
+        Self::check_magic_and_version(input);
+        Self::load_color_names_internal(input)
+    }
+
+    /// Load the index from the serialization format.
+    /// If this struct is going to be merged with [crate::coloring::merge_colorings], it will
+    /// need select support on the sbwt. We need to build it already during loading because
+    /// once the sbwt is put on to the heap into an Arc, it cannot be modified anymore.
+    /// Unless we make it an Arc<Refcell<...>>, but that might have overhead because then
+    /// it will do run-time borrow checking on every access if I understand correctly.
+    pub fn load(input: &mut impl std::io::Read, enable_select: bool) -> Self {
+        Self::check_magic_and_version(input);
+        let color_names = Self::load_color_names_internal(input);
+
+        let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
+        if enable_select {
+            log::info!("Building select support");
+            sbwt.build_select();
+        }
+        let lcs = LcsArray::load(input).unwrap();
+        let sets = CSS::load(input);
+        let map = ColexToColorSetMap::load(input);
+        assert_eq!(map.sampling.len(), sbwt.n_sets());
+        assert_eq!(color_names.len(), sets.n_colors());
 
         CompactColexKmers{sbwt, lcs, sets, map, color_names}
     }

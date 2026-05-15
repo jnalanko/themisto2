@@ -373,6 +373,21 @@ enum IndexVariant {
     SparseDenseIndex(CompactColexKmers<SparseDenseStorage>),
 }
 
+fn load_index_color_names_only(path: &Path) -> Vec<String> {
+    let mut input = BufReader::new(File::open(path).unwrap());
+    let mut id_buf = [0u8; 8];
+    input.read_exact(&mut id_buf).unwrap();
+    // Both index variants share the same color-names layout right after the
+    // magic + version, so we still verify the id is one we recognize.
+    if id_buf == ColoringType::Bitmaps.serialization_id() {
+        CompactColexKmers::<BitmapStorage>::load_color_names_only(&mut input)
+    } else if id_buf == ColoringType::SparseDense.serialization_id() {
+        CompactColexKmers::<SparseDenseStorage>::load_color_names_only(&mut input)
+    } else {
+        panic!("Unrecognized index serialization ID: {:?}", id_buf);
+    }
+}
+
 fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
     let mut input = BufReader::new(File::open(path).unwrap());
     let mut id_buf = [0u8; 8];
@@ -785,17 +800,13 @@ fn main() -> std::process::ExitCode {
 
         }
         Subcommands::Report { index: index_path, input, output } => {
-            log::info!("Loading index");
-            let index = load_index_variant(&index_path, false);
-            let color_names: &[String] = match &index {
-                IndexVariant::BitmapIndex(idx) => idx.get_color_names(),
-                IndexVariant::SparseDenseIndex(idx) => idx.get_color_names(),
-            };
+            log::info!("Loading color names from index");
+            let color_names = load_index_color_names_only(&index_path);
             match (input, output) {
-                (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap()), color_names),
-                (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout()), color_names),
-                (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap()), color_names),
-                (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout()), color_names),
+                (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap()), &color_names),
+                (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout()), &color_names),
+                (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap()), &color_names),
+                (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout()), &color_names),
             }
         },
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
