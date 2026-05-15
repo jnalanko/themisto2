@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crossbeam::channel::Receiver;
 use jseqio::reader::DynamicFastXReader;
 use sbwt::{reverse_complement_in_place, SeqStream};
 
@@ -106,5 +107,91 @@ impl ChainedInputStreamWithRevComp {
     #[allow(dead_code)]
     pub fn done(&self) -> bool {
         self.inner.cur_file_idx == self.inner.paths.len()
+    }
+}
+
+// ── Per-color sequence source ────────────────────────────────────────────────
+
+/// One color's sequence input, either a whole file or a single in-memory sequence.
+#[derive(Clone)]
+pub enum ColorSource {
+    File(PathBuf),
+    SingleSeq(Vec<u8>),
+}
+
+impl ColorSource {
+    pub fn open(&self) -> ColorSourceIter {
+        match self {
+            Self::File(p) => ColorSourceIter::File(DynamicFastXReader::from_file(p).unwrap()),
+            Self::SingleSeq(seq) => ColorSourceIter::Single { seq: seq.clone(), done: false },
+        }
+    }
+}
+
+/// Iterator yielding owned sequences for one color.
+pub enum ColorSourceIter {
+    File(DynamicFastXReader),
+    Single { seq: Vec<u8>, done: bool },
+}
+
+impl Iterator for ColorSourceIter {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Vec<u8>> {
+        match self {
+            Self::File(reader) => reader.read_next().unwrap().map(|rec| rec.seq.to_vec()),
+            Self::Single { seq, done } => {
+                if *done { None } else { *done = true; Some(std::mem::take(seq)) }
+            }
+        }
+    }
+}
+
+// ── SeqStream over all color sources (for SBWT / key-kmer phases) ────────────
+
+pub struct AllColorSeqs {
+    rx: Receiver<ColorSource>,
+    cur_iter: Option<ColorSourceIter>,
+    seq_buf: Vec<u8>,
+    include_rev_comp: bool,
+    rev_comp_pending: bool,
+}
+
+impl AllColorSeqs {
+    pub fn new(rx: Receiver<ColorSource>, include_rev_comp: bool) -> Self {
+        Self { rx, cur_iter: None, seq_buf: vec![], include_rev_comp, rev_comp_pending: false }
+    }
+}
+
+impl SeqStream for AllColorSeqs {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        if self.rev_comp_pending {
+            reverse_complement_in_place(&mut self.seq_buf);
+            self.rev_comp_pending = false;
+            return Some(&self.seq_buf);
+        }
+
+        loop {
+            let got_seq = if let Some(it) = self.cur_iter.as_mut() {
+                if let Some(seq) = it.next() {
+                    self.seq_buf = seq;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if got_seq {
+                self.rev_comp_pending = self.include_rev_comp;
+                return Some(&self.seq_buf);
+            }
+
+            match self.rx.recv() {
+                Ok(source) => self.cur_iter = Some(source.open()),
+                Err(_) => return None, // sender dropped, channel exhausted
+            }
+        }
     }
 }

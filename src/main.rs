@@ -6,18 +6,19 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
-use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, time::Instant};
+use std::{fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, sync::Arc, time::Instant};
 use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
-use io::ChainedInputStreamWithRevComp;
+use io::{AllColorSeqs, ColorSource};
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator, report::report};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
+
 
 mod EM;
 mod bitmap_storage;
@@ -74,8 +75,11 @@ impl ColoringType {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
-        #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
-        input: PathBuf,
+        #[arg(help = "A file with one fasta/fastq filename per line (one color per file)", short = 'i', long = "color-by-file", required_unless_present = "color_by_seq")]
+        color_by_file: Option<PathBuf>,
+
+        #[arg(help = "A fasta/fastq file where each record is one color (named by the record header)", long = "color-by-seq", conflicts_with = "color_by_file")]
+        color_by_seq: Option<PathBuf>,
 
         #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
         sbwt_path: Option<PathBuf>,
@@ -313,32 +317,31 @@ enum BuildMode {
     ToDisk(PathBuf, usize), // Output path prefix, number of pieces
 }
 
+/// Factory that spawns a parser thread and returns a receiver of ColorSources.
+/// The optional Range limits which colors (by 0-based index) the producer sends;
+/// None means all colors.
+type MakeRx = Box<dyn Fn() -> crossbeam::channel::Receiver<ColorSource>>;
+
 // Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to
 // disk.
 #[allow(clippy::too_many_arguments)]
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, make_rx: &MakeRx, n_colors: usize, color_names: Vec<String>, n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
 
-    let n_colors = input_paths.len();
     log::info!("Building distinct color set structure");
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
-    let key_kmer_marks = if forward_only {
-        let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
-        mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
-    } else {
-        let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
-        mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
-    };
+    let phase1_stream = AllColorSeqs::new(make_rx(), !forward_only);
+    let key_kmer_marks = mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_stream, n_threads);
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+        let gen = MsElementGenerator::new(make_rx(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, make_rx(), !forward_only);
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     };
 
@@ -346,10 +349,10 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     match build_mode {
         BuildMode::InMemory => {
             let css = if from_unitigs {
-                let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+                let gen = MsElementGenerator::new(make_rx(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
                 set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             } else {
-                let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
+                let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, make_rx(), !forward_only);
                 set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             };
 
@@ -358,32 +361,38 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             key_kmer_marks.enable_rank();
             assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
             let colex_map = ColexToColorSetMap {
-                sampling: key_kmer_marks, 
+                sampling: key_kmer_marks,
                 color_set_ids: key_kmer_idx_to_set_id,
             };
 
-            let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
             let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names));
-            Some(cck) 
+            Some(cck)
         },
         BuildMode::ToDisk(out_prefix, n_pieces) => {
             assert!(n_pieces != 0);
-            let chunk_size = input_paths.len().div_ceil(n_pieces);
+            let chunk_size = n_colors.div_ceil(n_pieces);
+            // Single pass: drain all colors once, split into per-chunk Vecs.
+            let all_sources: Vec<ColorSource> = make_rx().iter().collect();
+            let mut source_iter = all_sources.into_iter();
             if from_unitigs {
-                let mut gens = Vec::<(MsElementGenerator, Range::<usize>)>::new();
-                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
-                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
-                    let gen = MsElementGenerator::new(chunk.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
-                    gens.push((gen, color_id_range));
-                }
+                let gens: Vec<(MsElementGenerator, Range::<usize>)> = (0..n_pieces).filter_map(|chunk_id| {
+                    let start = chunk_id * chunk_size;
+                    if start >= n_colors { return None; }
+                    let chunk: Vec<ColorSource> = source_iter.by_ref().take(chunk_size).collect();
+                    let end = start + chunk.len();
+                    let gen = MsElementGenerator::from_sources(chunk, StreamingIndex::new(&sbwt, &lcs), !forward_only);
+                    Some((gen, start..end))
+                }).collect();
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             } else {
-                let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
-                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
-                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
-                    let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, chunk.to_owned(), !forward_only);
-                    gens.push((gen, color_id_range));
-                }
+                let gens: Vec<(DeduplicatingColorElementGenerator, Range::<usize>)> = (0..n_pieces).filter_map(|chunk_id| {
+                    let start = chunk_id * chunk_size;
+                    if start >= n_colors { return None; }
+                    let chunk: Vec<ColorSource> = source_iter.by_ref().take(chunk_size).collect();
+                    let end = start + chunk.len();
+                    let gen = DeduplicatingColorElementGenerator::from_sources(&sbwt, &lcs, chunk, !forward_only);
+                    Some((gen, start..end))
+                }).collect();
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             };
             None
@@ -688,13 +697,61 @@ fn main() -> std::process::ExitCode {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
+        Subcommands::Build { color_by_file, color_by_seq, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
 
-            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let input_stream = io::ChainedInputStream::new(input_paths.clone());
+            let (sbwt_input_paths, n_colors, make_rx, color_names): (Vec<PathBuf>, usize, MakeRx, Vec<String>) =
+                match (color_by_file, color_by_seq) {
+                    (Some(fof_path), None) => {
+                        let paths: Vec<PathBuf> = BufReader::new(File::open(&fof_path).unwrap())
+                            .lines().map(|l| PathBuf::from(l.unwrap())).collect();
+                        let n_colors = paths.len();
+                        let names = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+                        let sbwt_paths = paths.clone();
+                        let paths = Arc::new(paths);
+                        let make_rx: MakeRx = Box::new(move || {
+                            let (tx, rx) = crossbeam::channel::bounded(n_threads * 2);
+                            let paths = Arc::clone(&paths);
+                            std::thread::spawn(move || {
+                                for path in paths.iter() {
+                                    tx.send(ColorSource::File(path.clone())).unwrap();
+                                }
+                            });
+                            rx
+                        });
+                        (sbwt_paths, n_colors, make_rx, names)
+                    },
+                    (None, Some(fasta_path)) => {
+                        // Pre-pass: collect color names from headers; sequences are NOT retained.
+                        let mut reader = jseqio::reader::DynamicFastXReader::from_file(&fasta_path).unwrap();
+                        let mut names = Vec::new();
+                        while let Some(rec) = reader.read_next().unwrap() {
+                            let name = std::str::from_utf8(rec.head).unwrap()
+                                .split_whitespace().next().unwrap_or("").to_string();
+                            names.push(name);
+                        }
+                        let n_colors = names.len();
+                        let sbwt_paths = vec![fasta_path.clone()];
+                        let fasta_path = Arc::new(fasta_path);
+                        let make_rx: MakeRx = Box::new(move || {
+                            let (tx, rx) = crossbeam::channel::bounded(n_threads * 2);
+                            let fasta_path = Arc::clone(&fasta_path);
+                            std::thread::spawn(move || {
+                                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&*fasta_path).unwrap();
+                                while let Some(rec) = reader.read_next().unwrap() {
+                                    tx.send(ColorSource::SingleSeq(rec.seq.to_vec())).unwrap();
+                                }
+                            });
+                            rx
+                        });
+                        (sbwt_paths, n_colors, make_rx, names)
+                    },
+                    _ => unreachable!(), // clap enforces mutual exclusivity and at-least-one-required
+                };
+
+            let input_stream = io::ChainedInputStream::new(sbwt_input_paths);
 
             // Check that the output file can be created
             let _out_test = File::create(&output).unwrap();
@@ -707,7 +764,7 @@ fn main() -> std::process::ExitCode {
                     match n_pieces {
                         None => {
                             let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, &make_rx, n_colors, color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
                             let index = index.unwrap(); // Ok because we passed in InMemory
                             log::info!("Serializing bitmap index to {}", output.display());
                             write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
@@ -722,13 +779,13 @@ fn main() -> std::process::ExitCode {
                     match n_pieces {
                         None => {
                             let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &make_rx, n_colors, color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
                             let index = index.unwrap(); // Ok because we passed in InMemory
                             log::info!("Serializing sparse-dense index to {}", output.display());
                             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                         },
                         Some(n_pieces) => {
-                            build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
+                            build_coloring::<SparseDenseStorage>(sbwt, lcs, &make_rx, n_colors, color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
                         }
                     }
                 },

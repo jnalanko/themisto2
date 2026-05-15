@@ -1,26 +1,29 @@
-use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, ops::Range, sync::Arc};
 
-use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
+use crossbeam::channel::Receiver;
+use crate::io::ColorSource;
+
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
 use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
-    input_files: Vec<PathBuf>,
+    rx: Option<Receiver<ColorSource>>,
+    sources: Vec<ColorSource>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
 }
 
 impl<'a> MsElementGenerator<'a> {
-    pub fn new( input_files: Vec<PathBuf>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
-        Self {
-            input_files,
-            streaming_index,
-            filter: None,
-            include_rev_comp,
-        }
+    pub fn new(rx: Receiver<ColorSource>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
+        Self { rx: Some(rx), sources: vec![], streaming_index, filter: None, include_rev_comp }
+    }
+
+    pub fn from_sources(sources: Vec<ColorSource>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
+        Self { rx: None, sources, streaming_index, filter: None, include_rev_comp }
     }
 }
 
@@ -57,29 +60,29 @@ impl<'a> MsElementGenerator<'a> {
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        if let Some(rx) = self.rx.take() {
+            self.sources = rx.iter().collect();
+        }
         let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
         thread_pool.install(|| {
-            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
+            self.sources.par_iter().enumerate().for_each(|(color, source)| {
                 log::info!("Processing color {}", color);
-                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                while let Some(rec) = reader.read_next_mut().unwrap() {
-                    self.run_seq(rec.seq, color, &callback);
+                for mut seq in source.open() {
+                    self.run_seq(&seq, color, &callback);
                     if self.include_rev_comp {
-                        reverse_complement_in_place(rec.seq);
-                        self.run_seq(rec.seq, color, &callback);
+                        reverse_complement_in_place(&mut seq);
+                        self.run_seq(&seq, color, &callback);
                     }
                 }
             })
         });
     }
-    
+
     fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
         self.filter = Some(filter);
     }
 
-    fn rewind(&mut self) {
-        // Nothing needs to done, calling run() again already works
-    }
+    fn rewind(&mut self) {}
 }
 
 struct DeduplicatingBuffer {
@@ -182,16 +185,14 @@ impl Iterator for DeduplicatingBufferIter {
 
 pub struct DistinctColexComputation<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    input: jseqio::reader::DynamicFastXReader,
     set_ids: DeduplicatingBuffer,
 }
 
 impl<'a> DistinctColexComputation<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader) -> Self {
-        let streaming_index = StreamingIndex::new(sbwt, lcs); 
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray) -> Self {
+        let streaming_index = StreamingIndex::new(sbwt, lcs);
         Self {
             streaming_index,
-            input,
             set_ids: DeduplicatingBuffer::new(sbwt.n_sets()),
         }
     }
@@ -206,15 +207,12 @@ impl<'a> DistinctColexComputation<'a> {
         }
     }
 
-    fn run(mut self, include_rev_comp: bool) -> DeduplicatingBuffer {
-        let mut buf = Vec::<u8>::new();
-        while let Some(rec) = self.input.read_next_mut().unwrap() {
-            buf.clear();
-            buf.extend_from_slice(rec.seq);
-            self.process_seq(&buf);
+    fn run(mut self, seqs: impl Iterator<Item = Vec<u8>>, include_rev_comp: bool) -> DeduplicatingBuffer {
+        for mut seq in seqs {
+            self.process_seq(&seq);
             if include_rev_comp {
-                reverse_complement_in_place(&mut buf);
-                self.process_seq(&buf);
+                reverse_complement_in_place(&mut seq);
+                self.process_seq(&seq);
             }
         }
         self.set_ids
@@ -222,7 +220,8 @@ impl<'a> DistinctColexComputation<'a> {
 }
 
 pub struct DeduplicatingColorElementGenerator<'a> {
-    input_files: Vec<PathBuf>,
+    rx: Option<Receiver<ColorSource>>,
+    sources: Vec<ColorSource>,
     sbwt: &'a SbwtIndex<SubsetMatrix>,
     lcs: &'a LcsArray,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
@@ -230,36 +229,37 @@ pub struct DeduplicatingColorElementGenerator<'a> {
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
-    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>, include_rev_comp: bool) -> Self {
-        Self { input_files, sbwt, lcs, filter: None, include_rev_comp }
+    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, rx: Receiver<ColorSource>, include_rev_comp: bool) -> Self {
+        Self { rx: Some(rx), sources: vec![], sbwt, lcs, filter: None, include_rev_comp }
+    }
+
+    pub fn from_sources(sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, sources: Vec<ColorSource>, include_rev_comp: bool) -> Self {
+        Self { rx: None, sources, sbwt, lcs, filter: None, include_rev_comp }
     }
 }
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        if let Some(rx) = self.rx.take() {
+            self.sources = rx.iter().collect();
+        }
         let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
         thread_pool.install(|| {
-            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
+            self.sources.par_iter().enumerate().for_each(|(color, source)| {
                 log::info!("Processing color {}", color);
-                let reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                let gen = DistinctColexComputation::new(self.sbwt, self.lcs, reader);
-                let distinct_colex_positions = gen.run(self.include_rev_comp);
+                let gen = DistinctColexComputation::new(self.sbwt, self.lcs);
+                let distinct_colex_positions = gen.run(source.open(), self.include_rev_comp);
                 for colex in distinct_colex_positions.into_iter() {
                     let set_id = if let Some(filter) = &self.filter {
                         if !filter.get(colex) {
-                            continue; // Do not report this
+                            continue;
                         } else {
-                            // Assign new id
                             filter.rank(colex)
                         }
                     } else {
-                        colex // No filter
+                        colex
                     };
-
-                    callback(SetElement{
-                        set_id,
-                        color,
-                    });
+                    callback(SetElement { set_id, color });
                 }
             })
         });
@@ -269,9 +269,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
         self.filter = Some(filter.clone())
     }
 
-    fn rewind(&mut self) {
-        // Nothing needs to done, calling run() again already works
-    }
+    fn rewind(&mut self) {}
 }
 
 pub struct ElementGeneratorFromMergeInterleaving<'a, CSS: ColorSetStorage + Sync + Send> {
