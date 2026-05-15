@@ -17,7 +17,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, io::ChainedInputStream, parallel_ms_iteration::MsElementGenerator, report::report};
 
 mod EM;
 mod bitmap_storage;
@@ -39,6 +39,7 @@ mod merge;
 mod pseudoalignment;
 mod pseudoalignment_metrics;
 mod sparse_dense_storage_to_disk;
+mod report;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -248,6 +249,15 @@ pub enum Subcommands {
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
+    },
+
+    #[command(name = "report")]
+    Report {
+        #[arg(help = "Input file. If omitted, reads from stdin.", long = "input", short = 'i', value_parser = clap::value_parser!(PathBuf))]
+        input: Option<PathBuf>,
+
+        #[arg(help = "Output file. If omitted, writes to stdout.", long = "output", short = 'o', value_parser = clap::value_parser!(PathBuf))]
+        output: Option<PathBuf>,
     },
 
     #[command(arg_required_else_help = true, hide = true)]
@@ -771,6 +781,14 @@ fn main() -> std::process::ExitCode {
             };
 
         }
+        Subcommands::Report { input, output } => {
+            match (input, output) {
+                (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap())),
+                (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout())),
+                (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap())),
+                (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout())),
+            }
+        },
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
             // Hidden subcommand, might be deleted at any moment
             log::info!("Loading index");
