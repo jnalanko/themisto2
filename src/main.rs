@@ -129,6 +129,9 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
 
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
+
         #[arg(long = "report-hit-counts", default_value = "false")]
         report_hit_counts: bool,
 
@@ -157,6 +160,9 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
 
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
+
         #[arg(long = "report-hit-counts", default_value = "false")]
         report_hit_counts: bool,
 
@@ -169,18 +175,24 @@ pub enum Subcommands {
     PrintColorSets {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
-    
+
         #[arg(long = "query", short = 'q', required = true)]
         query: PathBuf,
 
         #[arg(long = "print-kmers", short = 'p', help = "Also print the k-mers on each line")]
         print_kmers: bool,
+
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
     },
 
     #[command(arg_required_else_help = true, name = "dump-color-names")]
     DumpColorNames{
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
+
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
     },
 
     #[command(arg_required_else_help = true, name = "merge")]
@@ -282,6 +294,18 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
+}
+
+enum Output {
+    File(BufWriter<File>),
+    Stdout(BufWriter<std::io::Stdout>),
+}
+
+fn open_output(path: Option<PathBuf>) -> Output {
+    match path {
+        Some(p) => Output::File(BufWriter::new(File::create(&p).unwrap())),
+        None => Output::Stdout(BufWriter::new(std::io::stdout())),
+    }
 }
 
 enum BuildMode {
@@ -416,9 +440,16 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     }
 }
 
-fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>) {
+fn print_color_names_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKmers<CSS>, out: &mut W) {
     for (id, name) in index.get_color_names().iter().enumerate() {
-        println!("{}\t{}", id, name);
+        writeln!(out, "{}\t{}", id, name).unwrap();
+    }
+}
+
+fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, out: Output) {
+    match out {
+        Output::File(mut w) => print_color_names_impl(index, &mut w),
+        Output::Stdout(mut w) => print_color_names_impl(index, &mut w),
     }
 }
 
@@ -438,11 +469,15 @@ fn print_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_th
 }
 
 
-fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool) {
+fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool, out: Output) {
+    match out {
+        Output::File(w) => print_color_sets_impl(index, query_path, print_kmers, w),
+        Output::Stdout(w) => print_color_sets_impl(index, query_path, print_kmers, w),
+    }
+}
+
+fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool, mut out: W) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
-    // Buffered writing to stdout
-    let stdout = std::io::stdout();
-    let mut out = BufWriter::new(stdout);
 
     log::info!("Retrieving color sets for query sequences in {}", query_path.display());
 
@@ -484,11 +519,7 @@ fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_
 }
 
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize) {
-    // Buffered writing to stdout
-    let stdout = std::io::stdout();
-    let out = BufWriter::new(stdout);
-
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output) {
     log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
 
     let create_new_aligner = move || {
@@ -496,16 +527,15 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
+    match out {
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads),
+    }
     log::info!("Finished");
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize) {
-    // Buffered writing to stdout
-    let stdout = std::io::stdout();
-    let out = BufWriter::new(stdout);
-
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output) {
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
         Denominator::All => pseudoalignment::Denominator::All,
@@ -518,7 +548,7 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
     log::info!("Running threshold pseudoalignment for query sequences in {}", query_path.display());
     let create_new_aligner = move || {
         let aligner = pseudoalignment::ThresholdPseudoaligner::new(
-            n_colors, 
+            n_colors,
             threshold,
             min_hits,
             denominator
@@ -526,7 +556,10 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
-    pseudoalignment::run_pseudoalignment(index, query_path, out, create_new_aligner, metrics, n_threads);
+    match out {
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads),
+    }
     log::info!("Finished");
 }
 
@@ -702,39 +735,43 @@ fn main() -> std::process::ExitCode {
             }
 
         },
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts} => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
+            let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads),
+                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out),
+                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out),
             };
 
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered} => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
+            let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads),
-                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads),
+                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out),
+                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out),
             };
         },
-        Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers } => {
+        Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers, output } => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
+            let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
-                IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers),
+                IndexVariant::BitmapIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
+                IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
             };
         },
-        Subcommands::DumpColorNames{ index: index_path} => {
+        Subcommands::DumpColorNames{ index: index_path, output } => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
+            let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => print_color_names(&idx),
-                IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx),
+                IndexVariant::BitmapIndex(idx) => print_color_names(&idx, out),
+                IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx, out),
             };
         },
         Subcommands::Merge { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
