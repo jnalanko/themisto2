@@ -24,8 +24,8 @@ impl ReportData {
         Self { 
             n_reads: 0, 
             n_positive_reads: 0, 
-            positive_by_color: vec![n_colors], 
-            unique_positive_by_color: vec![n_colors]
+            positive_by_color: vec![0; n_colors], 
+            unique_positive_by_color: vec![0; n_colors]
         }
     }
 
@@ -66,6 +66,30 @@ pub fn report(mut reader: impl BufRead, mut writer: impl Write, color_names: &[S
         line_no += 1;
     }
 
-    writer.write(serde_json::to_string_pretty(&data).unwrap().as_bytes());
+    let output = ReportOutput {
+        n_reads: data.n_reads,
+        n_positive_reads: data.n_positive_reads,
+        positive_by_color: pairs_sorted_nonzero(&data.positive_by_color, color_names),
+        unique_positive_by_color: pairs_sorted_nonzero(&data.unique_positive_by_color, color_names),
+    };
+    writer.write_all(serde_json::to_string_pretty(&output).unwrap().as_bytes()).unwrap();
     writer.flush().unwrap();
+}
+
+#[derive(serde::Serialize, Debug)]
+struct ReportOutput<'a> {
+    n_reads: usize,
+    n_positive_reads: usize,
+    positive_by_color: Vec<(&'a str, usize)>,
+    unique_positive_by_color: Vec<(&'a str, usize)>,
+}
+
+fn pairs_sorted_nonzero<'a>(counts: &[usize], color_names: &'a [String]) -> Vec<(&'a str, usize)> {
+    let mut pairs: Vec<(&str, usize)> = counts.iter().enumerate()
+        .filter(|(_, &c)| c > 0)
+        .map(|(i, &c)| (color_names[i].as_str(), c))
+        .collect();
+    // Sort by count in decreasing order.
+    pairs.sort_by(|a, b| b.1.cmp(&a.1));
+    pairs
 }
