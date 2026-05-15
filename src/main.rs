@@ -253,7 +253,10 @@ pub enum Subcommands {
 
     #[command(name = "report")]
     Report {
-        #[arg(help = "Input file. If omitted, reads from stdin.", long = "input", short = 'i', value_parser = clap::value_parser!(PathBuf))]
+        #[arg(help = "Themisto 2 index, used for color names", long = "index", short = 'i', required = true, value_parser = clap::value_parser!(PathBuf))]
+        index: PathBuf,
+
+        #[arg(help = "Pseudoalignment JSON file (one record per line). If omitted, reads from stdin.", long = "pseudoalignment-file", short = 'p', value_parser = clap::value_parser!(PathBuf))]
         input: Option<PathBuf>,
 
         #[arg(help = "Output file. If omitted, writes to stdout.", long = "output", short = 'o', value_parser = clap::value_parser!(PathBuf))]
@@ -781,12 +784,18 @@ fn main() -> std::process::ExitCode {
             };
 
         }
-        Subcommands::Report { input, output } => {
+        Subcommands::Report { index: index_path, input, output } => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, false);
+            let color_names: &[String] = match &index {
+                IndexVariant::BitmapIndex(idx) => idx.get_color_names(),
+                IndexVariant::SparseDenseIndex(idx) => idx.get_color_names(),
+            };
             match (input, output) {
-                (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap())),
-                (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout())),
-                (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap())),
-                (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout())),
+                (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap()), color_names),
+                (Some(in_path), None) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(std::io::stdout()), color_names),
+                (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap()), color_names),
+                (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout()), color_names),
             }
         },
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
