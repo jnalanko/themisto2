@@ -108,3 +108,80 @@ impl ChainedInputStreamWithRevComp {
         self.inner.cur_file_idx == self.inner.paths.len()
     }
 }
+
+pub trait RewindableSeqStreamGenerator {
+	fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>>;
+	fn rewind(&mut self);
+}
+
+pub struct SeqStreamGeneratorFromFiles {
+    files: Vec<PathBuf>,
+    cur_file_idx: usize,
+}
+
+pub struct JSeqIOWrapper { // So that we can implement sbwt::SeqStream for jseqio::reader
+    inner: jseqio::reader::DynamicFastXReader,
+    cur_buf: Vec<u8>,
+}
+
+impl sbwt::SeqStream for JSeqIOWrapper {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        let maybe_rec = self.inner.read_next().unwrap(); // Unwrap the IO Result
+        let rec = maybe_rec?; // If None -> end of stream
+        self.cur_buf.clear();
+        self.cur_buf.extend_from_slice(rec.seq);
+        Some(&self.cur_buf)
+    }
+}
+
+impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
+    fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+        if self.cur_file_idx == self.files.len() { return None; }
+
+        let reader = jseqio::reader::DynamicFastXReader::from_file(&self.files[self.cur_file_idx]).unwrap();
+        let reader = JSeqIOWrapper {inner: reader, cur_buf: vec![]};
+        let reader: Box<dyn SeqStream + Send+ Sync> = Box::new(reader);
+
+        self.cur_file_idx += 1;
+        Some(reader)
+    }
+
+    fn rewind(&mut self) {
+        self.cur_file_idx = 0;
+    }
+}
+
+pub struct SeqStreamGeneratorFromSingleFile {
+    file: PathBuf,
+    cur_stream: jseqio::reader::DynamicFastXReader,
+}
+
+pub struct SingleSeqStream {
+    seq: Vec<u8>,
+    done: bool,
+}
+
+impl SeqStream for SingleSeqStream {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        if self.done { return None };
+
+        self.done = true;
+        Some(&self.seq)
+    }
+}
+
+impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromSingleFile {
+    fn next(&mut self) -> Option<Box<dyn SeqStream + Sync + Send>> {
+        let rec = self.cur_stream.read_next().unwrap()?;
+        let seq = SingleSeqStream { seq: rec.seq.to_vec(), done: false };
+        let seq: Box<dyn SeqStream + Sync + Send> = Box::new(seq);
+        Some(seq)
+    }
+
+    fn rewind(&mut self) {
+        let mut new_reader = jseqio::reader::DynamicFastXReader::from_file(&self.file).unwrap();
+        std::mem::swap(&mut self.cur_stream, &mut new_reader);
+
+        // Thd old reader is dropped here
+    }
+}

@@ -693,9 +693,9 @@ dependencies = [
 
 [[package]]
 name = "jseqio"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4257a872e4a784fd67dc969bed4f893be81f7b17737460b8c3e956656b654e1b"
+checksum = "161bda7c3509126977a10765605bf2ebd2df3e82a1f8807868cd252877c79030"
 dependencies = [
  "ex",
  "flate2",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "sbwt"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "bitvec",
  "bytemuck",

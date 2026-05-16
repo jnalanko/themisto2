@@ -1,22 +1,22 @@
 use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc};
 
 use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
-use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
+use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}, io::RewindableSeqStreamGenerator};
 
 pub struct MsElementGenerator<'a> {
-    input_files: Vec<PathBuf>,
+    color_stream_generator: Box<dyn RewindableSeqStreamGenerator>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
 }
 
 impl<'a> MsElementGenerator<'a> {
-    pub fn new( input_files: Vec<PathBuf>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
+    pub fn new(color_stream_generator: Box<dyn RewindableSeqStreamGenerator>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
         Self {
-            input_files,
+            color_stream_generator,
             streaming_index,
             filter: None,
             include_rev_comp,
@@ -57,19 +57,36 @@ impl<'a> MsElementGenerator<'a> {
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
-        thread_pool.install(|| {
-            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
-                log::info!("Processing color {}", color);
-                let mut reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                while let Some(rec) = reader.read_next_mut().unwrap() {
-                    self.run_seq(rec.seq, color, &callback);
-                    if self.include_rev_comp {
-                        reverse_complement_in_place(rec.seq);
-                        self.run_seq(rec.seq, color, &callback);
-                    }
+        std::thread::scope(|scope| {
+            // Channel of pairs (color id, seq stream)
+            let (sender, receiver) = crossbeam::channel::bounded::<(usize, Box<dyn SeqStream>)>(2*n_threads);
+            let recever_ref = &receiver; // To capture a reference
+            let producer_handle = scope.spawn(|| {
+                let mut color = 0_usize;
+                while let Some(color_stream) = self.color_stream_generator.next() {
+                    sender.send((color, color_stream));
+                    color += 1;
                 }
-            })
+                drop(sender); // Finished
+            });
+
+            let consumer_handles: Vec<_> = (0..n_threads).map(|_| {
+                scope.spawn(|| {
+                    let mut rc_buf = Vec::<u8>::new();
+                    while let Ok((color, color_stream)) = receiver.recv() {
+                        log::info!("Processing color {}", color);
+                        while let Some(seq) = color_stream.stream_next() {
+                            self.run_seq(seq, color, &callback);
+                            if self.include_rev_comp {
+                                rc_buf.clear();
+                                rc_buf.extend_from_slice(seq);
+                                reverse_complement_in_place(&mut rc_buf);
+                                self.run_seq(&rc_buf, color, &callback);
+                            }
+                        }
+                    }
+                })
+            }).collect();
         });
     }
     
