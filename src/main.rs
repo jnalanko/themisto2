@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::{ChainedInputStreamWithRevComp, RewindableSeqStreamGenerator};
+use jseqio::record::Record;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
@@ -74,8 +75,11 @@ impl ColoringType {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
-        #[arg(help = "A file with one fasta/fastq filename per line", short, long, required = true)]
-        input: PathBuf,
+        #[arg(help = "A file with one fasta/fastq filename per line", short, long = "file-colors")]
+        color_fof: Option<PathBuf>,
+
+        #[arg(help = "A fasta/fastq file, with one color per sequence", short, long = "seq-colors")]
+        sequence_colors_file: Option<PathBuf>,
 
         #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
         sbwt_path: Option<PathBuf>,
@@ -726,13 +730,36 @@ fn main() -> std::process::ExitCode {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { input: input_fof, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
+        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
 
-            let input_paths: Vec<PathBuf> = BufReader::new(File::open(input_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            let input_stream = io::ChainedInputStream::new(input_paths.clone());
+            let (input_mode, all_input_paths, color_names) = match (color_fof, sequence_colors_file) {
+                (None, None) => panic!("Must give one of --file-colors or --seq-colors"),
+                (Some(_), Some(_)) => todo!("Must not give both --file-colors and --seq-colors"),
+                (Some(color_fof), None) => {
+                    let input_paths: Vec<PathBuf> = BufReader::new(File::open(color_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
+
+                    // Use input paths also as color names
+                    let color_names: Vec<String> = input_paths.iter().map(|p| p.clone().into_os_string().into_string().unwrap()).collect();
+                    (ColoredSeqInput::FileColors(input_paths.clone()), input_paths, color_names)
+                }
+                (None, Some(sequence_colors_file)) => {
+                    // Read color names from the sequence file
+                    log::info!("Reading all sequence names from the input file");
+                    let mut color_names = Vec::<String>::new();
+                    // TODO: could use a faster parser here
+                    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&sequence_colors_file).unwrap();
+                    while let Some(rec) = reader.read_next().unwrap() {
+                        color_names.push(String::from_utf8(rec.name().to_owned()).unwrap());
+                    }
+                    log::info!("Read {} sequences", color_names.len());
+                    (ColoredSeqInput::SequenceColors(sequence_colors_file.clone()), vec![sequence_colors_file], color_names)
+                },
+            };
+
+            let input_stream = io::ChainedInputStream::new(all_input_paths.clone());
 
             // Check that the output file can be created
             let _out_test = File::create(&output).unwrap();
@@ -745,7 +772,7 @@ fn main() -> std::process::ExitCode {
                     match n_pieces {
                         None => {
                             let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
                             let index = index.unwrap(); // Ok because we passed in InMemory
                             log::info!("Serializing bitmap index to {}", output.display());
                             write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
@@ -760,13 +787,13 @@ fn main() -> std::process::ExitCode {
                     match n_pieces {
                         None => {
                             let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
                             let index = index.unwrap(); // Ok because we passed in InMemory
                             log::info!("Serializing sparse-dense index to {}", output.display());
                             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                         },
                         Some(n_pieces) => {
-                            build_coloring::<SparseDenseStorage>(sbwt, lcs, &input_paths, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
+                            build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
                         }
                     }
                 },
