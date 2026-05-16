@@ -4,17 +4,17 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}, io::RewindableSeqStreamGenerator};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
-    color_stream_generator: Box<dyn RewindableSeqStreamGenerator>,
+    color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>,
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
 }
 
 impl<'a> MsElementGenerator<'a> {
-    pub fn new(color_stream_generator: Box<dyn RewindableSeqStreamGenerator>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
+    pub fn new(color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
         Self {
             color_stream_generator,
             streaming_index,
@@ -57,13 +57,24 @@ impl<'a> MsElementGenerator<'a> {
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
+        let (sender, receiver) = crossbeam::channel::bounded::<(usize, Box<dyn SeqStream + Send + Sync>)>(2*n_threads);
+        let receiver_ref = &receiver; // To capture a reference
+
+        // Here we need to get a bit tricky to avoid mutable aliasing of self. The issue is that
+        // the producer thread needs a mutable reference to the ReWindableSeqStreamGenerator at self,
+        // while the consumers need non-mutable access to the rest of self. This is not possible
+        // at the same time because borrowing self borrows everything. The workaround is that we
+        // swap in a dummy generator into self, so that we can get separate ownership of the generator
+        // and pass it into the producer. In the end we swap it back in.
+        let mut dummy_color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send> = Box::new(io::EmptyRewindableSeqStreamGenerator{});
+        std::mem::swap(&mut self.color_stream_generator, &mut dummy_color_stream_generator);
+        let mut color_stream_generator = dummy_color_stream_generator; // Now this function owns this
+
         std::thread::scope(|scope| {
             // Channel of pairs (color id, seq stream)
-            let (sender, receiver) = crossbeam::channel::bounded::<(usize, Box<dyn SeqStream>)>(2*n_threads);
-            let recever_ref = &receiver; // To capture a reference
             let producer_handle = scope.spawn(|| {
                 let mut color = 0_usize;
-                while let Some(color_stream) = self.color_stream_generator.next() {
+                while let Some(color_stream) = color_stream_generator.next() {
                     sender.send((color, color_stream));
                     color += 1;
                 }
@@ -73,7 +84,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
             let consumer_handles: Vec<_> = (0..n_threads).map(|_| {
                 scope.spawn(|| {
                     let mut rc_buf = Vec::<u8>::new();
-                    while let Ok((color, color_stream)) = receiver.recv() {
+                    while let Ok((color, mut color_stream)) = receiver_ref.recv() {
                         log::info!("Processing color {}", color);
                         while let Some(seq) = color_stream.stream_next() {
                             self.run_seq(seq, color, &callback);
@@ -87,7 +98,13 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
                     }
                 })
             }).collect();
+
+            // Wait for threads to finish
+            producer_handle.join();
+            for h in consumer_handles { h.join(); }
         });
+
+        self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the functino)
     }
     
     fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {

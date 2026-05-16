@@ -185,3 +185,15 @@ impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromSingleFile {
         // Thd old reader is dropped here
     }
 }
+
+pub struct EmptyRewindableSeqStreamGenerator { // Generates nothing
+
+}
+
+impl RewindableSeqStreamGenerator for EmptyRewindableSeqStreamGenerator {
+    fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+        None
+    }
+
+    fn rewind(&mut self) {}
+}
