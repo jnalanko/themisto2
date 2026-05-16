@@ -104,7 +104,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
             for h in consumer_handles { h.join(); }
         });
 
-        self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the functino)
+        self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
     }
     
     fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
@@ -112,7 +112,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
     }
 
     fn rewind(&mut self) {
-        // Nothing needs to done, calling run() again already works
+        self.color_stream_generator.rewind();
     }
 }
 
@@ -216,12 +216,12 @@ impl Iterator for DeduplicatingBufferIter {
 
 pub struct DistinctColexComputation<'a> {
     streaming_index: sbwt::StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
-    input: jseqio::reader::DynamicFastXReader,
+    input: Box<dyn SeqStream + Sync + Send>,
     set_ids: DeduplicatingBuffer,
 }
 
 impl<'a> DistinctColexComputation<'a> {
-    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: jseqio::reader::DynamicFastXReader) -> Self {
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input: Box<dyn SeqStream + Sync + Send>) -> Self {
         let streaming_index = StreamingIndex::new(sbwt, lcs); 
         Self {
             streaming_index,
@@ -242,9 +242,9 @@ impl<'a> DistinctColexComputation<'a> {
 
     fn run(mut self, include_rev_comp: bool) -> DeduplicatingBuffer {
         let mut buf = Vec::<u8>::new();
-        while let Some(rec) = self.input.read_next_mut().unwrap() {
+        while let Some(seq) = self.input.stream_next() {
             buf.clear();
-            buf.extend_from_slice(rec.seq);
+            buf.extend_from_slice(seq);
             self.process_seq(&buf);
             if include_rev_comp {
                 reverse_complement_in_place(&mut buf);
@@ -256,7 +256,7 @@ impl<'a> DistinctColexComputation<'a> {
 }
 
 pub struct DeduplicatingColorElementGenerator<'a> {
-    input_files: Vec<PathBuf>,
+    color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>,
     sbwt: &'a SbwtIndex<SubsetMatrix>,
     lcs: &'a LcsArray,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
@@ -264,39 +264,73 @@ pub struct DeduplicatingColorElementGenerator<'a> {
 }
 
 impl<'a> DeduplicatingColorElementGenerator<'a> {
-    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, input_files: Vec<PathBuf>, include_rev_comp: bool) -> Self {
-        Self { input_files, sbwt, lcs, filter: None, include_rev_comp }
+    pub fn new( sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &'a LcsArray, color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>, include_rev_comp: bool) -> Self {
+        Self { color_stream_generator, sbwt, lcs, filter: None, include_rev_comp }
     }
 }
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for DeduplicatingColorElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
-        thread_pool.install(|| {
-            self.input_files.iter().enumerate().par_bridge().for_each(|(color, file_path)| {
-                log::info!("Processing color {}", color);
-                let reader = jseqio::reader::DynamicFastXReader::from_file(&file_path).unwrap();
-                let gen = DistinctColexComputation::new(self.sbwt, self.lcs, reader);
-                let distinct_colex_positions = gen.run(self.include_rev_comp);
-                for colex in distinct_colex_positions.into_iter() {
-                    let set_id = if let Some(filter) = &self.filter {
-                        if !filter.get(colex) {
-                            continue; // Do not report this
-                        } else {
-                            // Assign new id
-                            filter.rank(colex)
-                        }
-                    } else {
-                        colex // No filter
-                    };
+        // TODO: a lot of this code is duplicated with  MsElementGenerator.
 
-                    callback(SetElement{
-                        set_id,
-                        color,
-                    });
+        let (sender, receiver) = crossbeam::channel::bounded::<(usize, Box<dyn SeqStream + Send + Sync>)>(2*n_threads);
+        let receiver_ref = &receiver; // To capture a reference
+
+        // Here we need to get a bit tricky to avoid mutable aliasing of self. The issue is that
+        // the producer thread needs a mutable reference to the ReWindableSeqStreamGenerator at self,
+        // while the consumers need non-mutable access to the rest of self. This is not possible
+        // at the same time because borrowing self borrows everything. The workaround is that we
+        // swap in a dummy generator into self, so that we can get separate ownership of the generator
+        // and pass it into the producer. In the end we swap it back in.
+        let mut dummy_color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send> = Box::new(io::EmptyRewindableSeqStreamGenerator{});
+        std::mem::swap(&mut self.color_stream_generator, &mut dummy_color_stream_generator);
+        let mut color_stream_generator = dummy_color_stream_generator; // Now this function owns this
+
+        std::thread::scope(|scope| {
+            // Channel of pairs (color id, seq stream)
+            let producer_handle = scope.spawn(|| {
+                let mut color = 0_usize;
+                while let Some(color_stream) = color_stream_generator.next() {
+                    sender.send((color, color_stream));
+                    color += 1;
                 }
-            })
+                drop(sender); // Finished
+            });
+
+            let consumer_handles: Vec<_> = (0..n_threads).map(|_| {
+                scope.spawn(|| {
+                    while let Ok((color, color_stream)) = receiver_ref.recv() {
+                        log::info!("Processing color {}", color);
+                        let gen = DistinctColexComputation::new(self.sbwt, self.lcs, color_stream);
+
+                        let distinct_colex_positions = gen.run(self.include_rev_comp);
+                        for colex in distinct_colex_positions.into_iter() {
+                            let set_id = if let Some(filter) = &self.filter {
+                                if !filter.get(colex) {
+                                    continue; // Do not report this
+                                } else {
+                                    // Assign new id
+                                    filter.rank(colex)
+                                }
+                            } else {
+                                colex // No filter
+                            };
+
+                            callback(SetElement{
+                                set_id,
+                                color,
+                            });
+                        }
+                    }
+                })
+            }).collect();
+
+            // Wait for threads to finish
+            producer_handle.join();
+            for h in consumer_handles { h.join(); }
         });
+
+        self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
     }
 
     fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
