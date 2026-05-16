@@ -338,7 +338,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
     }
 
     fn rewind(&mut self) {
-        // Nothing needs to done, calling run() again already works
+        self.color_stream_generator.rewind();
     }
 }
 
