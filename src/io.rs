@@ -119,6 +119,12 @@ pub struct SeqStreamGeneratorFromFiles {
     cur_file_idx: usize,
 }
 
+impl SeqStreamGeneratorFromFiles {
+    pub fn new(files: Vec<PathBuf>) -> Self {
+        Self {files, cur_file_idx: 0}
+    }
+}
+
 pub struct JSeqIOWrapper { // So that we can implement sbwt::SeqStream for jseqio::reader
     inner: jseqio::reader::DynamicFastXReader,
     cur_buf: Vec<u8>,
@@ -154,6 +160,13 @@ impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
 pub struct SeqStreamGeneratorFromSingleFile {
     file: PathBuf,
     cur_stream: jseqio::reader::DynamicFastXReader,
+}
+
+impl SeqStreamGeneratorFromSingleFile {
+    pub fn new(file: PathBuf) -> Self {
+        let cur_stream = jseqio::reader::DynamicFastXReader::from_file(&file).unwrap();
+        Self {file, cur_stream}
+    }
 }
 
 pub struct SingleSeqStream {

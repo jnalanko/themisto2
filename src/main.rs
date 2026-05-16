@@ -11,7 +11,7 @@ use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
-use io::ChainedInputStreamWithRevComp;
+use io::{ChainedInputStreamWithRevComp, RewindableSeqStreamGenerator};
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
@@ -313,43 +313,66 @@ enum BuildMode {
     ToDisk(PathBuf, usize), // Output path prefix, number of pieces
 }
 
-// Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to
-// disk.
-#[allow(clippy::too_many_arguments)]
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_paths: &[PathBuf], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
+enum ColoredSeqInput {
+    FileColors(Vec<PathBuf>), // One file per color
+    SequenceColors(PathBuf), // One file, containing one sequence per color.
+}
 
-    let n_colors = input_paths.len();
+// Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to disk.
+#[allow(clippy::too_many_arguments)]
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, forward_only: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
+
     log::info!("Building distinct color set structure");
+    let n_colors = color_names.len();
+    if let ColoredSeqInput::FileColors(v) = input_mode {
+        assert!(v.len() == n_colors, "Number of color names does not match the number of input files");
+    }
+
+    let mut all_input_seq_files = Vec::<PathBuf>::new();
+    match input_mode {
+        ColoredSeqInput::FileColors(v) => all_input_seq_files.extend(v),
+        ColoredSeqInput::SequenceColors(file) => all_input_seq_files.push(file),
+    }
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let key_kmer_marks = if forward_only {
-        let phase1_input_stream = ChainedInputStream::new(input_paths.to_owned());
+        let phase1_input_stream = ChainedInputStream::new(all_input_seq_files);
         mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
     } else {
-        let phase1_input_stream = ChainedInputStreamWithRevComp::new(input_paths.to_owned());
+        let phase1_input_stream = ChainedInputStreamWithRevComp::new(all_input_seq_files);
         mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
     };
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
+    let color_stream_gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> = match input_mode {
+        ColoredSeqInput::FileColors(path_bufs) => {
+            Box::new(io::SeqStreamGeneratorFromFiles::new(path_bufs.clone()))
+        },
+        ColoredSeqInput::SequenceColors(path_buf) => {
+            Box::new(io::SeqStreamGeneratorFromSingleFile::new(path_buf.clone()))
+        }
+    };
+
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let random_seed = 123123; // Todo: be more random
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
-        let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+        let gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), !forward_only);
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     } else {
-        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
+        let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, !forward_only);
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
     };
 
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
+    color_stream_gen.rewind();
     match build_mode {
         BuildMode::InMemory => {
             let css = if from_unitigs {
-                let gen = MsElementGenerator::new(input_paths.to_owned(), StreamingIndex::new(&sbwt, &lcs), !forward_only);
+                let gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), !forward_only);
                 set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             } else {
-                let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, input_paths.to_owned(), !forward_only);
+                let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, !forward_only);
                 set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             };
 
@@ -362,7 +385,6 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                 color_set_ids: key_kmer_idx_to_set_id,
             };
 
-            let color_names: Vec<String> = input_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
             let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names));
             Some(cck) 
         },
