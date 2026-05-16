@@ -335,7 +335,7 @@ impl UnitigImportSeqBatch {
 }
 
 // Todo: the logic associated with this is all over the place. Refactor into one place.
-fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + 'static, buf_cap: usize, out: Sender<UnitigImportSeqBatch>){
+fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + Sync + 'static, buf_cap: usize, out: Sender<UnitigImportSeqBatch>){
         
     let mut seqs = jseqio::reader::DynamicFastXReader::new(unitig_dump).unwrap();
 
@@ -478,7 +478,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         sample_distance: usize,
         n_threads: usize,
         metadata_dump: impl std::io::BufRead, 
-        unitig_dump: impl std::io::BufRead + Send + 'static, 
+        unitig_dump: impl std::io::BufRead + Send + Sync + 'static, 
         color_dump: impl std::io::BufRead) 
         -> Self {
 

@@ -171,7 +171,7 @@ pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: 
     let coloring2 = CompactColexKmers::<CSS>::new(sbwt2, lcs2, map2, sets2, Some(&color_names_2)); 
 
     log::info!("Building the LCS array for the merged SBWT");
-    let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads);
+    let merged_sbwt_lcs = LcsArray::from_sbwt(&merged_sbwt, n_threads, true);
 
     log::info!("Initializing DBG for the merged SBWT");
     let merged_dbg = Dbg::new(&merged_sbwt, Some(&merged_sbwt_lcs), n_threads);
