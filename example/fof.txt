@@ -1,0 +1,3 @@
+example/C1.fna
+example/C2.fna
+example/C3.fna
