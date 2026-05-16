@@ -75,10 +75,10 @@ impl ColoringType {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
-        #[arg(help = "A file with one fasta/fastq filename per line", short, long = "file-colors")]
+        #[arg(help = "A file with one fasta/fastq filename per line", long = "file-colors")]
         color_fof: Option<PathBuf>,
 
-        #[arg(help = "A fasta/fastq file, with one color per sequence", short, long = "seq-colors")]
+        #[arg(help = "A fasta/fastq file, with one color per sequence", long = "seq-colors")]
         sequence_colors_file: Option<PathBuf>,
 
         #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
