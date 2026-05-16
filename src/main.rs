@@ -683,7 +683,7 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
             LcsArray::load(&mut BufReader::new(File::open(lcs_path).unwrap())).unwrap()
         } else {
             log::info!("Building LCS array");
-            LcsArray::from_sbwt(&sbwt, n_threads)
+            LcsArray::from_sbwt(&sbwt, n_threads, true)
         };
         (sbwt, lcs)
     } else {
