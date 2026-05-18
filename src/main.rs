@@ -482,16 +482,16 @@ fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     }
 }
 
-fn print_color_names_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKmers<CSS>, out: &mut W) {
-    for (id, name) in index.get_color_names().iter().enumerate() {
+fn print_color_names_impl<W: Write>(names: &[String], out: &mut W) {
+    for (id, name) in names.iter().enumerate() {
         writeln!(out, "{}\t{}", id, name).unwrap();
     }
 }
 
-fn print_color_names<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, out: Output) {
+fn print_color_names(names: &[String], out: Output) {
     match out {
-        Output::File(mut w) => print_color_names_impl(index, &mut w),
-        Output::Stdout(mut w) => print_color_names_impl(index, &mut w),
+        Output::File(mut w) => print_color_names_impl(names, &mut w),
+        Output::Stdout(mut w) => print_color_names_impl(names, &mut w),
     }
 }
 
@@ -831,13 +831,11 @@ fn main() -> std::process::ExitCode {
             };
         },
         Subcommands::DumpColorNames{ index: index_path, output } => {
-            log::info!("Loading index");
-            let index = load_index_variant(&index_path, false); // No select support required
+            log::info!("Loading color names");
+            let color_names = load_index_color_names_only(&index_path);
             let out = open_output(output);
-            match index {
-                IndexVariant::BitmapIndex(idx) => print_color_names(&idx, out),
-                IndexVariant::SparseDenseIndex(idx) => print_color_names(&idx, out),
-            };
+            log::info!("Dumping color names");
+            print_color_names(&color_names, out);
         },
         Subcommands::Merge { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
