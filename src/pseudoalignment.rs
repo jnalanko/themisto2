@@ -151,22 +151,18 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
 
 struct QueryBatch {
     seqs: SeqDB,
-
-    // Rank of the first sequence in a larger output file.
-    // Used for output reordering.
-    rank_of_first_seq: usize
+    batch_id: usize
 }
 
 impl QueryBatch {
-    fn new(rank_of_first_seq: usize) -> Self { // TODO: take metrics
+    fn new(batch_id: usize) -> Self { // TODO: take metrics
         Self {
             seqs: SeqDB::new(),
-            rank_of_first_seq,
+            batch_id,
         }
     }
 
-    // Returns JSON-formatted bytes, and the rank of the first sequence in the batch in
-    // the larger input file.
+    // Returns JSON-formatted bytes, and the batch id.
     fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> (Vec<u8>, usize) {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
@@ -189,7 +185,7 @@ impl QueryBatch {
         let mut bytes_out = Vec::<u8>::new();
         result.into_json(&mut bytes_out);
 
-        (bytes_out, self.rank_of_first_seq)
+        (bytes_out, self.batch_id)
     }
 
     fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &SortedVec, index: &CompactColexKmers<CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
@@ -322,7 +318,7 @@ impl QueryResult {
 }
 
 fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, mut output: impl Write + Send){
-    while let Ok((json, first_read_rank)) = results_recv.recv() {
+    while let Ok((json, batch_id)) = results_recv.recv() {
         output.write_all(&json).unwrap();
     }
 
@@ -333,7 +329,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);
-    let (results_send, results_recv) = crossbeam::channel::bounded::<(Vec<u8>, usize)>(n_aligners); // Json-formatted blocks of text, and the rank of the first sequence in this batch
+    let (results_send, results_recv) = crossbeam::channel::bounded::<(Vec<u8>, usize)>(n_aligners); // Json-formatted blocks of text, and the batch id that produced this json.
 
     let (progress_printer_quit_signal_send, progress_printer_quit_signal_recv) = crossbeam::channel::bounded::<()>(1);
 
@@ -341,14 +337,14 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
 
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
-            let mut next_seq_rank = 0_usize;
-            let mut cur_batch = QueryBatch::new(next_seq_rank);
+            let mut batch_id = 0_usize;
+            let mut cur_batch = QueryBatch::new(batch_id);
             while let Some(q) = reader.read_next().unwrap() {
                 cur_batch.seqs.push_record(q);
-                next_seq_rank += 1;
                 if cur_batch.seqs.total_seq_len() >= batch_size {
                     work_send.send(cur_batch).unwrap();
-                    cur_batch = QueryBatch::new(next_seq_rank);
+                    batch_id += 1;
+                    cur_batch = QueryBatch::new(batch_id);
                 }
             }
             if cur_batch.seqs.total_seq_len() > 0 { // Last batch
@@ -370,8 +366,8 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
                     metric_processors.push(create_metric_processor(*metric, index.get_set_storage().n_colors()));
                 }
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let (json, first_seq_rank) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors);
-                    results_send_clone.send((json, first_seq_rank)).unwrap();
+                    let (json, batch_id) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors);
+                    results_send_clone.send((json, batch_id)).unwrap();
                 }
             });
             worker_handles.push(handle);
