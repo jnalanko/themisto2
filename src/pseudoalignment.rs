@@ -353,7 +353,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
     }
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;

@@ -1,6 +1,6 @@
-use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, ops::Range, sync::Arc};
 
-use rayon::iter::{IntoParallelIterator, ParallelBridge as _, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
@@ -75,7 +75,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
             let producer_handle = scope.spawn(|| {
                 let mut color = 0_usize;
                 while let Some(color_stream) = color_stream_generator.next() {
-                    sender.send((color, color_stream));
+                    sender.send((color, color_stream)).unwrap();
                     color += 1;
                 }
                 drop(sender); // Finished
@@ -100,8 +100,8 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
             }).collect();
 
             // Wait for threads to finish
-            producer_handle.join();
-            for h in consumer_handles { h.join(); }
+            producer_handle.join().unwrap();
+            for h in consumer_handles { h.join().unwrap(); }
         });
 
         self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
@@ -291,7 +291,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
             let producer_handle = scope.spawn(|| {
                 let mut color = 0_usize;
                 while let Some(color_stream) = color_stream_generator.next() {
-                    sender.send((color, color_stream));
+                    sender.send((color, color_stream)).unwrap();
                     color += 1;
                 }
                 drop(sender); // Finished
@@ -326,8 +326,8 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
             }).collect();
 
             // Wait for threads to finish
-            producer_handle.join();
-            for h in consumer_handles { h.join(); }
+            producer_handle.join().unwrap();
+            for h in consumer_handles { h.join().unwrap(); }
         });
 
         self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
