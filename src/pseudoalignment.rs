@@ -317,14 +317,43 @@ impl QueryResult {
     }
 }
 
-fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, mut output: impl Write + Send){
-    while let Ok((json, batch_id)) = results_recv.recv() {
-        output.write_all(&json).unwrap();
+fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, mut output: impl Write + Send, sort_output: bool){
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+
+    if !sort_output {
+        // Write batches in the order they are received.
+        while let Ok((json, _batch_id)) = results_recv.recv() {
+            output.write_all(&json).unwrap();
+        }
+        return;
     }
 
+    let mut next_batch_id = 0_usize;
+    // Min-heap of batches received out of order, keyed by batch id.
+    let mut buffer: BinaryHeap<Reverse<(usize, Vec<u8>)>> = BinaryHeap::new();
+
+    while let Ok((json, batch_id)) = results_recv.recv() {
+        buffer.push(Reverse((batch_id, json)));
+
+        // Write out all batches that are now consecutive starting from next_batch_id.
+        while let Some(Reverse((id, _))) = buffer.peek() {
+            if *id != next_batch_id {
+                break;
+            }
+            let Reverse((_, json)) = buffer.pop().unwrap();
+            output.write_all(&json).unwrap();
+            next_batch_id += 1;
+        }
+    }
+
+    if buffer.len() > 0 {
+        log::error!("Missing output batch. Please file a bug report to the maintainers.");
+        panic!("Missing output batch");
+    }
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, mut output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;
@@ -374,7 +403,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
         }
 
         let outputter_handle = scope.spawn(|| {
-            output_thread(results_recv, output);
+            output_thread(results_recv, output, sort_output);
         });
 
         let progress_printer_handle = scope.spawn(|| {
