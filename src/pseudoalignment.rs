@@ -16,6 +16,23 @@ impl SortedVec {
     }
 }
 
+// Append `n` as decimal ASCII digits to `out`, no fmt machinery or allocation.
+#[inline]
+fn push_decimal(out: &mut Vec<u8>, n: usize) {
+    let mut tmp = [0u8; 20]; // u64::MAX is 20 digits
+    let mut i = tmp.len();
+    let mut v = n;
+    loop {
+        i -= 1;
+        tmp[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&tmp[i..]);
+}
+
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
     fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
@@ -30,6 +47,15 @@ pub enum Denominator {
     All,
     Relevant,
     MaxHits,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// One JSON object per line: `{"name": "...", "colors": [..], ...}`.
+    Jsonl,
+    /// Themisto 1 format: `<query index> <space-separated colors>` per line.
+    /// Does not support per-read metrics.
+    Themisto1,
 }
 
 #[derive(Clone)]
@@ -151,19 +177,24 @@ impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
 
 struct QueryBatch {
     seqs: SeqDB,
-    batch_id: usize
+    batch_id: usize,
+    // Global 0-based index of the first query in this batch. Needed to write
+    // the absolute query index in the Themisto 1 output format, independent of
+    // the order in which batches are emitted.
+    first_query_index: usize,
 }
 
 impl QueryBatch {
-    fn new(batch_id: usize) -> Self { // TODO: take metrics
+    fn new(batch_id: usize, first_query_index: usize) -> Self { // TODO: take metrics
         Self {
             seqs: SeqDB::new(),
             batch_id,
+            first_query_index,
         }
     }
 
-    // Returns JSON-formatted bytes, and the batch id.
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> (Vec<u8>, usize) {
+    // Returns formatted bytes, and the batch id.
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>], output_format: OutputFormat) -> (Vec<u8>, usize) {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -183,7 +214,10 @@ impl QueryBatch {
         result.computed_metric_names.extend(metrics.iter().map(|proc| proc.metric_id()));
 
         let mut bytes_out = Vec::<u8>::new();
-        result.into_json(&mut bytes_out);
+        match output_format {
+            OutputFormat::Jsonl => result.into_json(&mut bytes_out),
+            OutputFormat::Themisto1 => result.into_themisto1(self.first_query_index, &mut bytes_out),
+        }
 
         (bytes_out, self.batch_id)
     }
@@ -314,6 +348,31 @@ impl QueryResult {
         out.write_all(&bytes).unwrap();
     }
 
+    // Themisto 1 output format: one line per query, starting with the absolute
+    // 0-based query index, followed by the space-separated compatible colors.
+    // `first_query_index` is the global index of the first query in this batch,
+    // so the index is correct regardless of the order batches are emitted in.
+    // Metrics (kmer_hits, bases_covered) have no representation in this format
+    // and are silently ignored here; callers must reject metric requests up
+    // front (see OutputFormat::Themisto1).
+    fn into_themisto1(self, first_query_index: usize, out: &mut impl Write) {
+        let mut bytes = Vec::<u8>::new();
+        let n_queries = self.query_names_starts.len() - 1;
+
+        for seq_idx in 0..n_queries {
+            let compat_s = self.compatibility_class_starts[seq_idx];
+            let compat_e = self.compatibility_class_starts[seq_idx + 1];
+
+            push_decimal(&mut bytes, first_query_index + seq_idx);
+            for &color in &self.compatibility_class_concat[compat_s..compat_e] {
+                bytes.push(b' ');
+                push_decimal(&mut bytes, color);
+            }
+            bytes.push(b'\n');
+        }
+        out.write_all(&bytes).unwrap();
+    }
+
     fn push(&mut self, compat_set: &[usize], seq_name: &[u8], metric_values_concat: Vec<usize>) {
         self.compatibility_class_concat.extend_from_slice(compat_set);
         self.compatibility_class_starts.push(self.compatibility_class_concat.len());
@@ -376,7 +435,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
     }
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_format: OutputFormat) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
 
     let batch_size = 10_000_usize;
@@ -391,13 +450,15 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
             let mut batch_id = 0_usize;
-            let mut cur_batch = QueryBatch::new(batch_id);
+            let mut n_queries_seen = 0_usize; // Global query counter for absolute indices
+            let mut cur_batch = QueryBatch::new(batch_id, n_queries_seen);
             while let Some(q) = reader.read_next().unwrap() {
                 cur_batch.seqs.push_record(q);
+                n_queries_seen += 1;
                 if cur_batch.seqs.total_seq_len() >= batch_size {
                     work_send.send(cur_batch).unwrap();
                     batch_id += 1;
-                    cur_batch = QueryBatch::new(batch_id);
+                    cur_batch = QueryBatch::new(batch_id, n_queries_seen);
                 }
             }
             if cur_batch.seqs.total_seq_len() > 0 { // Last batch
@@ -419,8 +480,8 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
                     metric_processors.push(create_metric_processor(*metric, index.get_set_storage().n_colors()));
                 }
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let (json, batch_id) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors);
-                    results_send_clone.send((json, batch_id)).unwrap();
+                    let (bytes, batch_id) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors, output_format);
+                    results_send_clone.send((bytes, batch_id)).unwrap();
                 }
             });
             worker_handles.push(handle);
@@ -474,4 +535,23 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
         progress_printer_quit_signal_send.send(()).unwrap(); // Interrupt the progress printer from sleep
         progress_printer_handle.join().unwrap();
     }); 
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decimal_string(n: usize) -> String {
+        let mut buf = Vec::new();
+        push_decimal(&mut buf, n);
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn test_push_decimal() {
+        assert_eq!(decimal_string(0), "0");
+        assert_eq!(decimal_string(1), "1");
+        assert_eq!(decimal_string(2), "2");
+        assert_eq!(decimal_string(10), "10");
+        assert_eq!(decimal_string(usize::MAX), usize::MAX.to_string());
+    }
 }

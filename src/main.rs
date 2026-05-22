@@ -139,6 +139,9 @@ pub enum Subcommands {
         #[arg(long = "sort-output", default_value = "false", help = "Write query results in the same order as the input sequences. Without this flag, results may be written in any order.")]
         sort_output: bool,
 
+        #[arg(long = "themisto1-output-format", default_value = "false", help = "Write output in the Themisto 1 format (query index followed by space-separated colors) instead of JSONL. Does not support reporting pseudoalignment metrics.")]
+        themisto1_output_format: bool,
+
         // Hidden option
         #[arg(long = "report-bases-covered", default_value = "false", hide = true)]
         report_bases_covered: bool,
@@ -172,6 +175,9 @@ pub enum Subcommands {
 
         #[arg(long = "sort-output", default_value = "false", help = "Write query results in the same order as the input sequences. Without this flag, results may be written in any order.")]
         sort_output: bool,
+
+        #[arg(long = "themisto1-output-format", default_value = "false", help = "Write output in the Themisto 1 format (query index followed by space-separated colors) instead of JSONL. Does not support reporting pseudoalignment metrics.")]
+        themisto1_output_format: bool,
 
         // Hidden option
         #[arg(long = "report-bases-covered", default_value = "false", hide = true)]
@@ -564,7 +570,7 @@ fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKme
 }
 
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool) {
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
 
     let create_new_aligner = move || {
@@ -573,14 +579,14 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
     };
 
     match out {
-        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output),
-        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output),
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
     }
     log::info!("Finished");
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool) {
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
         Denominator::All => pseudoalignment::Denominator::All,
@@ -602,8 +608,8 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
     };
 
     match out {
-        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output),
-        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output),
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
     }
     log::info!("Finished");
 }
@@ -724,6 +730,20 @@ fn into_metric_list(report_hit_counts: bool, report_bases_covered: bool) -> Vec<
     metrics
 }
 
+// Resolve the requested output format, rejecting the unsupported combination of
+// Themisto 1 output with per-read metrics before any work starts.
+fn resolve_output_format(themisto1_output_format: bool, metrics: &[pseudoalignment_metrics::Metric]) -> pseudoalignment::OutputFormat {
+    if themisto1_output_format {
+        if !metrics.is_empty() {
+            log::error!("The Themisto 1 output format does not support reporting pseudoalignment metrics. Drop --themisto1-output-format or the metric reporting flags.");
+            std::process::exit(1);
+        }
+        pseudoalignment::OutputFormat::Themisto1
+    } else {
+        pseudoalignment::OutputFormat::Jsonl
+    }
+}
+
 fn main() -> std::process::ExitCode {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -784,25 +804,27 @@ fn main() -> std::process::ExitCode {
             }
         },
 
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, output} => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, themisto1_output_format, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
+            let output_format = resolve_output_format(themisto1_output_format, &metrics);
             let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output),
-                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output),
+                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output, output_format),
+                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output, output_format),
             };
 
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, output} => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, themisto1_output_format, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
+            let output_format = resolve_output_format(themisto1_output_format, &metrics);
             let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output),
-                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output),
+                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
+                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
             };
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers, output } => {
