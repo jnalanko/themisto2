@@ -282,7 +282,15 @@ impl QueryResult {
             let compat_e = self.compatibility_class_starts[seq_idx+1]; 
 
             bytes.extend(b"\"name\": \"");
-            bytes.extend(&self.query_names_concat[name_s..name_e]);
+            // Escape double quotes. '"' is ASCII (0x22), which never appears as a byte
+            // inside a multi-byte UTF-8 sequence, so escaping byte-by-byte is Unicode-safe.
+            for &b in &self.query_names_concat[name_s..name_e] {
+                if b == b'"' {
+                    bytes.push(b'\\');
+                }
+                bytes.push(b);
+            }
+
             bytes.extend(b"\", \"colors\": ");
             Self::write_slice_as_ascii(&self.compatibility_class_concat[compat_s..compat_e], &mut bytes);
 
