@@ -445,7 +445,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
                         let t = last_wakeup_time.elapsed().as_secs_f64();
                         let in_throughput = (n_in - last_n_bases_processed) as f64 / t / (1 << 20) as f64;
                         let out_throughput = (n_out - last_n_bytes_output) as f64 / t / (1 << 20) as f64;
-                        log::info!("Current throughput: input {:.3} Mbases/s, output {:.3} MiB/s ({} bases processed, {} output written total)", in_throughput, out_throughput, n_in, n_out);
+                        log::info!("Input {:.3} Mbases/s, output {:.3} MiB/s (total: {} bases, {} MiB out)", in_throughput, out_throughput, n_in, n_out);
                         last_n_bases_processed = n_in;
                         last_n_bytes_output = n_out;
                         last_wakeup_time = std::time::Instant::now();
