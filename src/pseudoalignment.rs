@@ -325,7 +325,7 @@ impl QueryResult {
     }
 }
 
-fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, mut output: impl Write + Send, sort_output: bool){
+fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, mut output: impl Write + Send, sort_output: bool, n_bytes_output: &AtomicUsize){
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
 
@@ -333,6 +333,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
         // Write batches in the order they are received.
         while let Ok((json, _batch_id)) = results_recv.recv() {
             output.write_all(&json).unwrap();
+            n_bytes_output.fetch_add(json.len(), Relaxed);
         }
         return;
     }
@@ -364,6 +365,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
             assert!(total_buffer_size >= json.len());
             total_buffer_size -= json.len();
             output.write_all(&json).unwrap();
+            n_bytes_output.fetch_add(json.len(), Relaxed);
             next_batch_id += 1;
         }
     }
@@ -383,7 +385,8 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
 
     let (progress_printer_quit_signal_send, progress_printer_quit_signal_recv) = crossbeam::channel::bounded::<()>(1);
 
-    let n_bases_processed = AtomicUsize::new(0); 
+    let n_bases_processed = AtomicUsize::new(0);
+    let n_bytes_output = AtomicUsize::new(0);
 
     std::thread::scope(|scope| {
         let parser_handle = scope.spawn(move || {
@@ -424,23 +427,27 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
         }
 
         let outputter_handle = scope.spawn(|| {
-            output_thread(results_recv, output, sort_output);
+            output_thread(results_recv, output, sort_output, &n_bytes_output);
         });
 
         let progress_printer_handle = scope.spawn(|| {
             let mut last_wakeup_time = std::time::Instant::now();
             let mut last_n_bases_processed = n_bases_processed.load(Relaxed);
+            let mut last_n_bytes_output = n_bytes_output.load(Relaxed);
             let print_interval = std::time::Duration::from_secs(10);
             let start_time = std::time::Instant::now();
             loop {
                 match progress_printer_quit_signal_recv.recv_timeout(print_interval) {
                     Ok(_) => break, // Received the quit signal
                     Err(RecvTimeoutError::Timeout) => { // Time to print
-                        let n = n_bases_processed.load(Relaxed);
+                        let n_in = n_bases_processed.load(Relaxed);
+                        let n_out = n_bytes_output.load(Relaxed);
                         let t = last_wakeup_time.elapsed().as_secs_f64();
-                        let throughput = (n - last_n_bases_processed) as f64 / t / (1 << 20) as f64;
-                        log::info!("Current throughput {:.3} Mbases/s ({} bases processed total)", throughput, n);
-                        last_n_bases_processed = n;
+                        let in_throughput = (n_in - last_n_bases_processed) as f64 / t / (1 << 20) as f64;
+                        let out_throughput = (n_out - last_n_bytes_output) as f64 / t / (1 << 20) as f64;
+                        log::info!("Current throughput: input {:.3} Mbases/s, output {:.3} MiB/s ({} bases processed, {} output written total)", in_throughput, out_throughput, n_in, n_out);
+                        last_n_bases_processed = n_in;
+                        last_n_bytes_output = n_out;
                         last_wakeup_time = std::time::Instant::now();
                     },
                     Err(RecvTimeoutError::Disconnected) => {
@@ -452,10 +459,12 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
 
             // Print total statistics
             let total_n = n_bases_processed.load(Relaxed);
+            let total_n_out = n_bytes_output.load(Relaxed);
             let total_t = start_time.elapsed().as_secs_f64();
-            let total_throughput = total_n as f64 / total_t / (1 << 20) as f64;
-            log::info!("Total bases {} bases processed in {:.3} seconds", total_n, total_t);
-            log::info!("Total throughput: {:.3} Mbases/s", total_throughput);
+            let total_in_throughput = total_n as f64 / total_t / (1 << 20) as f64;
+            let total_out_throughput = total_n_out as f64 / total_t / (1 << 20) as f64;
+            log::info!("Total {} bases processed and {} output written in {:.3} seconds", total_n, total_n_out, total_t);
+            log::info!("Total throughput: input {:.3} Mbases/s, output {:.3} MiB/s", total_in_throughput, total_out_throughput);
         });
         
         parser_handle.join().unwrap(); // Wait for the parser to finish
