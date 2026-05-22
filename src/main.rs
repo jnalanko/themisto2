@@ -57,7 +57,7 @@ pub enum Denominator { // Options for the CLI
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
-pub enum ColoringType{ // Options for the CLI
+pub enum ColoringType{ // Options for the CLI. This is old code: now only SparseDense is supported.
     Bitmaps,
     SparseDense,
 }
@@ -104,9 +104,6 @@ pub enum Subcommands {
 
         #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize,
-
-        #[arg(long = "index-type")]
-        index_type: ColoringType,
 
         #[arg(long = "to-disk-in-pieces", help = "Build the final sets in pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once.")]
         n_pieces: Option<usize>,
@@ -736,7 +733,7 @@ fn main() -> std::process::ExitCode {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, index_type, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
+        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, sample_distance, sbwt_path, lcs_path, from_unitigs, forward_only, n_pieces} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -773,36 +770,17 @@ fn main() -> std::process::ExitCode {
 
             let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, forward_only, n_threads);
 
-            match index_type {
-                ColoringType::Bitmaps => {
-                    match n_pieces {
-                        None => {
-                            let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<BitmapStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
-                            let index = index.unwrap(); // Ok because we passed in InMemory
-                            log::info!("Serializing bitmap index to {}", output.display());
-                            write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
-                        },
-                        Some(_) => {
-                            eprintln!("Error: direct construction to disk not implemented for BitmapStorage");
-                            return ExitCode::FAILURE;
-                        }
-                    }
+            match n_pieces {
+                None => {
+                    let mut out = BufWriter::new(File::create(&output).unwrap());
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
+                    let index = index.unwrap(); // Ok because we passed in InMemory
+                    log::info!("Serializing sparse-dense index to {}", output.display());
+                    write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
-                ColoringType::SparseDense => {
-                    match n_pieces {
-                        None => {
-                            let mut out = BufWriter::new(File::create(&output).unwrap());
-                            let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::InMemory);
-                            let index = index.unwrap(); // Ok because we passed in InMemory
-                            log::info!("Serializing sparse-dense index to {}", output.display());
-                            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
-                        },
-                        Some(n_pieces) => {
-                            build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
-                        }
-                    }
-                },
+                Some(n_pieces) => {
+                    build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, forward_only, BuildMode::ToDisk(output, n_pieces));
+                }
             }
         },
 

@@ -36,7 +36,7 @@ fn file_colors_and_seq_colors_produce_same_index() {
     let status = themisto2()
         .args(["build", "--file-colors", "example/fof.txt", "--temp-dir"])
         .arg(&tmp1)
-        .args(["-k", "3", "--index-type", "sparse-dense", "-t", "1", "-o"])
+        .args(["-k", "3", "-t", "1", "-o"])
         .arg(&index1)
         .status()
         .unwrap();
@@ -45,7 +45,7 @@ fn file_colors_and_seq_colors_produce_same_index() {
     let status = themisto2()
         .args(["build", "--seq-colors", "example/seq-colors.fna", "--temp-dir"])
         .arg(&tmp2)
-        .args(["-k", "3", "--index-type", "sparse-dense", "-t", "1", "-o"])
+        .args(["-k", "3", "-t", "1", "-o"])
         .arg(&index2)
         .status()
         .unwrap();
