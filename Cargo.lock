@@ -1518,6 +1518,7 @@ dependencies = [
  "clap",
  "crossbeam 0.8.4",
  "env_logger 0.10.2",
+ "human_bytes",
  "indicatif",
  "jseqio",
  "log",

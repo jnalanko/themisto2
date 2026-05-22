@@ -333,8 +333,19 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
     // Min-heap of batches received out of order, keyed by batch id.
     let mut buffer: BinaryHeap<Reverse<(usize, Vec<u8>)>> = BinaryHeap::new();
 
+    let mut next_buffer_size_warning = 1_usize << 31; // 2 GiB 
+    let mut total_buffer_size = 0_usize;
+
     while let Ok((json, batch_id)) = results_recv.recv() {
+
+        total_buffer_size += json.len();
         buffer.push(Reverse((batch_id, json)));
+
+        if total_buffer_size >= next_buffer_size_warning {
+            let human_bytes = human_bytes::human_bytes(total_buffer_size as f64);
+            log::warn!("Output thread can not keep up: {} bytes in output buffer. Consider using fewer threads, or running without output sorting.", human_bytes);
+            next_buffer_size_warning *= 2;
+        }
 
         // Write out all batches that are now consecutive starting from next_batch_id.
         while let Some(Reverse((id, _))) = buffer.peek() {
@@ -342,6 +353,8 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
                 break;
             }
             let Reverse((_, json)) = buffer.pop().unwrap();
+            assert!(total_buffer_size >= json.len());
+            total_buffer_size -= json.len();
             output.write_all(&json).unwrap();
             next_batch_id += 1;
         }
