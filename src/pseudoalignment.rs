@@ -352,7 +352,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
 
         if total_buffer_size >= next_buffer_size_warning {
             let human_bytes = human_bytes::human_bytes(total_buffer_size as f64);
-            log::warn!("Output thread can not keep up: {} bytes in output buffer. Consider using fewer threads, or running without output sorting.", human_bytes);
+            log::warn!("A large number of bytes waiting to be written to disk: {}. Consider using fewer threads, or running without output sorting.", human_bytes);
             next_buffer_size_warning *= 2;
         }
 
