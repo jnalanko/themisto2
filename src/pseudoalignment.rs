@@ -463,7 +463,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
             let total_t = start_time.elapsed().as_secs_f64();
             let total_in_throughput = total_n as f64 / total_t / (1 << 20) as f64;
             let total_out_throughput = total_n_out as f64 / total_t / (1 << 20) as f64;
-            log::info!("Total {} bases processed and {} output written in {:.3} seconds", total_n, total_n_out, total_t);
+            log::info!("Total {} bases processed and {} output written in {:.3} seconds", total_n, human_bytes::human_bytes(total_n_out as f64), total_t);
             log::info!("Total throughput: input {:.3} Mbases/s, output {:.3} MiB/s", total_in_throughput, total_out_throughput);
         });
         
