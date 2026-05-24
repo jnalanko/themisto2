@@ -5,3 +5,4 @@
 [submodule "ggcat"]
 	path = ggcat
 	url = https://github.com/algbio/ggcat
+    update = none # Do not pull this by default because this is an optional feature
