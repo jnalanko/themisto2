@@ -3,6 +3,7 @@ use crossbeam::channel::{Sender, bounded};
 use indicatif::ProgressStyle;
 use jseqio::reverse_complement;
 use jseqio::seq_db::SeqDB;
+use rayon::slice::ParallelSliceMut;
 use sbwt::dbg::Dbg;
 use sbwt::reverse_complement_in_place;
 use sbwt::LcsArray;
@@ -283,9 +284,9 @@ impl ColexToColorSetMap {
     }
 }
 
-struct UnitigImportSeqBatch {
+pub(crate) struct UnitigImportSeqBatch {
     pub concat: Vec<u8>,
-    pub starts: Vec<usize>, // Has concat.len() at the end 
+    pub starts: Vec<usize>, // Has concat.len() at the end
     pub color_set_ids: Vec<usize>, // The color set id for each sequence in the concatenation
 }
 
@@ -298,7 +299,7 @@ impl UnitigImportSeqBatch {
         self.starts.len() - 1 // Has concat.len() at the end
     }
 
-    fn process(mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
+    pub(crate) fn process(mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
         let k = index.k();
 
         let mut set_ids_fn = |seq: &[u8], color_set_id| {
@@ -523,7 +524,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let n_colors = metadata.num_colors;
 
         log::info!("Sorting (colex, color set id) pairs");
-        colex_to_color_set_id.sort(); // Sorts by colex
+        rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap().install(|| {
+            colex_to_color_set_id.par_sort_unstable(); // Sorts by colex
+        });
+
         let bit_width = metadata.num_color_sets.next_power_of_two().trailing_zeros() as usize;
         log::info!("Building compressed representation for color set ids");
         let mut stored_color_set_ids = CompactIntVec::new(colex_to_color_set_id.len(), bit_width);

@@ -25,13 +25,17 @@ pub trait ColorSetStorage {
     // A fully generic way to construct the storage from a stream of color sets.
     // Returning box so that I can provide the method new_from_iter_of_iters
     // because there the size of the return value must be known at compile time.
-    fn new(sets: impl USizeIteratorGenerator, n_colors: usize) -> Box<Self>; // Todo: rename to match better with `new_from_transpose`?
+    fn new(sets: impl USizeIteratorGenerator, n_colors: usize) -> Box<Self>;
 
     // Construct in parallel from a generator of set_of_sets_construction::SetElement
+    // TODO: if the generator generates duplicate elements, then the sets will have dupliate
+    // elements? So the generator must not generate duplicates? Encode this in the type?
     fn new_parallel(element_gen: impl crate::set_of_sets_construction::ParallelElementGenerator, n_colors: usize, set_sizes: &[usize], n_threads: usize) -> Box<Self>;
 
     // Construct in parallel in chunks, one element generator for each, and write the data
     // directly to disk in chunks.
+    // TODO: if the generator generates duplicate elements, then the sets will have dupliate
+    // elements? So the generator must not generate duplicates? Encode this in the type?
     fn new_parallel_to_disk(element_gens: Vec<(impl crate::set_of_sets_construction::ParallelElementGenerator, std::ops::Range<usize>)>, set_sizes: Vec<usize>, output_prefix: &std::path::Path, n_threads: usize);
 
     fn n_sets(&self) -> usize;
