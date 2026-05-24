@@ -886,7 +886,7 @@ fn main() -> std::process::ExitCode {
             // colex-map builder, which queries both directions per unitig,
             // panics on revcomp lookups).
             let input_stream = io::ChainedInputStream::new(vec![ggcat_unitigs.clone()]);
-            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, false, n_threads);
+            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
 
             let mut out = BufWriter::new(File::create(&out_path).unwrap());
             let index = build_from_ggcat::build_index_from_ggcat::<SparseDenseStorage>(
