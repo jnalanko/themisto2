@@ -131,11 +131,15 @@ pub fn build_index_from_ggcat<CSS: ColorSetStorage + Send + Sync + 'static>(
     assert!(sample_distance > 0);
 
     log::info!("Initializing GGCAT instance");
+    // ggcat runs as the single producer feeding our colex workers — analogous
+    // to `unitig_import_parser_thread` in `new_from_colored_unitig_dump`. Cap
+    // its thread pool at 1 so total concurrent worker threads stays at
+    // `n_threads` (the colex pool) instead of `2 * n_threads`.
     let instance = GGCATInstance::create(GGCATConfig {
         temp_dir: Some(temp_dir.to_path_buf()),
         memory: 2.0,
         prefer_memory: true,
-        total_threads_count: n_threads,
+        total_threads_count: 1,
         intermediate_compression_level: None,
         stats_file: None,
         messages_callback: None,
@@ -171,7 +175,7 @@ pub fn build_index_from_ggcat<CSS: ColorSetStorage + Send + Sync + 'static>(
                     k,
                     None,
                     true, // colors required
-                    n_threads,
+                    1,    // ggcat is the producer; parallelism lives in our colex worker pool
                     true, // single_thread_output_function: callback is serialized for us
                     |seq, colors, same_colors| {
                         // `single_thread_output_function=true` serializes our
