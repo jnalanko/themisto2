@@ -7,7 +7,6 @@
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
 use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, time::Instant};
-use bitmap_storage::BitmapStorage;
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
@@ -240,9 +239,6 @@ pub enum Subcommands {
         #[arg(help = "Index text dump file prefix, as written by Fulgor 4.0.0", long = "color-dump-prefix", short = 'c', required = true)]
         color_dump_prefix: PathBuf,
 
-        #[arg(long = "index-type")]
-        index_type: ColoringType,
-
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
         sample_distance: usize,
 
@@ -442,9 +438,11 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     }
 }
 
-#[allow(clippy::large_enum_variant)] // It's saying that it's almost a kilobyte. I don't understand why but ok.
+// There used to be two variants. Now there is just one.
+// This enum will serialize with an id specifying the variant.
+// We'll keep this still in case we want to add support for 
+// other variants in the future.
 enum IndexVariant {
-    BitmapIndex(CompactColexKmers<BitmapStorage>),
     SparseDenseIndex(CompactColexKmers<SparseDenseStorage>),
 }
 
@@ -452,11 +450,7 @@ fn load_index_color_names_only(path: &Path) -> Vec<String> {
     let mut input = BufReader::new(File::open(path).unwrap());
     let mut id_buf = [0u8; 8];
     input.read_exact(&mut id_buf).unwrap();
-    // Both index variants share the same color-names layout right after the
-    // magic + version, so we still verify the id is one we recognize.
-    if id_buf == ColoringType::Bitmaps.serialization_id() {
-        CompactColexKmers::<BitmapStorage>::load_color_names_only(&mut input)
-    } else if id_buf == ColoringType::SparseDense.serialization_id() {
+    if id_buf == ColoringType::SparseDense.serialization_id() {
         CompactColexKmers::<SparseDenseStorage>::load_color_names_only(&mut input)
     } else {
         panic!("Unrecognized index serialization ID: {:?}", id_buf);
@@ -467,10 +461,7 @@ fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
     let mut input = BufReader::new(File::open(path).unwrap());
     let mut id_buf = [0u8; 8];
     input.read_exact(&mut id_buf).unwrap();
-    if id_buf == ColoringType::Bitmaps.serialization_id() {
-        let index = CompactColexKmers::<BitmapStorage>::load(&mut input, build_select);
-        IndexVariant::BitmapIndex(index)
-    } else if id_buf == ColoringType::SparseDense.serialization_id() {
+    if id_buf == ColoringType::SparseDense.serialization_id() {
         let index = CompactColexKmers::<SparseDenseStorage>::load(&mut input, build_select);
         IndexVariant::SparseDenseIndex(index)
     } else {
@@ -480,10 +471,6 @@ fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
 
 fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     match index {
-        IndexVariant::BitmapIndex(idx) => {
-            out.write_all(&ColoringType::Bitmaps.serialization_id()).unwrap();
-            idx.serialize(out);
-        },
         IndexVariant::SparseDenseIndex(idx) => {
             out.write_all(&ColoringType::SparseDense.serialization_id()).unwrap();
             idx.serialize(out);
@@ -633,24 +620,12 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 let colors2 = load_index_variant(&pair[1], true); // Select support is required
 
                 match (colors1, colors2) {
-                    (IndexVariant::BitmapIndex(c1), IndexVariant::BitmapIndex(c2)) => {
-                        log::info!("Merging bitmap indexes");
-                        let merged_colored_kmers = merge::merge_compact_colex_kmers(c1, c2, low_ram_mode, sample_distance, n_threads);
-                        log::info!("Serializing merged index to {}", outpath.display());
-                        write_index_variant(&IndexVariant::BitmapIndex(merged_colored_kmers), &mut out);
-                    },
                     (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
                         log::info!("Merging sparse-dense indexes");
                         let merged_colored_kmers = merge::merge_compact_colex_kmers(c1, c2, low_ram_mode, sample_distance, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
                     },
-                    (IndexVariant::SparseDenseIndex(_), IndexVariant::BitmapIndex(_)) => {
-                        panic!("Mismatched index types when merging: {} and {}", pair[0].display(), pair[1].display());
-                    }
-                    (IndexVariant::BitmapIndex(_), IndexVariant::SparseDenseIndex(_)) => {
-                        panic!("Mismatched index types when merging: {} and {}", pair[0].display(), pair[1].display());
-                    }
                 }
                 next_files.push(outpath);
             } else {
@@ -811,7 +786,6 @@ fn main() -> std::process::ExitCode {
             let output_format = resolve_output_format(themisto1_output_format, &metrics);
             let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output, output_format),
                 IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output, output_format),
             };
 
@@ -823,7 +797,6 @@ fn main() -> std::process::ExitCode {
             let output_format = resolve_output_format(themisto1_output_format, &metrics);
             let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
                 IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
             };
         },
@@ -832,7 +805,6 @@ fn main() -> std::process::ExitCode {
             let index = load_index_variant(&index_path, false); // No select support required
             let out = open_output(output);
             match index {
-                IndexVariant::BitmapIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
                 IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
             };
         },
@@ -847,7 +819,7 @@ fn main() -> std::process::ExitCode {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
             run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode, sample_distance);
         },
-        Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, index_type, sample_distance} => {
+        Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
             let color_sets_filename = format!("{}.color_sets.txt", color_dump_prefix.to_str().unwrap());
             let metadata_filename = format!("{}.metadata.txt", color_dump_prefix.to_str().unwrap());
@@ -874,33 +846,21 @@ fn main() -> std::process::ExitCode {
             let color_dump = BufReader::new(File::open(&color_sets_filename).unwrap());
             let metadata_dump = BufReader::new(File::open(&metadata_filename).unwrap());
 
-            match index_type {
-                ColoringType::Bitmaps => {
-                    let index = CompactColexKmers::<BitmapStorage>::new_from_colored_unitig_dump(
-                        sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
-                    log::info!("Serializing bitmap index to {}", out_path.display());
-                    write_index_variant(&IndexVariant::BitmapIndex(index), &mut out);
-                },
-                ColoringType::SparseDense => {
-                    let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
-                        sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
-                    log::info!("Serializing sparse-dense index to {}", out_path.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
-                },
-            }
+            let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
+                sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
+            log::info!("Serializing sparse-dense index to {}", out_path.display());
+            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
         },
         Subcommands::Export { index: index_path, color_dump_prefix, n_threads } => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for export
             match index {
-                IndexVariant::BitmapIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
                 IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
             };
         },
         Subcommands::Stats { index: index_path, n_threads } => {
             let index = load_index_variant(&index_path, true); // Select support required for DBG
             match index {
-                IndexVariant::BitmapIndex(idx) => print_stats(&idx, n_threads),
                 IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
             };
         }
@@ -920,7 +880,6 @@ fn main() -> std::process::ExitCode {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
-                IndexVariant::BitmapIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Finimizer),
                 IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Finimizer),
             };
         },
@@ -929,7 +888,6 @@ fn main() -> std::process::ExitCode {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for verify
             match index {
-                IndexVariant::BitmapIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
                 IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
             };
         },

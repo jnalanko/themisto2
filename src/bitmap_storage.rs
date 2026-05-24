@@ -6,6 +6,10 @@ use bitvec::prelude::*;
 
 use crate::{atomic_bitmap::AtomicBitmap, coloring_interface, iterators::{USizeIterator, USizeIteratorGenerator}, set_of_sets_construction::ParallelElementGenerator};
 
+// This file contains a bitmap color storage implementing coloring_interface::ColorSetStorage.
+// This code is no longer supported in the main CLI of Themisto 2, but
+// it's still used in some tests to easily construct the color sets.
+
 /*
  *
  * Structs

@@ -3,12 +3,12 @@ use std::io::{BufRead, Write};
 #[derive(serde::Deserialize, Debug)]
 pub struct PseudoalignmentRecord<'a> {
     #[serde(borrow)]
-    pub name: &'a str,
+    pub _name: &'a str,
     pub colors: Vec<usize>,
     #[serde(default)]
-    pub kmer_hits: Option<Vec<usize>>,
+    pub _kmer_hits: Option<Vec<usize>>,
     #[serde(default)]
-    pub bases_covered: Option<Vec<usize>>,
+    pub _bases_covered: Option<Vec<usize>>,
 }
 
 #[derive(serde::Serialize, Debug)]

@@ -230,9 +230,32 @@ mod tests {
     use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
     use simple_sds_sbwt::ops::{BitVec, Rank};
 
-    use crate::{bitmap_storage::build_from_seq_dbs, colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
+    use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, sparse_dense_storage::SparseDenseStorage, util::VecVecSeqStream};
 
     use super::CompactColexKmers;
+
+    // Annoying plumbing to get a RewindableSeqStreamGenerator from Vec<SeqDB>
+    /*
+    struct SeqDBsColorStream{
+        dbs: Vec<SeqDB>,
+        db_idx: usize,
+    }
+    impl RewindableSeqStreamGenerator for SeqDBsColorStream {
+        fn next(&mut self) -> Option<Box<dyn sbwt::SeqStream + Send + Sync>> {
+            if self.db_idx == self.dbs.len() { None }
+            else {
+                let seqs: Vec<Vec<u8>> = self.dbs[self.db_idx].iter().map(|rec| rec.seq.to_owned()).collect();
+                let ss = VecVecSeqStream::new(seqs);
+                let it: Box<dyn sbwt::SeqStream + Send + Sync> = Box::new(ss);
+                Some(it)
+            }
+        }
+    
+        fn rewind(&mut self) {
+            self.db_idx = 0;
+        }
+    }
+    */
 
     /// Output:
     /// - Distinct color sets encoded as ColorSetStorage
@@ -289,7 +312,7 @@ mod tests {
     fn build_color_sets<CSS: ColorSetStorage>(sbwt1: &SbwtIndex<SubsetMatrix>, lcs1: &LcsArray, dbs1: Vec<SeqDB>, n_threads: usize) 
     -> (Vec<usize>, CSS){
         let n_colors_1 = dbs1.len();
-        let bms1 = build_from_seq_dbs(dbs1, sbwt1, lcs1, n_threads);
+        let bms1 = crate::bitmap_storage::build_from_seq_dbs(dbs1, sbwt1, lcs1, n_threads);
 
         let iter_of_iters_1 = (0..sbwt1.n_sets()).map(|colex| bms1.get_set_view(colex).iter());
         let colex_to_css_1 = *CSS::new_from_iter_of_iters(iter_of_iters_1, n_colors_1);
