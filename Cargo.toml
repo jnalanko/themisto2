@@ -39,5 +39,19 @@ bytemuck = {version = "1.24.0", features = ["extern_crate_alloc"]}
 sha1 = "0.10.6"
 human_bytes = "0.4.3"
 
+# Optional: tighter integration with ggcat. Gated behind the `ggcat` feature
+# because the ggcat tree is large and pulls in many transitive dependencies.
+ggcat_api = { path = "./ggcat/crates/api", package = "ggcat-api", optional = true }
+parking_lot = { version = "0.12", optional = true }
+# Pin transitive deps so the `ggcat` feature picks up the same versions ggcat
+# was built against. Without these, the cargo resolver climbs to newer minor
+# releases that have breaking trait changes ggcat's own lockfile shielded it
+# from.
+parallel-processor = { version = "=0.2.3", optional = true }
+
+[features]
+default = []
+ggcat = ["dep:ggcat_api", "dep:parking_lot", "dep:parallel-processor"]
+
 [profile.release]
 debug = true      # keep symbols so profilers can show Rust function names

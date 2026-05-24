@@ -283,9 +283,9 @@ impl ColexToColorSetMap {
     }
 }
 
-struct UnitigImportSeqBatch {
+pub(crate) struct UnitigImportSeqBatch {
     pub concat: Vec<u8>,
-    pub starts: Vec<usize>, // Has concat.len() at the end 
+    pub starts: Vec<usize>, // Has concat.len() at the end
     pub color_set_ids: Vec<usize>, // The color set id for each sequence in the concatenation
 }
 
@@ -298,7 +298,7 @@ impl UnitigImportSeqBatch {
         self.starts.len() - 1 // Has concat.len() at the end
     }
 
-    fn process(mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
+    pub(crate) fn process(mut self, results_out: &mut Vec<(usize, usize)>, index: &sbwt::StreamingIndex<'_, SbwtIndex<SubsetMatrix>, LcsArray>, sample_distance: usize) { // Todo this should consume that batch since it's edited
         let k = index.k();
 
         let mut set_ids_fn = |seq: &[u8], color_set_id| {
