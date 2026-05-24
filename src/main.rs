@@ -27,8 +27,6 @@ mod colex_colored_kmers;
 mod coloring_interface;
 mod sparse_dense_storage;
 mod io;
-#[cfg(feature = "ggcat")]
-mod build_from_ggcat;
 mod set_of_sets_construction;
 mod iterators;
 mod parallel_ms_iteration;
@@ -245,37 +243,6 @@ pub enum Subcommands {
 
         #[arg(help = "Index output file", long = "out", short = 'o', required = true)]
         out: PathBuf,
-    },
-
-    #[cfg(feature = "ggcat")]
-    #[command(arg_required_else_help = true, name = "import-from-ggcat")]
-    ImportFromGgcat {
-        #[arg(help = "Path to the ggcat unitigs file (e.g. graph.fna)", long = "ggcat-unitigs", required = true)]
-        ggcat_unitigs: PathBuf,
-
-        #[arg(help = "Path to the ggcat colormap file (e.g. graph.colors.dat)", long = "ggcat-colors", required = true)]
-        ggcat_colors: PathBuf,
-
-        #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
-        sbwt_path: Option<PathBuf>,
-
-        #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
-        lcs_path: Option<PathBuf>,
-
-        #[arg(help = "Index output file", long = "out", short = 'o', required = true)]
-        out: PathBuf,
-
-        #[arg(long = "temp-dir", required = true)]
-        temp_dir: PathBuf,
-
-        #[arg(short, required = true)]
-        k: usize,
-
-        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
-        sample_distance: usize,
-
-        #[arg(long = "n-threads", short = 't', default_value = "4")]
-        n_threads: usize,
     },
 
     #[command(arg_required_else_help = true)]
@@ -871,27 +838,6 @@ fn main() -> std::process::ExitCode {
 
             let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
                 sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
-            log::info!("Serializing sparse-dense index to {}", out_path.display());
-            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
-        },
-        #[cfg(feature = "ggcat")]
-        Subcommands::ImportFromGgcat { ggcat_unitigs, ggcat_colors, sbwt_path, lcs_path, out: out_path, temp_dir, k, sample_distance, n_threads } => {
-            // Sanity-check inputs early.
-            BufReader::new(File::open(&ggcat_unitigs).unwrap());
-            BufReader::new(File::open(&ggcat_colors).unwrap());
-
-            // Build SBWT directly from the unitig FASTA. ggcat unitigs are
-            // bidirected: each canonical unitig represents both strands, so the
-            // SBWT must index reverse complements too (otherwise the
-            // colex-map builder, which queries both directions per unitig,
-            // panics on revcomp lookups).
-            let input_stream = io::ChainedInputStream::new(vec![ggcat_unitigs.clone()]);
-            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
-
-            let mut out = BufWriter::new(File::create(&out_path).unwrap());
-            let index = build_from_ggcat::build_index_from_ggcat::<SparseDenseStorage>(
-                sbwt, lcs, &ggcat_unitigs, &ggcat_colors, &temp_dir, k, sample_distance, n_threads,
-            );
             log::info!("Serializing sparse-dense index to {}", out_path.display());
             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
         },

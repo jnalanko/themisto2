@@ -1,4 +1,4 @@
-#![cfg(feature = "ggcat")]
+// This is dead code for now, might re-integrate later.
 
 //! Direct construction of a Themisto 2 index from a ggcat colored graph,
 //! reading through the ggcat API instead of via an intermediate text dump.
