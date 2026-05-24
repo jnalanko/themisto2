@@ -16,6 +16,7 @@ use std::path::Path;
 use crossbeam::channel::{bounded, Receiver};
 use ggcat_api::{GGCATConfig, GGCATInstance};
 use parking_lot::Mutex;
+use rayon::slice::ParallelSliceMut;
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use simple_sds_sbwt::raw_vector::AccessRaw;
@@ -271,7 +272,9 @@ pub fn build_index_from_ggcat<CSS: ColorSetStorage + Send + Sync + 'static>(
 
     log::info!("Sorting (colex, color set id) pairs");
     let mut colex_pairs = colex_pairs;
-    colex_pairs.sort();
+    rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap().install(|| {
+        colex_pairs.par_sort_unstable();
+    });
 
     let bit_width = n_color_sets.next_power_of_two().trailing_zeros() as usize;
     log::info!("Building compressed representation for color set ids");
