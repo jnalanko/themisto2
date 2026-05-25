@@ -113,16 +113,16 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "query", short = 'q')]
+        #[arg(long = "query", short = 'q', conflicts_with_all = ["query_list", "query_output_list"], help = "Query file (FASTA/FASTQ, optionally gzipped). If omitted and --query-list is also omitted, reads queries from stdin. Mutually exclusive with --query-list and --query-output-list.")]
         query: Option<PathBuf>,
 
-        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        #[arg(long = "output", short = 'o', conflicts_with_all = ["query_list", "query_output_list"], help = "Output file. If omitted, writes to stdout. Mutually exclusive with --query-list and --query-output-list.")]
         output: Option<PathBuf>,
 
         #[arg(long = "query-list", help = "A list of query files, one per line. All query results are printed to stdout, unless --query-output-list is given.")]
         query_list: Option<PathBuf>,
 
-        #[arg(long = "query-output-list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list.")]
+        #[arg(long = "query-output-list", requires = "query_list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list. Requires --query-list.")]
         query_output_list: Option<PathBuf>,
 
         #[arg(long = "min-hits", short = 'm', default_value = "1")]
@@ -150,16 +150,16 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "query", short = 'q')]
+        #[arg(long = "query", short = 'q', conflicts_with_all = ["query_list", "query_output_list"], help = "Query file (FASTA/FASTQ, optionally gzipped). If omitted and --query-list is also omitted, reads queries from stdin. Mutually exclusive with --query-list and --query-output-list.")]
         query: Option<PathBuf>,
 
-        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        #[arg(long = "output", short = 'o', conflicts_with_all = ["query_list", "query_output_list"], help = "Output file. If omitted, writes to stdout. Mutually exclusive with --query-list and --query-output-list.")]
         output: Option<PathBuf>,
 
         #[arg(long = "query-list", help = "A list of query files, one per line. All query results are printed to stdout, unless --query-output-list is given.")]
         query_list: Option<PathBuf>,
 
-        #[arg(long = "query-output-list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list.")]
+        #[arg(long = "query-output-list", requires = "query_list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list. Requires --query-list.")]
         query_output_list: Option<PathBuf>,
 
         #[arg(long = "min-hits", short = 'm', required = true, default_value = "1")]
@@ -558,22 +558,30 @@ fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKme
     log::info!("Time in lookup per nucleotide: {:.2} ns", total_lookup_nanoseconds as f64 / (total_bases_read as f64));
 }
 
+fn open_query_reader(query_path: Option<&Path>) -> jseqio::reader::DynamicFastXReader {
+    match query_path {
+        Some(p) => jseqio::reader::DynamicFastXReader::from_file(&p).unwrap(),
+        None => jseqio::reader::DynamicFastXReader::from_stdin().unwrap(),
+    }
+}
+
 #[allow(clippy::manual_flatten)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     let create_new_aligner = move || {
         let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
+    let reader = open_query_reader(query_path);
     match out {
-        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
-        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, reader, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, reader, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
     }
     log::info!("Finished");
 }
 
 #[allow(clippy::manual_flatten, clippy::len_zero)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
         Denominator::All => pseudoalignment::Denominator::All,
@@ -583,7 +591,8 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
 
     let n_colors = index.get_set_storage().n_colors();
 
-    log::info!("Running threshold pseudoalignment for query sequences in {}", query_path.display());
+    let query_log_string = query_path.map(|p| p.display().to_string()).unwrap_or_else(|| "stdin".to_string());
+    log::info!("Running threshold pseudoalignment for query sequences in {}", query_log_string);
     let create_new_aligner = move || {
         let aligner = pseudoalignment::ThresholdPseudoaligner::new(
             n_colors,
@@ -594,9 +603,10 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
     };
 
+    let reader = open_query_reader(query_path);
     match out {
-        Output::File(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
-        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, query_path, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::File(w) => pseudoalignment::run_pseudoalignment(index, reader, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
+        Output::Stdout(w) => pseudoalignment::run_pseudoalignment(index, reader, w, create_new_aligner, metrics, n_threads, sort_output, output_format),
     }
     log::info!("Finished");
 }
@@ -726,14 +736,17 @@ fn read_file_of_paths(file: &PathBuf) -> Vec<PathBuf> {
         .collect()
 }
 
-// Returns pairs (input file, output file). The output file can be None, in which
+// Returns pairs (input file, output file). The input file can be None, in which
+// case the input should be read from stdin. The output file can be None, in which
 // case the output should be written to stdout.
-fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<PathBuf>, query_listfile: Option<PathBuf>, output_listfile: Option<PathBuf>) 
--> Vec<(PathBuf, Option<PathBuf>)>{
-    let mut io_pairs: Vec<(PathBuf, Option<PathBuf>)> = vec![];
+fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<PathBuf>, query_listfile: Option<PathBuf>, output_listfile: Option<PathBuf>)
+-> Vec<(Option<PathBuf>, Option<PathBuf>)>{
+    let mut io_pairs: Vec<(Option<PathBuf>, Option<PathBuf>)> = vec![];
+
+    let no_input_source_given = query_path.is_none() && query_listfile.is_none();
 
     if let Some(f) = query_path {
-        io_pairs.push((f, output_path))
+        io_pairs.push((Some(f), output_path.clone()))
     }
 
     if let Some(query_listfile) = query_listfile {
@@ -747,13 +760,13 @@ fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<P
         assert!(query_files.len() == output_files.len(), "Error: number of input files ({}) does not match the number of output files ({})", query_files.len(), output_files.len());
 
         for i in 0..query_files.len() {
-            io_pairs.push((query_files[i].clone(), output_files[i].clone()));
+            io_pairs.push((Some(query_files[i].clone()), output_files[i].clone()));
         }
     }
 
-    if io_pairs.len() == 0 {
-        eprintln!("Error: no input files given");
-        std::process::exit(1);
+    if no_input_source_given {
+        // Default: read query sequences from stdin
+        io_pairs.push((None, output_path));
     }
 
     io_pairs
@@ -828,12 +841,13 @@ fn main() -> std::process::ExitCode {
             let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
 
             for (infile, outfile) in io_file_pairs {
-                let output_log_string = if let Some(f) = &outfile { &f.display().to_string() } else { "stdout" };
-                log::info!("Running intersection pseudoalignment for query sequences in {}, writing output to {}", infile.display(), output_log_string);
+                let input_log_string = infile.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "stdin".to_string());
+                let output_log_string = outfile.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "stdout".to_string());
+                log::info!("Running intersection pseudoalignment for query sequences in {}, writing output to {}", input_log_string, output_log_string);
 
                 let out = open_output(outfile);
                 match &index {
-                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &infile, min_hits, &metrics, n_threads, out, sort_output, output_format),
+                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, infile.as_deref(), min_hits, &metrics, n_threads, out, sort_output, output_format),
                 };
 
             }
@@ -847,12 +861,13 @@ fn main() -> std::process::ExitCode {
             let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
 
             for (infile, outfile) in io_file_pairs {
-                let output_log_string = if let Some(f) = &outfile { &f.display().to_string() } else { "stdout" };
-                log::info!("Running threshold pseudoalignment for query sequences in {}, writing output to {}", infile.display(), output_log_string);
+                let input_log_string = infile.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "stdin".to_string());
+                let output_log_string = outfile.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "stdout".to_string());
+                log::info!("Running threshold pseudoalignment for query sequences in {}, writing output to {}", input_log_string, output_log_string);
 
                 let out = open_output(outfile);
                 match &index {
-                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &infile, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
+                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, infile.as_deref(), min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
                 };
             }
         },

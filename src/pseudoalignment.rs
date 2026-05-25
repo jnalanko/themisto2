@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::{io::Write, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 
 use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
@@ -435,8 +435,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
     }
 }
 
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, input_file: &Path, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_format: OutputFormat) {
-    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&input_file).unwrap();
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_format: OutputFormat) {
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);

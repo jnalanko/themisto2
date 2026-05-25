@@ -1,5 +1,6 @@
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(serde::Deserialize, Debug)]
@@ -134,6 +135,21 @@ fn pseudoalign_example_data() {
             query_file,
         );
 
+        // Without -q, queries are read from stdin; output should match.
+        let stdin_out = run_with_stdin(
+            themisto2()
+                .args(["intersection-pseudoalign", "-i"])
+                .arg(&index)
+                .args(["-t", "1", "--sort-output"]),
+            query_file,
+        );
+        assert_eq!(
+            stdin_out,
+            std::fs::read(&intersection_out).unwrap(),
+            "intersection-pseudoalign stdin output differs from --query output for {}",
+            query_file,
+        );
+
         let threshold_out = dir.join(format!("threshold-c{}.jsonl", color + 1));
         let threshold_args = || {
             let mut cmd = themisto2();
@@ -175,5 +191,41 @@ fn pseudoalign_example_data() {
             "threshold-pseudoalign stdout differs from -o output for {}",
             query_file,
         );
+
+        let stdin_out = run_with_stdin(
+            themisto2()
+                .args(["threshold-pseudoalign", "-i"])
+                .arg(&index)
+                .args([
+                    "-m", "1",
+                    "-d", "0.7",
+                    "-n", "relevant",
+                    "-t", "1",
+                    "--sort-output",
+                ]),
+            query_file,
+        );
+        assert_eq!(
+            stdin_out,
+            std::fs::read(&threshold_out).unwrap(),
+            "threshold-pseudoalign stdin output differs from --query output for {}",
+            query_file,
+        );
     }
+}
+
+/// Run `cmd`, piping the contents of `query_file` to its stdin, and return the
+/// captured stdout bytes. Asserts the process exited successfully.
+fn run_with_stdin(cmd: &mut Command, query_file: &str) -> Vec<u8> {
+    let query_bytes = std::fs::read(PathBuf::from(PROJECT_DIR).join(query_file)).unwrap();
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(&query_bytes).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stdin-fed run failed for {}", query_file);
+    output.stdout
 }
