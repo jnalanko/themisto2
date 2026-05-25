@@ -751,6 +751,10 @@ fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<P
 
     if let Some(query_listfile) = query_listfile {
         let query_files = read_file_of_paths(&query_listfile);
+        if query_files.is_empty() {
+            eprintln!("Error: --query-list file {} is empty", query_listfile.display());
+            std::process::exit(1);
+        }
         let output_files: Vec<Option<PathBuf>> = if let Some(output_listfile) = output_listfile {
             read_file_of_paths(&output_listfile).into_iter().map(|p| Some(p)).collect()
         } else {
