@@ -6,7 +6,7 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
-use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, time::Instant};
+use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
@@ -47,7 +47,7 @@ pub struct Cli {
     pub command: Subcommands,
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 pub enum Denominator { // Options for the CLI
     All,
     Relevant,
@@ -113,17 +113,23 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
+        #[arg(long = "query", short = 'q')]
+        query: Option<PathBuf>,
+
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
+
+        #[arg(long = "query-list", help = "A list of query files, one per line. All query results are printed to stdout, unless --query-output-list is given.")]
+        query_list: Option<PathBuf>,
+
+        #[arg(long = "query-output-list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list.")]
+        query_output_list: Option<PathBuf>,
 
         #[arg(long = "min-hits", short = 'm', default_value = "1")]
         min_hits: usize,
 
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
-
-        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
-        output: Option<PathBuf>,
 
         #[arg(long = "report-hit-counts", default_value = "false")]
         report_hit_counts: bool,
@@ -144,8 +150,17 @@ pub enum Subcommands {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
 
-        #[arg(long = "query", short = 'q', required = true)]
-        query: PathBuf,
+        #[arg(long = "query", short = 'q')]
+        query: Option<PathBuf>,
+
+        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
+        output: Option<PathBuf>,
+
+        #[arg(long = "query-list", help = "A list of query files, one per line. All query results are printed to stdout, unless --query-output-list is given.")]
+        query_list: Option<PathBuf>,
+
+        #[arg(long = "query-output-list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list.")]
+        query_output_list: Option<PathBuf>,
 
         #[arg(long = "min-hits", short = 'm', required = true, default_value = "1")]
         min_hits: usize,
@@ -158,9 +173,6 @@ pub enum Subcommands {
 
         #[arg(long = "n-threads", short = 't', required = true, default_value = "4")]
         n_threads: usize,
-
-        #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
-        output: Option<PathBuf>,
 
         #[arg(long = "report-hit-counts", default_value = "false")]
         report_hit_counts: bool,
@@ -548,8 +560,6 @@ fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKme
 
 #[allow(clippy::manual_flatten)]
 fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: &Path, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
-    log::info!("Running intersection pseudoalignment for query sequences in {}", query_path.display());
-
     let create_new_aligner = move || {
         let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
@@ -709,6 +719,46 @@ fn resolve_output_format(themisto1_output_format: bool, metrics: &[pseudoalignme
     }
 }
 
+fn read_file_of_paths(file: &PathBuf) -> Vec<PathBuf> {
+    BufReader::new(File::open(file).unwrap())
+        .lines()
+        .map(|s| PathBuf::from_str(&s.unwrap()).unwrap())
+        .collect()
+}
+
+// Returns pairs (input file, output file). The output file can be None, in which
+// case the output should be written to stdout.
+fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<PathBuf>, query_listfile: Option<PathBuf>, output_listfile: Option<PathBuf>) 
+-> Vec<(PathBuf, Option<PathBuf>)>{
+    let mut io_pairs: Vec<(PathBuf, Option<PathBuf>)> = vec![];
+
+    if let Some(f) = query_path {
+        io_pairs.push((f, output_path))
+    }
+
+    if let Some(query_listfile) = query_listfile {
+        let query_files = read_file_of_paths(&query_listfile);
+        let output_files: Vec<Option<PathBuf>> = if let Some(output_listfile) = output_listfile {
+            read_file_of_paths(&output_listfile).into_iter().map(|p| Some(p)).collect()
+        } else {
+            vec![None; query_files.len()]
+        };
+
+        assert!(query_files.len() == output_files.len(), "Error: number of input files ({}) does not match the number of output files ({})", query_files.len(), output_files.len());
+
+        for i in 0..query_files.len() {
+            io_pairs.push((query_files[i].clone(), output_files[i].clone()));
+        }
+    }
+
+    if io_pairs.len() == 0 {
+        eprintln!("Error: no input files given");
+        std::process::exit(1);
+    }
+
+    io_pairs
+}
+
 fn main() -> std::process::ExitCode {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
@@ -769,26 +819,42 @@ fn main() -> std::process::ExitCode {
             }
         },
 
-        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, themisto1_output_format, output} => {
+        Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, themisto1_output_format, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_format = resolve_output_format(themisto1_output_format, &metrics);
-            let out = open_output(output);
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &query_path, min_hits, &metrics, n_threads, out, sort_output, output_format),
-            };
+
+            let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
+
+            for (infile, outfile) in io_file_pairs {
+                let output_log_string = if let Some(f) = &outfile { &f.display().to_string() } else { "stdout" };
+                log::info!("Running intersection pseudoalignment for query sequences in {}, writing output to {}", infile.display(), output_log_string);
+
+                let out = open_output(outfile);
+                match &index {
+                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, &infile, min_hits, &metrics, n_threads, out, sort_output, output_format),
+                };
+
+            }
 
         },
-        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, themisto1_output_format, output} => {
+        Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, themisto1_output_format, output} => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, false); // No select support required
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_format = resolve_output_format(themisto1_output_format, &metrics);
-            let out = open_output(output);
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &query_path, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
-            };
+            let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
+
+            for (infile, outfile) in io_file_pairs {
+                let output_log_string = if let Some(f) = &outfile { &f.display().to_string() } else { "stdout" };
+                log::info!("Running threshold pseudoalignment for query sequences in {}, writing output to {}", infile.display(), output_log_string);
+
+                let out = open_output(outfile);
+                match &index {
+                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, &infile, min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
+                };
+            }
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers, output } => {
             log::info!("Loading index");
