@@ -39,6 +39,7 @@ mod pseudoalignment;
 mod pseudoalignment_metrics;
 mod sparse_dense_storage_to_disk;
 mod report;
+mod filter_reads;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -287,6 +288,21 @@ pub enum Subcommands {
 
         #[arg(help = "Output file. If omitted, writes to stdout.", long = "output", short = 'o', value_parser = clap::value_parser!(PathBuf))]
         output: Option<PathBuf>,
+    },
+
+    #[command(arg_required_else_help = true, name = "filter-reads")]
+    FilterReads {
+        #[arg(help = "Pseudoalignment JSONL file produced by a pseudoalign subcommand", long = "pseudoalignment-file", short = 'p', required = true)]
+        pseudoalignment: PathBuf,
+
+        #[arg(help = "Reads file (FASTA/FASTQ, optionally gzipped) that was the input to the pseudoalignment", long = "reads", short = 'r', required = true)]
+        reads: PathBuf,
+
+        #[arg(help = "Output reads file. Extension determines format (.fa/.fq, optionally .gz)", long = "output", short = 'o', required = true)]
+        output: PathBuf,
+
+        #[arg(help = "File with one color id (integer) per line. A read is kept if its pseudoalignment matches at least one of these colors.", long = "color-ids", short = 'c', required = true)]
+        color_ids: PathBuf,
     },
 
     #[command(arg_required_else_help = true, hide = true)]
@@ -949,6 +965,9 @@ fn main() -> std::process::ExitCode {
                 (None, Some(out_path)) => report(BufReader::new(std::io::stdin()), BufWriter::new(File::create(out_path).unwrap()), &color_names),
                 (None, None) => report(BufReader::new(std::io::stdin()), BufWriter::new(std::io::stdout()), &color_names),
             }
+        },
+        Subcommands::FilterReads { pseudoalignment, reads, output, color_ids } => {
+            return filter_reads::filter_reads(&pseudoalignment, &reads, &output, &color_ids);
         },
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
             // Hidden subcommand, might be deleted at any moment
