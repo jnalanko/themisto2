@@ -30,13 +30,24 @@ fn read_color_ids(path: &Path) -> Vec<usize> {
         });
         ids.push(id);
     }
-    ids.sort_unstable();
-    ids.dedup(); // Maybe crash instead if there are duplicates?
     ids
 }
 
-// Both inputs must be sorted in ascending order. Linear merge-style intersection check.
-fn sorted_lists_intersect(a: &[usize], b: &[usize]) -> bool {
+// A `Sorted` value is a slice that is statically guaranteed to be sorted ascending,
+// because the only way to construct one is via `Sorted::sort`, which sorts the underlying slice.
+#[derive(Clone, Copy)]
+struct Sorted<'a>(&'a [usize]);
+
+impl<'a> Sorted<'a> {
+    fn sort(v: &'a mut [usize]) -> Self {
+        v.sort_unstable();
+        Self(v)
+    }
+}
+
+// Linear merge-style intersection check. Both inputs are statically guaranteed to be sorted ascending.
+fn sorted_lists_intersect(a: Sorted, b: Sorted) -> bool {
+    let (a, b) = (a.0, b.0);
     let (mut i, mut j) = (0_usize, 0_usize);
     while i < a.len() && j < b.len() {
         match a[i].cmp(&b[j]) {
@@ -55,8 +66,7 @@ struct KeepEntry {
 
 // Returns name -> KeepEntry. `keep` is true iff the read's color set intersects target_colors.
 // `seen` starts false and is flipped to true during the read-streaming pass.
-// IMPORTANT: `target_colors` must be sorted in ascending order.
-fn build_keep_map(pseudoalignment_path: &Path, target_colors: &[usize]) -> FxHashMap<Vec<u8>, KeepEntry> {
+fn build_keep_map(pseudoalignment_path: &Path, target_colors: Sorted) -> FxHashMap<Vec<u8>, KeepEntry> {
     let reader = BufReader::new(File::open(pseudoalignment_path).unwrap_or_else(|e| {
         log::error!("Could not open pseudoalignment file {}: {}", pseudoalignment_path.display(), e);
         std::process::exit(1);
@@ -80,8 +90,8 @@ fn build_keep_map(pseudoalignment_path: &Path, target_colors: &[usize]) -> FxHas
             log::error!("Failed to parse JSON in {} on line {}: {}", pseudoalignment_path.display(), line_no + 1, e);
             std::process::exit(1);
         });
-        rec.colors.sort_unstable();
-        let should_keep = sorted_lists_intersect(&rec.colors, target_colors);
+        let rec_colors = Sorted::sort(&mut rec.colors);
+        let should_keep = sorted_lists_intersect(rec_colors, target_colors);
         if should_keep { n_keep += 1; }
         let prev = keep.insert(rec.name.as_bytes().to_vec(), KeepEntry { keep: should_keep, seen: false });
         if prev.is_some() {
@@ -95,11 +105,12 @@ fn build_keep_map(pseudoalignment_path: &Path, target_colors: &[usize]) -> FxHas
 
 pub fn filter_reads(pseudoalignment_path: &Path, reads_path: &Path, output_path: &Path, color_ids_path: &Path) -> ExitCode {
     log::info!("Loading target color ids from {}", color_ids_path.display());
-    let target_colors = read_color_ids(color_ids_path);
-    log::info!("Loaded {} target color id(s)", target_colors.len());
+    let mut target_colors_buf = read_color_ids(color_ids_path);
+    log::info!("Loaded {} target color id(s)", target_colors_buf.len());
+    let target_colors = Sorted::sort(&mut target_colors_buf);
 
     log::info!("Scanning pseudoalignment file {}", pseudoalignment_path.display());
-    let mut keep = build_keep_map(pseudoalignment_path, &target_colors);
+    let mut keep = build_keep_map(pseudoalignment_path, target_colors);
 
     log::info!("Streaming reads from {} and writing filtered output to {}", reads_path.display(), output_path.display());
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&reads_path).unwrap_or_else(|e| {
