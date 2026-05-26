@@ -2,7 +2,7 @@ use std::{fs::File, io::{BufRead, BufReader}, path::Path, process::ExitCode};
 
 use jseqio::record::Record;
 use jseqio::writer::SeqRecordWriter;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 #[derive(serde::Deserialize)]
 struct PseudoalignmentRecord<'a> {
@@ -11,8 +11,8 @@ struct PseudoalignmentRecord<'a> {
     colors: Vec<usize>,
 }
 
-fn read_color_ids(path: &Path) -> FxHashSet<usize> {
-    let mut set = FxHashSet::<usize>::default();
+fn read_color_ids(path: &Path) -> Vec<usize> {
+    let mut ids = Vec::<usize>::new();
     let reader = BufReader::new(File::open(path).unwrap_or_else(|e| {
         log::error!("Could not open color id file {}: {}", path.display(), e);
         std::process::exit(1);
@@ -28,19 +28,41 @@ fn read_color_ids(path: &Path) -> FxHashSet<usize> {
                         path.display(), line_no + 1, trimmed);
             std::process::exit(1);
         });
-        set.insert(id);
+        ids.push(id);
     }
-    set
+    ids.sort_unstable();
+    ids.dedup(); // Maybe crash instead if there are duplicates?
+    ids
 }
 
-// Returns name -> keep flag. Keep flag is true iff the read's color set intersects target_colors.
-fn build_keep_map(pseudoalignment_path: &Path, target_colors: &FxHashSet<usize>) -> FxHashMap<Vec<u8>, bool> {
+// Both inputs must be sorted in ascending order. Linear merge-style intersection check.
+fn sorted_lists_intersect(a: &[usize], b: &[usize]) -> bool {
+    let (mut i, mut j) = (0_usize, 0_usize);
+    while i < a.len() && j < b.len() {
+        match a[i].cmp(&b[j]) {
+            std::cmp::Ordering::Equal => return true,
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+        }
+    }
+    false
+}
+
+struct KeepEntry {
+    keep: bool,
+    seen: bool,
+}
+
+// Returns name -> KeepEntry. `keep` is true iff the read's color set intersects target_colors.
+// `seen` starts false and is flipped to true during the read-streaming pass.
+// IMPORTANT: `target_colors` must be sorted in ascending order.
+fn build_keep_map(pseudoalignment_path: &Path, target_colors: &[usize]) -> FxHashMap<Vec<u8>, KeepEntry> {
     let reader = BufReader::new(File::open(pseudoalignment_path).unwrap_or_else(|e| {
         log::error!("Could not open pseudoalignment file {}: {}", pseudoalignment_path.display(), e);
         std::process::exit(1);
     }));
 
-    let mut keep: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
+    let mut keep: FxHashMap<Vec<u8>, KeepEntry> = FxHashMap::default();
     let mut n_keep = 0_usize;
     let mut line = String::new();
     let mut line_no = 0_usize;
@@ -54,16 +76,16 @@ fn build_keep_map(pseudoalignment_path: &Path, target_colors: &FxHashSet<usize>)
             line_no += 1;
             continue;
         }
-        let rec: PseudoalignmentRecord = serde_json::from_str(&line).unwrap_or_else(|e| {
+        let mut rec: PseudoalignmentRecord = serde_json::from_str(&line).unwrap_or_else(|e| {
             log::error!("Failed to parse JSON in {} on line {}: {}", pseudoalignment_path.display(), line_no + 1, e);
             std::process::exit(1);
         });
-        let should_keep = rec.colors.iter().any(|c| target_colors.contains(c));
+        rec.colors.sort_unstable();
+        let should_keep = sorted_lists_intersect(&rec.colors, target_colors);
         if should_keep { n_keep += 1; }
-        let prev = keep.insert(rec.name.as_bytes().to_vec(), should_keep);
+        let prev = keep.insert(rec.name.as_bytes().to_vec(), KeepEntry { keep: should_keep, seen: false });
         if prev.is_some() {
-            log::error!("Duplicate read name in pseudoalignment file {}: {}", pseudoalignment_path.display(), rec.name);
-            std::process::exit(1);
+            log::warn!("Duplicate read name in pseudoalignment file {}: {}", pseudoalignment_path.display(), rec.name);
         }
         line_no += 1;
     }
@@ -94,12 +116,17 @@ pub fn filter_reads(pseudoalignment_path: &Path, reads_path: &Path, output_path:
     while let Some(rec) = reader.read_next().unwrap() {
         n_reads += 1;
         let name = rec.name();
-        match keep.remove(name) {
-            Some(true) => {
-                writer.write(&rec).unwrap();
-                n_written += 1;
+        match keep.get_mut(name) {
+            Some(entry) => {
+                if entry.seen {
+                    log::warn!("Duplicate read name {:?} in {}", String::from_utf8_lossy(name), reads_path.display());
+                }
+                entry.seen = true;
+                if entry.keep {
+                    writer.write(&rec).unwrap();
+                    n_written += 1;
+                }
             }
-            Some(false) => {}
             None => {
                 log::error!("Read name {:?} in {} has no record in pseudoalignment file {}",
                             String::from_utf8_lossy(name), reads_path.display(), pseudoalignment_path.display());
@@ -109,10 +136,11 @@ pub fn filter_reads(pseudoalignment_path: &Path, reads_path: &Path, output_path:
     }
     writer.flush().unwrap();
 
-    if !keep.is_empty() {
-        let example: &[u8] = keep.keys().next().unwrap();
+    let n_unseen = keep.values().filter(|e| !e.seen).count();
+    if n_unseen > 0 {
+        let example: &[u8] = keep.iter().find(|(_, e)| !e.seen).map(|(k, _)| k.as_slice()).unwrap();
         log::error!("{} pseudoalignment record(s) in {} have no matching read in {} (e.g. {:?})",
-                    keep.len(), pseudoalignment_path.display(), reads_path.display(), String::from_utf8_lossy(example));
+                    n_unseen, pseudoalignment_path.display(), reads_path.display(), String::from_utf8_lossy(example));
         std::process::exit(1);
     }
 
