@@ -214,6 +214,135 @@ fn pseudoalign_example_data() {
     }
 }
 
+fn write_file(path: &PathBuf, content: &str) {
+    std::fs::write(path, content).unwrap();
+}
+
+fn fastq_record_names(content: &str) -> Vec<&str> {
+    // A FASTQ record is four lines (@head, seq, +, qual), so the header line
+    // is at indices 0, 4, 8, ... We rely on that structure instead of scanning
+    // for `@` because quality strings can start with `@`.
+    content.lines().step_by(4).map(|l| l.strip_prefix('@').expect("header missing @")).collect()
+}
+
+#[test]
+fn filter_reads_happy_path() {
+    let dir = tmp_dir();
+    let pa = dir.join("pa.jsonl");
+    let reads = dir.join("reads.fastq");
+    let colors = dir.join("colors.txt");
+    let out = dir.join("filtered.fastq");
+
+    write_file(&pa, "{\"name\": \"r1\", \"colors\": [0]}\n\
+                     {\"name\": \"r2\", \"colors\": [1]}\n\
+                     {\"name\": \"r3\", \"colors\": [2]}\n\
+                     {\"name\": \"r4\", \"colors\": []}\n");
+    write_file(&reads, "@r1\nACGT\n+\nIIII\n\
+                        @r2\nACGT\n+\nIIII\n\
+                        @r3\nACGT\n+\nIIII\n\
+                        @r4\nACGT\n+\nIIII\n");
+    write_file(&colors, "0\n2\n");
+
+    let result = themisto2()
+        .args(["filter-reads", "-p"]).arg(&pa)
+        .arg("-r").arg(&reads)
+        .arg("-o").arg(&out)
+        .arg("-c").arg(&colors)
+        .output().unwrap();
+    assert!(result.status.success(),
+            "filter-reads failed: {}", String::from_utf8_lossy(&result.stderr));
+
+    let filtered = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(fastq_record_names(&filtered), vec!["r1", "r3"]);
+}
+
+#[test]
+fn filter_reads_duplicate_read_names() {
+    let dir = tmp_dir();
+    let pa = dir.join("pa.jsonl");
+    let reads = dir.join("reads.fastq");
+    let colors = dir.join("colors.txt");
+    let out = dir.join("filtered.fastq");
+
+    write_file(&pa, "{\"name\": \"r1\", \"colors\": [0]}\n\
+                     {\"name\": \"r2\", \"colors\": [1]}\n");
+    // r1 appears twice in the read file; both occurrences should be written and a warning logged.
+    write_file(&reads, "@r1\nACGT\n+\nIIII\n\
+                        @r2\nACGT\n+\nIIII\n\
+                        @r1\nACGT\n+\nIIII\n");
+    write_file(&colors, "0\n");
+
+    let result = themisto2()
+        .args(["filter-reads", "-p"]).arg(&pa)
+        .arg("-r").arg(&reads)
+        .arg("-o").arg(&out)
+        .arg("-c").arg(&colors)
+        .output().unwrap();
+    assert!(result.status.success(),
+            "filter-reads failed: {}", String::from_utf8_lossy(&result.stderr));
+
+    let filtered = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(fastq_record_names(&filtered), vec!["r1", "r1"]);
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("Duplicate read name \"r1\""),
+            "expected duplicate-name warning in stderr, got: {}", stderr);
+}
+
+#[test]
+fn filter_reads_unknown_read_errors() {
+    let dir = tmp_dir();
+    let pa = dir.join("pa.jsonl");
+    let reads = dir.join("reads.fastq");
+    let colors = dir.join("colors.txt");
+    let out = dir.join("filtered.fastq");
+
+    write_file(&pa, "{\"name\": \"r1\", \"colors\": [0]}\n");
+    // r2 has no record in the pseudoalignment file.
+    write_file(&reads, "@r1\nACGT\n+\nIIII\n\
+                        @r2\nACGT\n+\nIIII\n");
+    write_file(&colors, "0\n");
+
+    let result = themisto2()
+        .args(["filter-reads", "-p"]).arg(&pa)
+        .arg("-r").arg(&reads)
+        .arg("-o").arg(&out)
+        .arg("-c").arg(&colors)
+        .output().unwrap();
+    assert!(!result.status.success(), "expected failure but command succeeded");
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("has no record in pseudoalignment file"),
+            "expected error about missing pseudoalignment record, got: {}", stderr);
+}
+
+#[test]
+fn filter_reads_missing_read_errors() {
+    let dir = tmp_dir();
+    let pa = dir.join("pa.jsonl");
+    let reads = dir.join("reads.fastq");
+    let colors = dir.join("colors.txt");
+    let out = dir.join("filtered.fastq");
+
+    // pseudoalignment has 2 records but the read file only has r1.
+    write_file(&pa, "{\"name\": \"r1\", \"colors\": [0]}\n\
+                     {\"name\": \"r2\", \"colors\": [0]}\n");
+    write_file(&reads, "@r1\nACGT\n+\nIIII\n");
+    write_file(&colors, "0\n");
+
+    let result = themisto2()
+        .args(["filter-reads", "-p"]).arg(&pa)
+        .arg("-r").arg(&reads)
+        .arg("-o").arg(&out)
+        .arg("-c").arg(&colors)
+        .output().unwrap();
+    assert!(!result.status.success(), "expected failure but command succeeded");
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("have no matching read"),
+            "expected error about unmatched pseudoalignment records, got: {}", stderr);
+}
+
 /// Run `cmd`, piping the contents of `query_file` to its stdin, and return the
 /// captured stdout bytes. Asserts the process exited successfully.
 fn run_with_stdin(cmd: &mut Command, query_file: &str) -> Vec<u8> {
