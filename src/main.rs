@@ -258,6 +258,27 @@ pub enum Subcommands {
         out: PathBuf,
     },
 
+    #[command(arg_required_else_help = true, name = "import-sbwt")]
+    ImportSbwt {
+        #[arg(help = "Precomputed bit matrix SBWT", long = "sbwt", short = 's', required = true)]
+        sbwt_path: PathBuf,
+
+        #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
+        lcs_path: Option<PathBuf>,
+
+        #[arg(help = "Themisto 2 index output file", long = "output", short = 'o', required = true)]
+        output: PathBuf,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
+        sample_distance: usize,
+
+        #[arg(help = "Number of parallel threads", long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(help = "Name for the single color in the resulting Themisto 2 index", long = "color-name", required = true)]
+        color_name: String,
+    },
+
     #[command(arg_required_else_help = true)]
     Export {
         #[arg(long = "index", short = 'i', required = true)]
@@ -940,6 +961,29 @@ fn main() -> std::process::ExitCode {
             let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
                 sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
             log::info!("Serializing sparse-dense index to {}", out_path.display());
+            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+        },
+        Subcommands::ImportSbwt { sbwt_path, lcs_path, output, sample_distance, n_threads, color_name } => {
+            log::info!("Loading SBWT from {}", sbwt_path.display());
+            let mut sbwt_in = BufReader::new(File::open(&sbwt_path).unwrap());
+            let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+
+            log::info!("Building select support for SBWT");
+            sbwt.build_select();
+
+            let lcs = if let Some(lcs_path) = lcs_path {
+                log::info!("Loading the LCS array from {}", lcs_path.display());
+                LcsArray::load(&mut BufReader::new(File::open(&lcs_path).unwrap())).unwrap()
+            } else {
+                log::info!("Building LCS array");
+                LcsArray::from_sbwt(&sbwt, n_threads, true)
+            };
+
+            log::info!("Building single-colored Themisto 2 index");
+            let index = CompactColexKmers::<SparseDenseStorage>::new_single_colored(sbwt, lcs, sample_distance, n_threads, color_name);
+
+            let mut out = BufWriter::new(File::create(&output).unwrap());
+            log::info!("Serializing Themisto 2 index to {}", output.display());
             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
         },
         Subcommands::Export { index: index_path, color_dump_prefix, n_threads } => {
