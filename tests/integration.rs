@@ -343,28 +343,28 @@ fn filter_reads_missing_read_errors() {
             "expected error about unmatched pseudoalignment records, got: {}", stderr);
 }
 
-#[test]
-fn import_sbwt_builds_single_colored_index() {
+fn build_sbwt_file(fasta_path: &PathBuf, sbwt_path: &PathBuf, k: usize) {
     use sbwt::{BitPackedKmerSortingMem, SbwtIndexBuilder, SbwtIndexVariant, write_sbwt_index_variant};
-
-    let dir = tmp_dir();
-    let sbwt_path = dir.join("input.sbwt");
-    let index_path = dir.join("single.thm2");
-    let query_file = "example/C1.fna";
-    let k = 3;
-    let color_name = "my_color";
-
     let (sbwt, _lcs) = SbwtIndexBuilder::<BitPackedKmerSortingMem>::new()
         .k(k)
         .n_threads(1)
         .add_rev_comp(true)
         .build_lcs(false)
         .algorithm(BitPackedKmerSortingMem::default())
-        .run_from_fasta(std::fs::File::open(PathBuf::from(PROJECT_DIR).join(query_file)).unwrap());
+        .run_from_fasta(std::fs::File::open(fasta_path).unwrap());
+    let mut out = std::io::BufWriter::new(std::fs::File::create(sbwt_path).unwrap());
+    write_sbwt_index_variant(&SbwtIndexVariant::SubsetMatrix(sbwt), &mut out).unwrap();
+}
 
-    let mut sbwt_out = std::io::BufWriter::new(std::fs::File::create(&sbwt_path).unwrap());
-    write_sbwt_index_variant(&SbwtIndexVariant::SubsetMatrix(sbwt), &mut sbwt_out).unwrap();
-    drop(sbwt_out);
+#[test]
+fn import_sbwt_builds_single_colored_index() {
+    let dir = tmp_dir();
+    let sbwt_path = dir.join("input.sbwt");
+    let index_path = dir.join("single.thm2");
+    let query_file = "example/C1.fna";
+    let color_name = "my_color";
+
+    build_sbwt_file(&PathBuf::from(PROJECT_DIR).join(query_file), &sbwt_path, 3);
 
     let status = themisto2()
         .args(["import-sbwt", "-s"]).arg(&sbwt_path)
@@ -393,6 +393,121 @@ fn import_sbwt_builds_single_colored_index() {
     assert!(!records.is_empty(), "no pseudoalignment records produced");
     for rec in &records {
         assert_eq!(rec.colors, vec![0], "expected single color 0 for every read, got {:?}", rec.colors);
+    }
+}
+
+#[test]
+fn merged_single_colored_indexes_match_normal_build() {
+    let dir = tmp_dir();
+    let k = 3;
+
+    // Step 1: build a single-colored Themisto 2 index for each input file
+    // by first dumping an SBWT and then running `import-sbwt`.
+    let mut single_colored_indexes: Vec<PathBuf> = Vec::new();
+    for fname in ["C1.fna", "C2.fna"] {
+        let fasta = PathBuf::from(PROJECT_DIR).join("example").join(fname);
+        let sbwt = dir.join(format!("{}.sbwt", fname));
+        let index = dir.join(format!("{}.thm2", fname));
+        build_sbwt_file(&fasta, &sbwt, k);
+
+        // The normal build uses the input path string as the color name, so
+        // use the same convention here to keep the color names aligned with
+        // the normal build for byte-by-byte output comparison below.
+        let color_name = format!("example/{}", fname);
+
+        let status = themisto2()
+            .args(["import-sbwt", "-s"]).arg(&sbwt)
+            .args(["-o"]).arg(&index)
+            .args(["--color-name", &color_name, "-t", "1"])
+            .status()
+            .unwrap();
+        assert!(status.success(), "import-sbwt failed for {}", fname);
+        single_colored_indexes.push(index);
+    }
+
+    // Step 2: merge the two single-colored indexes.
+    let index_list = dir.join("indexes.txt");
+    {
+        let mut s = String::new();
+        for p in &single_colored_indexes {
+            s.push_str(p.to_str().unwrap());
+            s.push('\n');
+        }
+        write_file(&index_list, &s);
+    }
+    let merge_temp = dir.join("merge_temp");
+    std::fs::create_dir_all(&merge_temp).unwrap();
+    let merged_index = dir.join("merged.thm2");
+    let status = themisto2()
+        .args(["merge", "--index-file-list"]).arg(&index_list)
+        .args(["--temp-dir"]).arg(&merge_temp)
+        .args(["-o"]).arg(&merged_index)
+        .args(["-t", "1"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "merge failed");
+
+    // Step 3: normal two-color build for comparison.
+    let fof = dir.join("fof_two.txt");
+    write_file(&fof, "example/C1.fna\nexample/C2.fna\n");
+    let normal_temp = dir.join("normal_temp");
+    std::fs::create_dir_all(&normal_temp).unwrap();
+    let normal_index = dir.join("normal.thm2");
+    let status = themisto2()
+        .args(["build", "--file-colors"]).arg(&fof)
+        .args(["--temp-dir"]).arg(&normal_temp)
+        .args(["-k", &k.to_string(), "-t", "1", "-o"]).arg(&normal_index)
+        .status()
+        .unwrap();
+    assert!(status.success(), "normal build failed");
+
+    // Step 4: color names should match between the two indexes.
+    let merged_names = themisto2()
+        .args(["dump-color-names", "-i"]).arg(&merged_index)
+        .output().unwrap();
+    assert!(merged_names.status.success());
+    let normal_names = themisto2()
+        .args(["dump-color-names", "-i"]).arg(&normal_index)
+        .output().unwrap();
+    assert!(normal_names.status.success());
+    assert_eq!(merged_names.stdout, normal_names.stdout, "color names differ between merged and normal indexes");
+
+    // Step 5: pseudoalignment results must match for every input file
+    // (covers both single-color and shared-color k-mers).
+    for query_file in ["example/C1.fna", "example/C2.fna"] {
+        let merged_out = dir.join(format!("merged-{}.jsonl", query_file.replace('/', "_")));
+        let normal_out = dir.join(format!("normal-{}.jsonl", query_file.replace('/', "_")));
+
+        for (idx, out) in [(&merged_index, &merged_out), (&normal_index, &normal_out)] {
+            let status = themisto2()
+                .args(["intersection-pseudoalign", "-i"]).arg(idx)
+                .args(["-q", query_file, "-t", "1", "--sort-output", "-o"]).arg(out)
+                .status().unwrap();
+            assert!(status.success(), "intersection-pseudoalign failed for {} against {}", query_file, idx.display());
+        }
+
+        assert_eq!(
+            std::fs::read(&merged_out).unwrap(),
+            std::fs::read(&normal_out).unwrap(),
+            "pseudoalignment of {} differs between merged and normal indexes", query_file,
+        );
+
+        // Step 6: per-k-mer color sets must match too.
+        let merged_sets = dir.join(format!("merged-{}.colorsets.txt", query_file.replace('/', "_")));
+        let normal_sets = dir.join(format!("normal-{}.colorsets.txt", query_file.replace('/', "_")));
+        for (idx, out) in [(&merged_index, &merged_sets), (&normal_index, &normal_sets)] {
+            let status = themisto2()
+                .args(["print-color-sets", "-i"]).arg(idx)
+                .args(["-q", query_file, "-p", "-o"]).arg(out)
+                .status().unwrap();
+            assert!(status.success(), "print-color-sets failed for {} against {}", query_file, idx.display());
+        }
+
+        assert_eq!(
+            std::fs::read(&merged_sets).unwrap(),
+            std::fs::read(&normal_sets).unwrap(),
+            "per-k-mer color sets of {} differ between merged and normal indexes", query_file,
+        );
     }
 }
 
