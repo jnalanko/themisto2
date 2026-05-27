@@ -343,6 +343,59 @@ fn filter_reads_missing_read_errors() {
             "expected error about unmatched pseudoalignment records, got: {}", stderr);
 }
 
+#[test]
+fn import_sbwt_builds_single_colored_index() {
+    use sbwt::{BitPackedKmerSortingMem, SbwtIndexBuilder, SbwtIndexVariant, write_sbwt_index_variant};
+
+    let dir = tmp_dir();
+    let sbwt_path = dir.join("input.sbwt");
+    let index_path = dir.join("single.thm2");
+    let query_file = "example/C1.fna";
+    let k = 3;
+    let color_name = "my_color";
+
+    let (sbwt, _lcs) = SbwtIndexBuilder::<BitPackedKmerSortingMem>::new()
+        .k(k)
+        .n_threads(1)
+        .add_rev_comp(true)
+        .build_lcs(false)
+        .algorithm(BitPackedKmerSortingMem::default())
+        .run_from_fasta(std::fs::File::open(PathBuf::from(PROJECT_DIR).join(query_file)).unwrap());
+
+    let mut sbwt_out = std::io::BufWriter::new(std::fs::File::create(&sbwt_path).unwrap());
+    write_sbwt_index_variant(&SbwtIndexVariant::SubsetMatrix(sbwt), &mut sbwt_out).unwrap();
+    drop(sbwt_out);
+
+    let status = themisto2()
+        .args(["import-sbwt", "-s"]).arg(&sbwt_path)
+        .args(["-o"]).arg(&index_path)
+        .args(["--color-name", color_name, "-t", "1"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "import-sbwt failed");
+
+    let dump = themisto2()
+        .args(["dump-color-names", "-i"]).arg(&index_path)
+        .output()
+        .unwrap();
+    assert!(dump.status.success(), "dump-color-names failed: {}", String::from_utf8_lossy(&dump.stderr));
+    assert_eq!(String::from_utf8(dump.stdout).unwrap(), format!("0\t{}\n", color_name));
+
+    let pa_out = dir.join("pa.jsonl");
+    let status = themisto2()
+        .args(["intersection-pseudoalign", "-i"]).arg(&index_path)
+        .args(["-q", query_file, "-t", "1", "--sort-output", "-o"]).arg(&pa_out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "intersection-pseudoalign on imported single-colored index failed");
+
+    let records = read_jsonl(&pa_out);
+    assert!(!records.is_empty(), "no pseudoalignment records produced");
+    for rec in &records {
+        assert_eq!(rec.colors, vec![0], "expected single color 0 for every read, got {:?}", rec.colors);
+    }
+}
+
 /// Run `cmd`, piping the contents of `query_file` to its stdin, and return the
 /// captured stdout bytes. Asserts the process exited successfully.
 fn run_with_stdin(cmd: &mut Command, query_file: &str) -> Vec<u8> {
