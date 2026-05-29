@@ -11,7 +11,6 @@ use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::{ChainedInputStreamWithRevComp, RewindableSeqStreamGenerator};
-use jseqio::record::Record;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
@@ -841,10 +840,9 @@ fn main() -> std::process::ExitCode {
                     // Read color names from the sequence file
                     log::info!("Reading all sequence names from the input file");
                     let mut color_names = Vec::<String>::new();
-                    // TODO: could use a faster parser here
-                    let mut reader = jseqio::reader::DynamicFastXReader::from_file(&sequence_colors_file).unwrap();
-                    while let Some(rec) = reader.read_next().unwrap() {
-                        color_names.push(String::from_utf8(rec.name().to_owned()).unwrap());
+                    let mut reader = needletail::parse_fastx_file(&sequence_colors_file).unwrap();
+                    while let Some(rec) = reader.next() {
+                        color_names.push(String::from_utf8(rec.unwrap().id().to_owned()).unwrap());
                     }
                     log::info!("Read {} sequences", color_names.len());
                     (ColoredSeqInput::SequenceColors(sequence_colors_file.clone()), vec![sequence_colors_file], color_names)

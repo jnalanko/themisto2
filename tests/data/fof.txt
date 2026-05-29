@@ -1,0 +1,3 @@
+tests/data/color1.fna
+tests/data/color2.fna
+tests/data/color3.fna

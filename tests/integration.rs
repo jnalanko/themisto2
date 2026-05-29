@@ -30,8 +30,9 @@ fn themisto2() -> Command {
     cmd
 }
 
+
 #[test]
-fn file_colors_and_seq_colors_produce_same_index() {
+fn file_colors_and_seq_colors_single_seq_per_color_produce_same_index() {
     let dir = tmp_dir();
     let tmp1 = dir.join("tmp1");
     let tmp2 = dir.join("tmp2");
@@ -42,7 +43,7 @@ fn file_colors_and_seq_colors_produce_same_index() {
     let index2 = dir.join("seq_colors.thm2");
 
     let status = themisto2()
-        .args(["build", "--file-colors", "example/fof.txt", "--temp-dir"])
+        .args(["build", "--file-colors", "tests/data/fof.txt", "--temp-dir"])
         .arg(&tmp1)
         .args(["-k", "3", "-t", "1", "-o"])
         .arg(&index1)
@@ -51,7 +52,7 @@ fn file_colors_and_seq_colors_produce_same_index() {
     assert!(status.success(), "--file-colors build failed");
 
     let status = themisto2()
-        .args(["build", "--seq-colors", "example/seq-colors.fna", "--temp-dir"])
+        .args(["build", "--seq-colors", "tests/data/seq-colors.fna", "--temp-dir"])
         .arg(&tmp2)
         .args(["-k", "3", "-t", "1", "-o"])
         .arg(&index2)
