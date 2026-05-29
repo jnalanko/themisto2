@@ -162,7 +162,7 @@ pub enum Subcommands {
         #[arg(long = "query-output-list", requires = "query_list", help = "A list of filenames, one per line. The file on the i-th line is the output file for the i-th input file in the file for --query-list. Requires --query-list.")]
         query_output_list: Option<PathBuf>,
 
-        #[arg(long = "min-hits", short = 'm', required = true, default_value = "1")]
+        #[arg(long = "min-hits", short = 'm', default_value = "1")]
         min_hits: usize,
 
         #[arg(long = "threshold", short = 'd', required = true)]
