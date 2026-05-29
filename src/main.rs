@@ -842,7 +842,10 @@ fn main() -> std::process::ExitCode {
                     let mut color_names = Vec::<String>::new();
                     let mut reader = needletail::parse_fastx_file(&sequence_colors_file).unwrap();
                     while let Some(rec) = reader.next() {
-                        color_names.push(String::from_utf8(rec.unwrap().id().to_owned()).unwrap());
+                        let rec = rec.unwrap();
+                        let id = rec.id();
+                        let name = id.split(|&b| b == b' ').next().unwrap_or(id);
+                        color_names.push(String::from_utf8(name.to_owned()).unwrap());
                     }
                     log::info!("Read {} sequences", color_names.len());
                     (ColoredSeqInput::SequenceColors(sequence_colors_file.clone()), vec![sequence_colors_file], color_names)

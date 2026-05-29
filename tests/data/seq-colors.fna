@@ -1,6 +1,6 @@
->tests/data/color1.fna
+>tests/data/color1.fna anything after the first token should not matter
 ACGACATCTACTACTAGTCGACTAC
->tests/data/color2.fna
+>tests/data/color2.fna should not matter
 ACACATCTCATCAGTAGTCAGTCGCAGCTAGCAATCTAC
->tests/data/color3.fna
+>tests/data/color3.fna ----
 CATCTTCTAGTCGTACGTCGGATCGTACTGTACGACT
