@@ -10,7 +10,7 @@ use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, 
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
-use io::{ChainedInputStreamWithRevComp, RewindableSeqStreamGenerator};
+use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
@@ -399,7 +399,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let key_kmer_marks = {
-        let phase1_input_stream = ChainedInputStreamWithRevComp::new(all_input_seq_files);
+        let phase1_input_stream = io::NeedletailSeqStreamWithRevComp::new(all_input_seq_files);
         mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
     };
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
