@@ -104,6 +104,6 @@ A Themisto 2 paper is forthcoming, but in the meantime, you can cite the preprin
 
 # Related tools
 
-Other tools implementing k-mer pseudoalignment include [Bifrost](https://github.com/pmelsted/bifrost), [Metagraph](https://github.com/ratschlab/metagraph) and [Fulgor](https://github.com/jermp/fulgor).  Themisto 2 is at the cutting edge of BWT-based k-mer indexing, benefitting from latest research on SBWT. This enables in particular, fast and very parallel index merging.
+Other tools implementing k-mer pseudoalignment include [Bifrost](https://github.com/pmelsted/bifrost), [Metagraph](https://github.com/ratschlab/metagraph) and [Fulgor](https://github.com/jermp/fulgor).  Unlike these tools, Themisto 2 draws on the latest research in BWT-based k-mer indexing through its SBWT foundation. This enables, in particular, fast and highly parallel index merging.
 
 See also: [HKS](https://github.com/jnalanko/HKS), an SBWT-based sequence annotation tool with hierarchical labels.
