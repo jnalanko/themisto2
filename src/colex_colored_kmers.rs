@@ -101,7 +101,7 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
     std::thread::scope(|scope| {
 
         let reader_buf_size = 1_000_000;
-        let (batch_send, batch_recv) = crossbeam::channel::bounded::<SeqBatch>(4);
+        let (batch_send, batch_recv) = crossbeam::channel::bounded::<SeqBatch>(n_threads);
         let reader_handle = scope.spawn(move || {
             let progress = indicatif::ProgressBar::new_spinner();
             progress.set_style(ProgressStyle::with_template("{pos} {msg}").unwrap());
