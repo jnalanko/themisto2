@@ -136,7 +136,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         for (_, _, key_kmer_colex, size) in &set_quadruples[run.clone()] {
             let key_kmer_idx = key_kmer_marks.rank(*key_kmer_colex);
             key_kmer_idx_to_new_id[key_kmer_idx] = set_id;
-            set_size = *size; // The size should be the same for all lets since this is a run
+            set_size = *size; // The size should be the same for all sets since this is a run
         }
         set_sizes[set_id] = set_size;
         set_id += 1;
