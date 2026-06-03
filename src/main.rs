@@ -91,8 +91,8 @@ pub enum Subcommands {
         #[arg(help = "Optional: Build from unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", short, long)]
         from_unitigs: bool,
 
-        #[arg(help = "Directory for temporary files", long = "temp-dir", required = true)]
-        temp_dir: PathBuf,
+        #[arg(help = "Directory for temporary files. Required if --sbwt is not given. Should point to a location with fast IO and plenty of free space.", long = "temp-dir", required_unless_present="sbwt_path")]
+        temp_dir: Option<PathBuf>,
 
         #[arg(short, required = true)]
         k: usize,
@@ -247,8 +247,8 @@ pub enum Subcommands {
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
         sample_distance: usize,
 
-        #[arg(long = "temp-dir", required = true)]
-        temp_dir: PathBuf,
+        #[arg(help = "Directory for temporary files. Required if --sbwt is not given. Should point to a location with fast IO and plenty of free space.", long = "temp-dir", required_unless_present="sbwt_path")]
+        temp_dir: Option<PathBuf>,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
@@ -701,7 +701,7 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
     index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
 }
 
-fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Path, input_stream: io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
+fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Option<PathBuf>, input_stream: io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
     let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
         log::info!("Loading SBWT from {}", sbwt_path.display());
         let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
@@ -721,13 +721,15 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
         };
         (sbwt, lcs)
     } else {
+        log::info!("SBWT not provided -> building the SBWT.");
+        let temp_dir = temp_dir.as_ref().expect("Tempory directory not specified (must be specified for SBWT construction)");
         let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
             .add_rev_comp(true)
             .k(k)
             .build_lcs(true)
             .n_threads(n_threads)
             .precalc_length(8)
-            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(temp_dir))
+            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
         .run(input_stream);
         log::info!("Building SBWT select support");
         sbwt.build_select();
