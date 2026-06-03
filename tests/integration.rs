@@ -512,6 +512,78 @@ fn merged_single_colored_indexes_match_normal_build() {
     }
 }
 
+#[test]
+fn report_smoke_test() {
+    let dir = tmp_dir();
+    let tmp = dir.join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // Build a small index with 3 colors.
+    let index = dir.join("index.thm2");
+    let status = themisto2()
+        .args(["build", "--file-colors", "example/fof.txt", "--temp-dir"])
+        .arg(&tmp)
+        .args(["-k", "3", "-t", "1", "-o"])
+        .arg(&index)
+        .status()
+        .unwrap();
+    assert!(status.success(), "build failed");
+
+    // Pseudoalign all three input files together to get a JSONL file.
+    let pa_out = dir.join("pa.jsonl");
+    let status = themisto2()
+        .args(["intersection-pseudoalign", "-i"])
+        .arg(&index)
+        .args(["-q", "example/C1.fna", "-t", "1", "-o"])
+        .arg(&pa_out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "pseudoalign failed");
+
+    // Run report with an explicit -p and -o.
+    let report_out = dir.join("report.json");
+    let status = themisto2()
+        .args(["report", "-i"])
+        .arg(&index)
+        .arg("-p").arg(&pa_out)
+        .arg("-o").arg(&report_out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "report failed");
+
+    let text = std::fs::read_to_string(&report_out).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("report output is not valid JSON: {e}\n---\n{text}"));
+
+    // Structural checks.
+    assert!(v["n_reads"].is_number(), "missing n_reads");
+    assert!(v["n_positive_reads"].is_number(), "missing n_positive_reads");
+    assert!(v["positive_by_color"].is_array(), "missing positive_by_color");
+    assert!(v["unique_positive_by_color"].is_array(), "missing unique_positive_by_color");
+
+    let n_reads = v["n_reads"].as_u64().unwrap();
+    let n_positive = v["n_positive_reads"].as_u64().unwrap();
+    assert!(n_reads > 0, "expected at least one read in report");
+    assert!(n_positive <= n_reads, "n_positive_reads ({}) > n_reads ({})", n_positive, n_reads);
+
+    // Without -p and -o the same output should arrive on stdout.
+    let pa_bytes = std::fs::read(&pa_out).unwrap();
+    let mut child = themisto2()
+        .args(["report", "-i"]).arg(&index)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(&pa_bytes).unwrap();
+    let stdout_run = child.wait_with_output().unwrap();
+    assert!(stdout_run.status.success(), "report (stdin→stdout) failed");
+    assert_eq!(
+        stdout_run.stdout,
+        std::fs::read(&report_out).unwrap(),
+        "report output via stdin/stdout differs from -p/-o output",
+    );
+}
+
 /// Run `cmd`, piping the contents of `query_file` to its stdin, and return the
 /// captured stdout bytes. Asserts the process exited successfully.
 fn run_with_stdin(cmd: &mut Command, query_file: &str) -> Vec<u8> {
