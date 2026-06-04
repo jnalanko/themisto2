@@ -3,12 +3,18 @@ use std::io::{BufRead, Write};
 #[derive(serde::Deserialize, Debug)]
 pub struct PseudoalignmentRecord<'a> {
     #[serde(borrow)]
-    pub _name: &'a str,
+    #[allow(dead_code)] // DO NOT ADD A LEADING UNDERSCORE TO THE FIELD NAME: IT WILL BREAK JSON PARSING
+    pub name: &'a str,
+
     pub colors: Vec<usize>,
+
     #[serde(default)]
-    pub _kmer_hits: Option<Vec<usize>>,
+    #[allow(dead_code)] // DO NOT ADD A LEADING UNDERSCORE TO THE FIELD NAME: IT WILL BREAK JSON PARSING
+    pub kmer_hits: Option<Vec<usize>>,
+
     #[serde(default)]
-    pub _bases_covered: Option<Vec<usize>>,
+    #[allow(dead_code)] // DO NOT ADD A LEADING UNDERSCORE TO THE FIELD NAME: IT WILL BREAK JSON PARSING
+    pub bases_covered: Option<Vec<usize>>,
 }
 
 #[derive(serde::Serialize, Debug)]
