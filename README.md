@@ -17,6 +17,8 @@ Given a query sequence, **pseudoalignment** looks up each of the query's k-mers 
 
 Both modes output one JSONL record per query sequence, with the sequence name and the list of matching color indices.
 
+Themisto 2 currently supports up to 2^32 colors and up to 2^40 k-mers.
+
 # Installation
 
 First, install Rust and the Cargo package manager using rustup (no root privileges required): [https://rust-lang.org/tools/install/](https://rust-lang.org/tools/install/). Then, clone this repository and compile with: 

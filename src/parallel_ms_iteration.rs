@@ -24,9 +24,52 @@ impl<'a> MsElementGenerator<'a> {
     }
 }
 
-impl<'a> MsElementGenerator<'a> {
+pub struct WorkBatch<'a> {
+    seq_concat: Vec<u8>,
+    seq_ends: Vec<usize>,
+    seq_colors: Vec<usize>,
+    streaming_index: &'a StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
+    filter: &'a Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
+    include_rev_comp: bool,
+}
 
-    fn run_seq(&self, seq: &[u8], color: usize, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
+impl<'a> WorkBatch<'a> {
+    fn run(mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
+        let n_seqs = self.seq_ends.len();
+        assert_eq!(n_seqs, self.seq_colors.len());
+
+        let mut seq_start = 0_usize;
+        for seq_idx in 0..n_seqs {
+            let seq_end = self.seq_ends[seq_idx];
+            let seq = &self.seq_concat[seq_start..seq_end];
+            let color = self.seq_colors[seq_idx];
+
+            self.process_seq(seq, color, &callback);
+            if self.include_rev_comp {
+                // Reverse-complemet in-place. This is already since we now own `self`, so
+                // nobody else can see the sequences anymore.
+                let seq_mut = &mut self.seq_concat[seq_start..seq_end];
+                reverse_complement_in_place(seq_mut);
+                let seq = &self.seq_concat[seq_start..seq_end];
+                self.process_seq(seq, color, &callback);
+            }
+
+            seq_start = seq_end;
+        }
+    }
+
+    fn push_seq(&mut self, seq: &[u8], color: usize) {
+        self.seq_concat.extend_from_slice(seq);
+        self.seq_ends.push(self.seq_concat.len());
+        self.seq_colors.push(color);
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        self.seq_concat.len() + self.seq_ends.len()*size_of::<usize>() + self.seq_colors.len()*size_of::<usize>()
+    }
+
+    // Don't call this from outside. Call self.run instead.
+    fn process_seq(&self, seq: &[u8], color: usize, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
         let k = self.streaming_index.k();
         let ms_iter = self.streaming_index.matching_statistics_iter(seq);
         let kmer_iter = ms_iter.skip(k-1).filter(|(len, _colex)| *len == k);
@@ -53,11 +96,15 @@ impl<'a> MsElementGenerator<'a> {
             });
         }
     }
+
+    fn new(streaming_index: &'a StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, filter: &'a Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, include_rev_comp: bool) -> WorkBatch<'a> {
+        WorkBatch { seq_concat: vec![], seq_ends: vec![], seq_colors: vec![], streaming_index, filter, include_rev_comp }
+    }
 }
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        let (sender, receiver) = crossbeam::channel::bounded::<(usize, Box<dyn SeqStream + Send + Sync>)>(2*n_threads);
+        let (sender, receiver) = crossbeam::channel::bounded::<WorkBatch>(2*n_threads);
         let receiver_ref = &receiver; // To capture a reference
 
         // Here we need to get a bit tricky to avoid mutable aliasing of self. The issue is that
@@ -73,28 +120,28 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
         std::thread::scope(|scope| {
             // Channel of pairs (color id, seq stream)
             let producer_handle = scope.spawn(|| {
+                let batch_size: usize = 1 << 23; // 8 MiB
                 let mut color = 0_usize;
-                while let Some(color_stream) = color_stream_generator.next() {
-                    sender.send((color, color_stream)).unwrap();
+                let mut cur_batch = WorkBatch::new(&self.streaming_index, &self.filter, self.include_rev_comp);
+                while let Some(mut color_stream) = color_stream_generator.next() {
+                    log::info!("Processing color {}", color);
+                    while let Some(seq) = color_stream.stream_next() {
+                        cur_batch.push_seq(seq, color);
+                        if cur_batch.size_in_bytes() >= batch_size {
+                            sender.send(cur_batch).unwrap();
+                            cur_batch = WorkBatch::new(&self.streaming_index, &self.filter, self.include_rev_comp);
+                        }
+                    }
                     color += 1;
                 }
+                sender.send(cur_batch).unwrap(); // Last batch. May be empty, but that is ok.
                 drop(sender); // Finished
             });
 
             let consumer_handles: Vec<_> = (0..n_threads).map(|_| {
                 scope.spawn(|| {
-                    let mut rc_buf = Vec::<u8>::new();
-                    while let Ok((color, mut color_stream)) = receiver_ref.recv() {
-                        log::info!("Processing color {}", color);
-                        while let Some(seq) = color_stream.stream_next() {
-                            self.run_seq(seq, color, &callback);
-                            if self.include_rev_comp {
-                                rc_buf.clear();
-                                rc_buf.extend_from_slice(seq);
-                                reverse_complement_in_place(&mut rc_buf);
-                                self.run_seq(&rc_buf, color, &callback);
-                            }
-                        }
+                    while let Ok(batch) = receiver_ref.recv() {
+                        batch.run(&callback);
                     }
                 })
             }).collect();
@@ -437,5 +484,120 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
 
     fn rewind(&mut self) {
         // Nothing needs to done, calling run() again already works
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sbwt::{BitPackedKmerSortingMem, SeqStream, StreamingIndex, reverse_complement_in_place};
+    use crate::{io::RewindableSeqStreamGenerator, set_of_sets_construction::{ParallelElementGenerator, SetElement}, util::VecVecSeqStream};
+    use super::MsElementGenerator;
+
+    struct VecColorStream {
+        colors: Vec<Vec<Vec<u8>>>,
+        color_idx: usize,
+    }
+
+    impl VecColorStream {
+        fn new(colors: Vec<Vec<Vec<u8>>>) -> Self {
+            Self { colors, color_idx: 0 }
+        }
+    }
+
+    impl RewindableSeqStreamGenerator for VecColorStream {
+        fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+            if self.color_idx == self.colors.len() {
+                return None;
+            }
+            let seqs = self.colors[self.color_idx].clone();
+            self.color_idx += 1;
+            Some(Box::new(VecVecSeqStream::new(seqs)))
+        }
+        fn rewind(&mut self) {
+            self.color_idx = 0;
+        }
+    }
+
+    // Compute expected SetElements by running matching statistics directly on forward
+    // and reverse-complement sequences, mirroring the WorkBatch logic.
+    fn expected_elements(
+        si: &StreamingIndex<'_, sbwt::SbwtIndex<sbwt::SubsetMatrix>, sbwt::LcsArray>,
+        k: usize,
+        color_seqs: &[Vec<Vec<u8>>],
+    ) -> Vec<SetElement> {
+        let mut out = Vec::new();
+        for (color, seqs) in color_seqs.iter().enumerate() {
+            for seq in seqs {
+                let mut buf = seq.clone();
+                // forward
+                for (len, range) in si.matching_statistics_iter(&buf).skip(k - 1) {
+                    if len == k {
+                        assert_eq!(range.len(), 1);
+                        out.push(SetElement { set_id: range.start, color });
+                    }
+                }
+                // reverse complement
+                reverse_complement_in_place(&mut buf);
+                for (len, range) in si.matching_statistics_iter(&buf).skip(k - 1) {
+                    if len == k {
+                        assert_eq!(range.len(), 1);
+                        out.push(SetElement { set_id: range.start, color });
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn ms_element_generator_emits_correct_elements_including_duplicates() {
+        let k = 3_usize;
+
+        // seq0: "ACGCG"
+        //   forward k-mers:  ACG, CGC, GCG
+        //   rev-comp = CGCGT, k-mers: CGC, GCG, CGT
+        //   → CGC and GCG each appear twice for color 0 (non-deduplication is observable)
+        let seq0: &[u8] = b"ACGCG";
+        let seq1: &[u8] = b"TTTGGG";
+
+        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+            .algorithm(BitPackedKmerSortingMem::new())
+            .k(k)
+            .add_rev_comp(true)
+            .build_lcs(true)
+            .run_from_slices(&[seq0, seq1]);
+        let lcs = lcs.unwrap();
+
+        let color_seqs: Vec<Vec<Vec<u8>>> = vec![
+            vec![seq0.to_vec()], // color 0
+            vec![seq1.to_vec()], // color 1
+        ];
+
+        let si_ref = StreamingIndex::new(&sbwt, &lcs);
+        let expected = expected_elements(&si_ref, k, &color_seqs);
+
+        // Run MsElementGenerator with include_rev_comp = true.
+        let gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> =
+            Box::new(VecColorStream::new(color_seqs));
+        let si = StreamingIndex::new(&sbwt, &lcs);
+        let mut ms_gen = MsElementGenerator::new(gen, si, true);
+        let got_mutex = std::sync::Mutex::new(Vec::<SetElement>::new());
+        ms_gen.run(|e| got_mutex.lock().unwrap().push(e), 1);
+        let mut got = got_mutex.into_inner().unwrap();
+        got.sort();
+
+        assert_eq!(got, expected);
+
+        // CGC appears in both the forward and the reverse complement of seq0,
+        // so it must be reported twice for color 0 (the non-deduplication property).
+        let colex_cgc = si_ref
+            .matching_statistics_iter(b"CGC")
+            .skip(k - 1)
+            .next()
+            .map(|(_, r)| r.start)
+            .expect("CGC should be in the SBWT");
+        let cgc_color0 = got.iter().filter(|e| e.set_id == colex_cgc && e.color == 0).count();
+        assert_eq!(cgc_color0, 2, "CGC should be reported twice for color 0 (once per strand)");
     }
 }

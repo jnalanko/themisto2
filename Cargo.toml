@@ -38,6 +38,7 @@ rayon = "1.11.0"
 bytemuck = {version = "1.24.0", features = ["extern_crate_alloc"]}
 sha1 = "0.10.6"
 human_bytes = "0.4.3"
+memory-stats = "1.2.0"
 
 [profile.release]
 debug = true      # keep symbols so profilers can show Rust function names

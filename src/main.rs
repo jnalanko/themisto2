@@ -73,13 +73,13 @@ impl ColoringType {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
-        #[arg(help = "A file with one fasta/fastq filename per line", long = "file-colors")]
+        #[arg(help = "A file with one fasta/fastq filename per line. Maximum supported number of colors: 2^32.", long = "file-colors")]
         color_fof: Option<PathBuf>,
 
-        #[arg(help = "A fasta/fastq file, with one color per sequence", long = "seq-colors")]
+        #[arg(help = "A fasta/fastq file, with one color per sequence. Maximum supported number of colors: 2^32.", long = "seq-colors")]
         sequence_colors_file: Option<PathBuf>,
 
-        #[arg(help = "Precomputed bit matrix SBWT (optional)", long = "sbwt", short = 's')]
+        #[arg(help = "Precomputed bit matrix SBWT (optional). Maximum supported SBWT length: 2^40.", long = "sbwt", short = 's')]
         sbwt_path: Option<PathBuf>,
 
         #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
@@ -386,9 +386,18 @@ impl ColoredSeqInput {
 fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
 
     log::info!("Building distinct color set structure");
-    let n_colors = color_names.len();
+    let n_colors = u32::try_from(color_names.len()).unwrap_or_else( |_| {
+        log::error!("Maximum number of colors 2^32 exceeded");
+        panic!();
+    });
+
+    if sbwt.n_sets() > set_of_sets_construction::SET_OF_SETS_CONSTRUCTION_MAX_SBWT_LEN {
+        log::error!("Maximum SBWT length exceeded. Found: {}, maximum supported: {}", sbwt.n_sets(), set_of_sets_construction::SET_OF_SETS_CONSTRUCTION_MAX_SBWT_LEN);
+        panic!();
+    }
+
     if let ColoredSeqInput::FileColors(v) = &input_mode {
-        assert!(v.len() == n_colors, "Number of color names does not match the number of input files");
+        assert!(v.len() == n_colors as usize, "Number of color names does not match the number of input files");
     }
 
     let mut all_input_seq_files = Vec::<PathBuf>::new();
@@ -408,12 +417,12 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     log::info!("=== PHASE 2/3: Building color set finperprints for key k-mers ===");
     let color_stream_gen = input_mode.get_generator();
     let random_seed = 123123; // Todo: be more random
-    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id) = if from_unitigs {
+    let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id, mut key_kmer_marks) = if from_unitigs {
         let ms_gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true);
-        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(ms_gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(ms_gen, key_kmer_marks, n_colors, n_threads, random_seed)
     } else {
         let ms_gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, true);
-        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(ms_gen, key_kmer_marks.clone(), n_colors, n_threads, random_seed)
+        set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(ms_gen, key_kmer_marks, n_colors, n_threads, random_seed)
     };
 
     log::info!("=== PHASE 3/3: Build the distinct color set storage ===");
@@ -422,15 +431,14 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             let color_stream_gen = input_mode.get_generator();
             let css = if from_unitigs {
                 let gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true);
-                set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+                set_of_sets_construction::build_color_set_storage(n_colors as usize, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             } else {
                 let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, true);
-                set_of_sets_construction::build_color_set_storage(n_colors, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
+                set_of_sets_construction::build_color_set_storage(n_colors as usize, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             };
 
             log::info!("Building rank support for key k-mer marks");
-            let mut key_kmer_marks = util::bitvec_to_simple_sds_bitvec(key_kmer_marks);
-            key_kmer_marks.enable_rank();
+            key_kmer_marks.enable_rank(); // Should already have but does not hurt
             assert!(key_kmer_idx_to_set_id.len() == key_kmer_marks.rank(key_kmer_marks.len()));
             let colex_map = ColexToColorSetMap {
                 sampling: key_kmer_marks, 
@@ -451,11 +459,11 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                     // input file.
                 },
             };
-            let chunk_size = n_colors.div_ceil(n_pieces);
+            let chunk_size = (n_colors as usize).div_ceil(n_pieces);
             if from_unitigs {
                 let mut gens = Vec::<(MsElementGenerator, Range::<usize>)>::new();
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
-                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
+                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors as usize);
                     let gen = Box::new(io::SeqStreamGeneratorFromFiles::new(chunk.to_owned()));
                     let ms_gen = MsElementGenerator::new(gen, StreamingIndex::new(&sbwt, &lcs), true);
                     gens.push((ms_gen, color_id_range));
@@ -464,7 +472,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             } else {
                 let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
-                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors);
+                    let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors as usize);
                     let gen = Box::new(io::SeqStreamGeneratorFromFiles::new(chunk.to_owned()));
                     let ms_gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, gen, true);
                     gens.push((ms_gen, color_id_range));
