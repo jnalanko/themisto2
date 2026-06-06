@@ -87,7 +87,7 @@ fn main() {
     std::thread::scope(|scope| {
 
         let mut producers = vec![];
-        for _ in 0..n_producers { // Create producers
+        for producer_id in 0..n_producers { // Create producers
             let sender_clone = sender.clone();
             let gen_mutex_clone = gen_mutex.clone();
             let handle = scope.spawn(move || {
@@ -98,6 +98,7 @@ fn main() {
                     while let Some(seq) = stream.stream_next() {
                         cur_batch.push(seq, color);
                         if cur_batch.size_in_bytes() >= BATCH_SIZE {
+                            log::info!("Producer {producer_id} sends batch");
                             sender_clone.send(cur_batch).unwrap();
                             cur_batch = Batch::new();
                         }
