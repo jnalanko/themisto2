@@ -107,7 +107,7 @@ impl<'a> FirstLastKmerWorker<'a> {
     // way because it was hard to make the borrow checker happy otherwise
     // because we need to mutate the reverse complement buffer here, so
     // this function needs a mutable &self, but it can't simultaneously
-    // take an immutable reference into the its own reverse complement buffer.
+    // take an immutable reference into its own reverse complement buffer.
     fn process_internal(&mut self, seq: &[u8], rev_comp_instead: bool) {
 
         let seq = if rev_comp_instead {
