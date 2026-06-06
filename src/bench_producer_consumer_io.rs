@@ -93,18 +93,26 @@ fn main() {
             let handle = scope.spawn(move || {
                 const BATCH_SIZE: usize = 1 << 23; // 8 MiB, same as MsElementGenerator
                 let mut cur_batch = Batch::new();
-                while let Some((mut stream, color)) = gen_mutex_clone.lock().unwrap().next() {
-                    log::warn!("Processing color {color}");
-                    while let Some(seq) = stream.stream_next() {
-                        cur_batch.push(seq, color);
-                        if cur_batch.size_in_bytes() >= BATCH_SIZE {
-                            log::info!("Producer {producer_id} sends batch");
-                            sender_clone.send(cur_batch).unwrap();
-                            cur_batch = Batch::new();
+                loop {
+                    let next_stream_maybe = { 
+                        let mut gen = gen_mutex_clone.lock().unwrap();
+                        gen.next()
+                    }; // gen_mutex_clone lock is freed here
+
+                    if let Some((mut stream, color)) = next_stream_maybe {
+                        log::warn!("Processing color {color}");
+                        while let Some(seq) = stream.stream_next() {
+                            cur_batch.push(seq, color);
+                            if cur_batch.size_in_bytes() >= BATCH_SIZE {
+                                sender_clone.send(cur_batch).unwrap();
+                                cur_batch = Batch::new();
+                            }
                         }
+                    } else {
+                        sender_clone.send(cur_batch).unwrap(); // flush last (possibly empty) batch
+                        break;
                     }
                 }
-                sender_clone.send(cur_batch).unwrap(); // flush last (possibly empty) batch
                 drop(sender_clone); // Drop our copy of the generator mutex. When all copies are dropped, the channel is closed
             });
             producers.push(handle);
