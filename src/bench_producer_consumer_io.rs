@@ -47,6 +47,12 @@ impl Batch {
 }
 
 fn main() {
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <file_of_files> [n_threads]", args[0]);
@@ -88,7 +94,7 @@ fn main() {
                 const BATCH_SIZE: usize = 1 << 23; // 8 MiB, same as MsElementGenerator
                 let mut cur_batch = Batch::new();
                 while let Some((mut stream, color)) = gen_mutex_clone.lock().unwrap().next() {
-                    log::info!("Processing color {color}");
+                    log::warn!("Processing color {color}");
                     while let Some(seq) = stream.stream_next() {
                         cur_batch.push(seq, color);
                         if cur_batch.size_in_bytes() >= BATCH_SIZE {
