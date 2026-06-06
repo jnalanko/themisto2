@@ -101,8 +101,11 @@ pub enum Subcommands {
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
         sample_distance: usize,
 
-        #[arg(help = "Number of parallel threads", short = 't', long = "n-threads", default_value = "4")]
+        #[arg(help = "Number of parallel worker threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize,
+
+        #[arg(help = "Number of parallel input parsing threads. This might speed up construction if the file system is slow or the number of input sequence files is massive. If you observe that the program is using less CPU time than what is available during construction phases 2 or 3, increasing the number of parsing threads might help with keeping the cores busy. Only use this if the storage hardware actually supports concurrent reads (i.e. not a single spinning HDD). Otherwise this will probably just make things slower.", long = "n-parser-threads", default_value = "1")]
+        n_parser_threads: usize,
 
         #[arg(long = "to-disk-in-pieces", help = "Build the final sets in pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once.")]
         n_pieces: Option<usize>,
@@ -384,7 +387,7 @@ impl ColoredSeqInput {
 
 // Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to disk.
 #[allow(clippy::too_many_arguments)]
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode) -> Option<CompactColexKmers<CSS>>{
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode, n_parser_threads: usize) -> Option<CompactColexKmers<CSS>>{
 
     log::info!("Building distinct color set structure");
     let n_colors = u32::try_from(color_names.len()).unwrap_or_else( |_| {
@@ -419,7 +422,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     let color_stream_gen = input_mode.get_generator();
     let random_seed = 123123; // Todo: be more random
     let (repr_kmer_marks, distinct_set_sizes, key_kmer_idx_to_set_id, mut key_kmer_marks) = if from_unitigs {
-        let ms_gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true);
+        let ms_gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true, n_parser_threads);
         set_of_sets_construction::find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(ms_gen, key_kmer_marks, n_colors, n_threads, random_seed)
     } else {
         let ms_gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, true);
@@ -431,7 +434,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
         BuildMode::InMemory => {
             let color_stream_gen = input_mode.get_generator();
             let css = if from_unitigs {
-                let gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true);
+                let gen = MsElementGenerator::new(color_stream_gen, StreamingIndex::new(&sbwt, &lcs), true, n_parser_threads);
                 set_of_sets_construction::build_color_set_storage(n_colors as usize, repr_kmer_marks, distinct_set_sizes, gen, n_threads)
             } else {
                 let gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, color_stream_gen, true);
@@ -466,7 +469,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                 for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors as usize);
                     let gen = Box::new(io::SeqStreamGeneratorFromFiles::new(chunk.to_owned()));
-                    let ms_gen = MsElementGenerator::new(gen, StreamingIndex::new(&sbwt, &lcs), true);
+                    let ms_gen = MsElementGenerator::new(gen, StreamingIndex::new(&sbwt, &lcs), true, n_parser_threads);
                     gens.push((ms_gen, color_id_range));
                 }
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
@@ -832,7 +835,7 @@ fn main() -> std::process::ExitCode {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, sample_distance, sbwt_path, lcs_path, from_unitigs, n_pieces} => {
+        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, sample_distance, sbwt_path, lcs_path, from_unitigs, n_pieces, n_parser_threads} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -874,13 +877,13 @@ fn main() -> std::process::ExitCode {
             match n_pieces {
                 None => {
                     let mut out = BufWriter::new(File::create(&output).unwrap());
-                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::InMemory);
+                    let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::InMemory, n_parser_threads);
                     let index = index.unwrap(); // Ok because we passed in InMemory
                     log::info!("Serializing sparse-dense index to {}", output.display());
                     write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
                 },
                 Some(n_pieces) => {
-                    build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::ToDisk(output, n_pieces));
+                    build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::ToDisk(output, n_pieces), n_parser_threads);
                 }
             }
         },

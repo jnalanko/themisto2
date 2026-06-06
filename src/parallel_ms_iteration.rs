@@ -11,15 +11,17 @@ pub struct MsElementGenerator<'a> {
     streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
+    n_parser_threads: usize,
 }
 
 impl<'a> MsElementGenerator<'a> {
-    pub fn new(color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool) -> Self {
+    pub fn new(color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>, streaming_index: StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, include_rev_comp: bool, n_parser_threads: usize) -> Self {
         Self {
             color_stream_generator,
             streaming_index,
             filter: None,
             include_rev_comp,
+            n_parser_threads,
         }
     }
 }
@@ -99,7 +101,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
             }
         }).collect();
 
-        crate::work_dispatcher::dispatch_work(&mut color_stream_generator, workers, 1, 1 << 23); 
+        crate::work_dispatcher::dispatch_work(&mut color_stream_generator, workers, self.n_parser_threads, 1 << 23); 
 
         self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
     }
@@ -532,7 +534,7 @@ mod tests {
         let gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> =
             Box::new(VecColorStream::new(color_seqs));
         let si = StreamingIndex::new(&sbwt, &lcs);
-        let mut ms_gen = MsElementGenerator::new(gen, si, true);
+        let mut ms_gen = MsElementGenerator::new(gen, si, true, 2);
         let got_mutex = std::sync::Mutex::new(Vec::<SetElement>::new());
         ms_gen.run(|e| got_mutex.lock().unwrap().push(e), 1);
         let mut got = got_mutex.into_inner().unwrap();
