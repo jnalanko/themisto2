@@ -110,7 +110,8 @@ impl ChainedInputStreamWithRevComp {
 }
 
 pub trait RewindableSeqStreamGenerator {
-	fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>>;
+    // Gives a stream and the index of the stream
+	fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)>;
 	fn rewind(&mut self);
 }
 
@@ -141,15 +142,16 @@ impl sbwt::SeqStream for JSeqIOWrapper {
 }
 
 impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
-    fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+    fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)> {
         if self.cur_file_idx == self.files.len() { return None; }
 
         let reader = jseqio::reader::DynamicFastXReader::from_file(&self.files[self.cur_file_idx]).unwrap();
         let reader = JSeqIOWrapper {inner: reader, cur_buf: vec![]};
         let reader: Box<dyn SeqStream + Send+ Sync> = Box::new(reader);
 
+        let stream_idx = self.cur_file_idx;
         self.cur_file_idx += 1;
-        Some(reader)
+        Some((reader, stream_idx))
     }
 
     fn rewind(&mut self) {
@@ -160,12 +162,13 @@ impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
 pub struct SeqStreamGeneratorFromSingleFile {
     file: PathBuf,
     cur_stream: jseqio::reader::DynamicFastXReader,
+    n_seqs_read: usize,
 }
 
 impl SeqStreamGeneratorFromSingleFile {
     pub fn new(file: PathBuf) -> Self {
         let cur_stream = jseqio::reader::DynamicFastXReader::from_file(&file).unwrap();
-        Self {file, cur_stream}
+        Self {file, cur_stream, n_seqs_read: 0}
     }
 }
 
@@ -184,15 +187,18 @@ impl SeqStream for SingleSeqStream {
 }
 
 impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromSingleFile {
-    fn next(&mut self) -> Option<Box<dyn SeqStream + Sync + Send>> {
+    fn next(&mut self) -> Option<(Box<dyn SeqStream + Sync + Send>, usize)> {
         let rec = self.cur_stream.read_next().unwrap()?;
         let seq = SingleSeqStream { seq: rec.seq.to_vec(), done: false };
         let seq: Box<dyn SeqStream + Sync + Send> = Box::new(seq);
-        Some(seq)
+        let seq_idx = self.n_seqs_read;
+        self.n_seqs_read += 1;
+        Some((seq, seq_idx))
     }
 
     fn rewind(&mut self) {
         let mut new_reader = jseqio::reader::DynamicFastXReader::from_file(&self.file).unwrap();
+        self.n_seqs_read = 0;
         std::mem::swap(&mut self.cur_stream, &mut new_reader);
 
         // Thd old reader is dropped here
@@ -253,7 +259,7 @@ pub struct EmptyRewindableSeqStreamGenerator { // Generates nothing
 }
 
 impl RewindableSeqStreamGenerator for EmptyRewindableSeqStreamGenerator {
-    fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+    fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)> {
         None
     }
 

@@ -17,7 +17,7 @@ use std::{
     fs::File,
     io::{BufRead, BufReader},
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering::Relaxed},
+    sync::{Arc, Mutex, atomic::{AtomicU64, Ordering::Relaxed}},
     time::Instant,
 };
 
@@ -75,24 +75,34 @@ fn main() {
     let (sender, receiver) = crossbeam::channel::bounded::<Batch>(2 * n_threads);
     let receiver_ref = &receiver;
 
+    let n_producers = 16;
+    let gen_mutex = Arc::new(Mutex::new(gen));
+
     std::thread::scope(|scope| {
-        let producer = scope.spawn(|| {
-            const BATCH_SIZE: usize = 1 << 23; // 8 MiB, same as MsElementGenerator
-            let mut color = 0_usize;
-            let mut cur_batch = Batch::new();
-            while let Some(mut stream) = gen.next() {
-                while let Some(seq) = stream.stream_next() {
-                    cur_batch.push(seq, color);
-                    if cur_batch.size_in_bytes() >= BATCH_SIZE {
-                        sender.send(cur_batch).unwrap();
-                        cur_batch = Batch::new();
+
+        let mut producers = vec![];
+        for _ in 0..n_producers { // Create producers
+            let sender_clone = sender.clone();
+            let gen_mutex_clone = gen_mutex.clone();
+            let handle = scope.spawn(move || {
+                const BATCH_SIZE: usize = 1 << 23; // 8 MiB, same as MsElementGenerator
+                let mut cur_batch = Batch::new();
+                while let Some((mut stream, color)) = gen_mutex_clone.lock().unwrap().next() {
+                    log::info!("Processing color {color}");
+                    while let Some(seq) = stream.stream_next() {
+                        cur_batch.push(seq, color);
+                        if cur_batch.size_in_bytes() >= BATCH_SIZE {
+                            sender_clone.send(cur_batch).unwrap();
+                            cur_batch = Batch::new();
+                        }
                     }
                 }
-                color += 1;
-            }
-            sender.send(cur_batch).unwrap(); // flush last (possibly empty) batch
-            drop(sender);
-        });
+                sender_clone.send(cur_batch).unwrap(); // flush last (possibly empty) batch
+                drop(sender_clone); // Drop our copy of the generator mutex. When all copies are dropped, the channel is closed
+            });
+            producers.push(handle);
+        }
+        drop(sender); // Drop this clone of the sender. Now the only copies are within the producers.
 
         let consumers: Vec<_> = (0..n_threads)
             .map(|_| {
@@ -106,7 +116,9 @@ fn main() {
             })
             .collect();
 
-        producer.join().unwrap();
+        for c in producers {
+            c.join().unwrap();
+        }
         for h in consumers {
             h.join().unwrap();
         }

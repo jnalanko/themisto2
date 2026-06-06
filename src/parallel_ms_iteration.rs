@@ -123,7 +123,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
                 let batch_size: usize = 1 << 23; // 8 MiB
                 let mut color = 0_usize;
                 let mut cur_batch = WorkBatch::new(&self.streaming_index, &self.filter, self.include_rev_comp);
-                while let Some(mut color_stream) = color_stream_generator.next() {
+                while let Some((mut color_stream, _stream_idx)) = color_stream_generator.next() {
                     log::info!("Processing color {}", color);
                     while let Some(seq) = color_stream.stream_next() {
                         cur_batch.push_seq(seq, color);
@@ -337,7 +337,7 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
             // Channel of pairs (color id, seq stream)
             let producer_handle = scope.spawn(|| {
                 let mut color = 0_usize;
-                while let Some(color_stream) = color_stream_generator.next() {
+                while let Some((color_stream, _stream_idx)) = color_stream_generator.next() {
                     sender.send((color, color_stream)).unwrap();
                     color += 1;
                 }
@@ -505,13 +505,14 @@ mod tests {
     }
 
     impl RewindableSeqStreamGenerator for VecColorStream {
-        fn next(&mut self) -> Option<Box<dyn SeqStream + Send + Sync>> {
+        fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)> {
             if self.color_idx == self.colors.len() {
                 return None;
             }
             let seqs = self.colors[self.color_idx].clone();
+            let color_idx = self.color_idx;
             self.color_idx += 1;
-            Some(Box::new(VecVecSeqStream::new(seqs)))
+            Some((Box::new(VecVecSeqStream::new(seqs)), color_idx))
         }
         fn rewind(&mut self) {
             self.color_idx = 0;
