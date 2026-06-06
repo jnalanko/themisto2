@@ -39,6 +39,7 @@ mod pseudoalignment_metrics;
 mod sparse_dense_storage_to_disk;
 mod report;
 mod filter_reads;
+mod work_dispatcher;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]

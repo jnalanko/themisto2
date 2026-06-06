@@ -4,7 +4,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}, work_dispatcher};
 
 pub struct MsElementGenerator<'a> {
     color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>,
@@ -24,52 +24,30 @@ impl<'a> MsElementGenerator<'a> {
     }
 }
 
-pub struct WorkBatch<'a> {
-    seq_concat: Vec<u8>,
-    seq_ends: Vec<usize>,
-    seq_colors: Vec<usize>,
+pub struct MsWorker<'a, CB: Fn(crate::set_of_sets_construction::SetElement) + Send + Sync> {
     streaming_index: &'a StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>,
     filter: &'a Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>,
     include_rev_comp: bool,
+    rev_comp_buf: Vec<u8>,
+    callback: &'a CB, 
 }
 
-impl<'a> WorkBatch<'a> {
-    fn run(mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
-        let n_seqs = self.seq_ends.len();
-        assert_eq!(n_seqs, self.seq_colors.len());
-
-        let mut seq_start = 0_usize;
-        for seq_idx in 0..n_seqs {
-            let seq_end = self.seq_ends[seq_idx];
-            let seq = &self.seq_concat[seq_start..seq_end];
-            let color = self.seq_colors[seq_idx];
-
-            self.process_seq(seq, color, &callback);
-            if self.include_rev_comp {
-                // Reverse-complemet in-place. This is already since we now own `self`, so
-                // nobody else can see the sequences anymore.
-                let seq_mut = &mut self.seq_concat[seq_start..seq_end];
-                reverse_complement_in_place(seq_mut);
-                let seq = &self.seq_concat[seq_start..seq_end];
-                self.process_seq(seq, color, &callback);
-            }
-
-            seq_start = seq_end;
+impl<'a, CB: Fn(crate::set_of_sets_construction::SetElement) + Send + Sync> crate::work_dispatcher::Worker for MsWorker<'a, CB> {
+    fn process(&mut self, seq: &[u8], color: usize) {
+        self.process_internal(seq, color);
+        if self.include_rev_comp {
+            self.rev_comp_buf.clear();
+            self.rev_comp_buf.extend_from_slice(seq);
+            reverse_complement_in_place(&mut self.rev_comp_buf);
+            self.process_internal(&self.rev_comp_buf, color);
         }
     }
+}
 
-    fn push_seq(&mut self, seq: &[u8], color: usize) {
-        self.seq_concat.extend_from_slice(seq);
-        self.seq_ends.push(self.seq_concat.len());
-        self.seq_colors.push(color);
-    }
+impl<'a, CB: Fn(crate::set_of_sets_construction::SetElement) + Send + Sync> MsWorker<'a, CB> {
 
-    fn size_in_bytes(&self) -> usize {
-        self.seq_concat.len() + self.seq_ends.len()*size_of::<usize>() + self.seq_colors.len()*size_of::<usize>()
-    }
-
-    // Don't call this from outside. Call self.run instead.
-    fn process_seq(&self, seq: &[u8], color: usize, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync) {
+    // Don't call this directly. This is called from the process-function of crate::work_dispatcher::Worker.
+    fn process_internal(&self, seq: &[u8], color: usize) {
         let k = self.streaming_index.k();
         let ms_iter = self.streaming_index.matching_statistics_iter(seq);
         let kmer_iter = ms_iter.skip(k-1).filter(|(len, _colex)| *len == k);
@@ -90,26 +68,20 @@ impl<'a> WorkBatch<'a> {
         });
 
         for id in filtered_iter {
-            callback(SetElement{
+            (self.callback)(SetElement{
                 set_id: id,
                 color,
             });
         }
     }
-
-    fn new(streaming_index: &'a StreamingIndex<'a, SbwtIndex<SubsetMatrix>, LcsArray>, filter: &'a Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, include_rev_comp: bool) -> WorkBatch<'a> {
-        WorkBatch { seq_concat: vec![], seq_ends: vec![], seq_colors: vec![], streaming_index, filter, include_rev_comp }
-    }
 }
 
 impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElementGenerator<'a> {
     fn run(&mut self, callback: impl Fn(crate::set_of_sets_construction::SetElement) + Send + Sync, n_threads: usize) {
-        let (sender, receiver) = crossbeam::channel::bounded::<WorkBatch>(2*n_threads);
-        let receiver_ref = &receiver; // To capture a reference
 
         // Here we need to get a bit tricky to avoid mutable aliasing of self. The issue is that
-        // the producer thread needs a mutable reference to the ReWindableSeqStreamGenerator at self,
-        // while the consumers need non-mutable access to the rest of self. This is not possible
+        // the work dispatcher needs a mutable reference to the ReWindableSeqStreamGenerator at self,
+        // while the workers need non-mutable access to the rest of self. This is not possible
         // at the same time because borrowing self borrows everything. The workaround is that we
         // swap in a dummy generator into self, so that we can get separate ownership of the generator
         // and pass it into the producer. In the end we swap it back in.
@@ -117,39 +89,17 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for MsElement
         std::mem::swap(&mut self.color_stream_generator, &mut dummy_color_stream_generator);
         let mut color_stream_generator = dummy_color_stream_generator; // Now this function owns this
 
-        std::thread::scope(|scope| {
-            // Channel of pairs (color id, seq stream)
-            let producer_handle = scope.spawn(|| {
-                let batch_size: usize = 1 << 23; // 8 MiB
-                let mut color = 0_usize;
-                let mut cur_batch = WorkBatch::new(&self.streaming_index, &self.filter, self.include_rev_comp);
-                while let Some((mut color_stream, _stream_idx)) = color_stream_generator.next() {
-                    log::info!("Processing color {}", color);
-                    while let Some(seq) = color_stream.stream_next() {
-                        cur_batch.push_seq(seq, color);
-                        if cur_batch.size_in_bytes() >= batch_size {
-                            sender.send(cur_batch).unwrap();
-                            cur_batch = WorkBatch::new(&self.streaming_index, &self.filter, self.include_rev_comp);
-                        }
-                    }
-                    color += 1;
-                }
-                sender.send(cur_batch).unwrap(); // Last batch. May be empty, but that is ok.
-                drop(sender); // Finished
-            });
+        let workers: Vec<MsWorker<_>> = (0..n_threads).map(|_| {
+            MsWorker {
+                streaming_index: &self.streaming_index,
+                filter: &self.filter,
+                include_rev_comp: self.include_rev_comp,
+                rev_comp_buf: vec![],
+                callback: &callback,
+            }
+        }).collect();
 
-            let consumer_handles: Vec<_> = (0..n_threads).map(|_| {
-                scope.spawn(|| {
-                    while let Ok(batch) = receiver_ref.recv() {
-                        batch.run(&callback);
-                    }
-                })
-            }).collect();
-
-            // Wait for threads to finish
-            producer_handle.join().unwrap();
-            for h in consumer_handles { h.join().unwrap(); }
-        });
+        crate::work_dispatcher::dispatch_work(&mut color_stream_generator, workers, 1, 1 << 23); 
 
         self.color_stream_generator = color_stream_generator; // Put this back in (see comment at the start of the function)
     }
