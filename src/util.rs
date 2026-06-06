@@ -59,6 +59,30 @@ impl VecVecSeqStream {
     }
 }
 
+#[allow(dead_code)]
+pub struct VecVecRewindableGen {
+    seqs: Vec<Vec<u8>>,
+    done: bool,
+}
+
+impl VecVecRewindableGen {
+    #[allow(dead_code)]
+    pub fn new(seqs: Vec<Vec<u8>>) -> Self {
+        Self { seqs, done: false }
+    }
+}
+
+impl crate::io::RewindableSeqStreamGenerator for VecVecRewindableGen {
+    fn next(&mut self) -> Option<(Box<dyn sbwt::SeqStream + Send + Sync>, usize)> {
+        if self.done { return None; }
+        self.done = true;
+        Some((Box::new(VecVecSeqStream::new(self.seqs.clone())), 0))
+    }
+    fn rewind(&mut self) {
+        self.done = false;
+    }
+}
+
 pub fn segment_range(range: Range<usize>, n_pieces: usize) -> Vec<Range<usize>> {
     let segment_len = range.len().div_ceil(n_pieces);
     let mut pieces: Vec<Range<usize>> = vec![];
