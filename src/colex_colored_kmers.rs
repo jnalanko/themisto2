@@ -21,7 +21,9 @@ use crate::atomic_bitmap::AtomicBitmap;
 use crate::int_vec::CompactIntVec;
 use crate::coloring_interface::{self, ColorSetStorage, ColorSetView};
 use crate::index_import;
+use crate::io::RewindableSeqStreamGenerator;
 use crate::iterators::VecVecUsizeIteratorGenerator;
+use crate::work_dispatcher;
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
@@ -80,6 +82,68 @@ impl SeqBatch {
     }
 }
 
+struct FirstLastKmerWorker<'a> {
+    in_neighbor_buf: Vec::<(Node, u8)>,
+    rev_comp_buf: Vec<u8>,
+    k: usize,
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
+    dbg: &'a Dbg<'a, SubsetMatrix>,
+    marks: &'a AtomicBitmap,
+    add_rev_comp: bool,
+}
+
+impl<'a> crate::work_dispatcher::Worker for FirstLastKmerWorker<'a> {
+    fn process(&mut self, seq: &[u8], _color: usize) {
+        self.process_internal(seq, false);
+        if self.add_rev_comp {
+            self.process_internal(seq, true);
+        }
+    }
+}
+
+impl<'a> FirstLastKmerWorker<'a> {
+    // This is a bit ugly. We process seq, unless rev_comp_instead is true,
+    // in which case we compute from the reverse complement. It's done this
+    // way because it was hard to make the borrow checker happy otherwise
+    // because we need to mutate the reverse complement buffer here, so
+    // this function needs a mutable &self, but it can't simultaneously
+    // take an immutable reference into the its own reverse complement buffer.
+    fn process_internal(&mut self, seq: &[u8], rev_comp_instead: bool) {
+
+        let seq = if rev_comp_instead {
+            self.rev_comp_buf.clear();
+            self.rev_comp_buf.extend_from_slice(seq);
+            reverse_complement_in_place(&mut self.rev_comp_buf);
+            &self.rev_comp_buf
+        } else { 
+            seq 
+        };
+
+        for ACGT_run in seq.split(|&c| !crate::util::IS_DNA[c as usize]) {
+            if ACGT_run.len() < self.k { continue }
+
+            let first = self.sbwt.search(&ACGT_run[0..self.k]).unwrap_or_else(|| {
+                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[0..self.k]));
+            });
+
+            assert!(first.len() == 1);
+
+            self.in_neighbor_buf.clear();
+            self.dbg.push_in_neighbors(Node{id: first.start}, &mut self.in_neighbor_buf);
+            for (in_node, _) in self.in_neighbor_buf.iter() {
+                self.marks.set(in_node.id, true);
+            }
+
+            let last = self.sbwt.search(&ACGT_run[ACGT_run.len()-self.k..]).unwrap_or_else(|| {
+                panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[ACGT_run.len()-self.k..]));
+            });
+
+            assert!(last.len() == 1);
+            self.marks.set(last.start, true);
+        }
+    }
+}
+
 // key k-mers as defined in the Themisto Bioinformatics paper:
 // - Last k-mer of unitig or input sequence
 // - In-neighbors of first k-mer of unitig or input sequence
@@ -87,60 +151,24 @@ impl SeqBatch {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would need to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
-// Also does not mark reverse complements, so you need to provide a SeqStream that
-// produces both strands.
-pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, mut seqs: impl sbwt::SeqStream + Send, n_threads: usize) -> bitvec::vec::BitVec {
+pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, seq_stream_gen: &mut Box<dyn RewindableSeqStreamGenerator + Sync + Send>, n_threads: usize, n_parser_threads: usize, add_rev_comp: bool) -> bitvec::vec::BitVec {
 
     log::info!("Initializing DBG");
     let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
     let marks = AtomicBitmap::new(sbwt.n_sets());
-    let dbg_ref = &dbg; // To borrow for worker threads
-    let marks_ref = &marks; // To borrow for worker threads
 
     log::info!("Searching first and last k-mer of every input sequence");
-    std::thread::scope(|scope| {
+    let workers: Vec<_> = (0..n_threads).map(|_| FirstLastKmerWorker {
+        in_neighbor_buf: vec![],
+        rev_comp_buf: vec![],
+        k: sbwt.k(),
+        sbwt,
+        dbg: &dbg,
+        marks: &marks,
+        add_rev_comp
+    }).collect();
 
-        let reader_buf_size = 1_000_000;
-        let (batch_send, batch_recv) = crossbeam::channel::bounded::<SeqBatch>(n_threads);
-        let reader_handle = scope.spawn(move || {
-            let progress = indicatif::ProgressBar::new_spinner();
-            progress.set_style(ProgressStyle::with_template("{pos} {msg}").unwrap());
-            progress.set_message(" Sequences read");
-            let mut buf = SeqDB::new();
-            let mut buf_total_len = 0_usize;
-            while let Some(seq) = seqs.stream_next(){
-                buf.push_seq(seq);
-                buf_total_len += seq.len();
-                if buf_total_len > reader_buf_size {
-                    batch_send.send(SeqBatch{seqs: buf}).unwrap(); 
-                    buf = SeqDB::new();
-                    buf_total_len = 0;
-                }
-                progress.inc(1);
-            }
-            if buf_total_len > 0 { // Last batch
-                batch_send.send(SeqBatch{seqs: buf}).unwrap(); 
-            }
-            progress.finish();
-            drop(batch_send);
-        });
-
-        let mut worker_handles = Vec::new();
-        for _ in 0..n_threads {
-            let recv_clone = batch_recv.clone();
-            let worker_handle = scope.spawn(move || {
-                while let Ok(batch) = recv_clone.recv() {
-                    batch.process(sbwt, dbg_ref, marks_ref);
-                }
-            });
-            worker_handles.push(worker_handle);
-        }
-
-        reader_handle.join().unwrap();
-        for h in worker_handles {
-            h.join().unwrap();
-        }
-    });
+    crate::work_dispatcher::dispatch_work(seq_stream_gen, workers, n_parser_threads, 1 << 23);
 
     log::info!("Sampling along unitigs");
     dbg.iter_unitigs_with_callback(|nodes| {

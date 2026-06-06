@@ -412,8 +412,8 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let key_kmer_marks = {
-        let phase1_input_stream = io::NeedletailSeqStreamWithRevComp::new(all_input_seq_files);
-        mark_key_kmers(&sbwt, &lcs, sample_distance, phase1_input_stream, n_threads)
+        let mut phase1_input_stream = input_mode.get_generator();
+        mark_key_kmers(&sbwt, &lcs, sample_distance, &mut phase1_input_stream, n_threads, n_parser_threads, true)
     };
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());

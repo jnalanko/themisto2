@@ -254,6 +254,47 @@ impl SeqStream for NeedletailSeqStreamWithRevComp {
     }
 }
 
+// Chains multiple fasta/fastq files (gzipped or not), uppercases sequences.
+pub struct NeedletailSeqStream {
+    paths: Vec<PathBuf>,
+    cur_idx: usize,
+    cur_reader: Option<Box<dyn needletail::FastxReader>>,
+    seq_buf: Vec<u8>,
+}
+
+impl NeedletailSeqStream {
+    pub fn new(paths: Vec<PathBuf>) -> Self {
+        let cur_reader = paths.first().map(|p| needletail::parse_fastx_file(p).unwrap());
+        Self { paths, cur_idx: 0, cur_reader, seq_buf: vec![] }
+    }
+}
+
+impl SeqStream for NeedletailSeqStream {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        loop {
+            let has_record = match self.cur_reader.as_mut() {
+                None => return None,
+                Some(reader) => match reader.next() {
+                    None => false,
+                    Some(Err(e)) => panic!("Error reading sequence: {e}"),
+                    Some(Ok(rec)) => {
+                        let seq = rec.seq();
+                        self.seq_buf.clear();
+                        self.seq_buf.extend(seq.iter().map(|&b| b.to_ascii_uppercase()));
+                        true
+                    }
+                }
+            };
+            if has_record {
+                return Some(&self.seq_buf);
+            }
+            self.cur_idx += 1;
+            self.cur_reader = self.paths.get(self.cur_idx)
+                .map(|p| needletail::parse_fastx_file(p).unwrap());
+        }
+    }
+}
+
 pub struct EmptyRewindableSeqStreamGenerator { // Generates nothing
 
 }
