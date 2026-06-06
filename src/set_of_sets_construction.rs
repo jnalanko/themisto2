@@ -142,7 +142,10 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
             sfs.len() / 3,
         )
     };
-    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).build().unwrap();
+
+    // We use an 8 MiB stack for the thread pool because Rayon seems to sometimes run into a 
+    // stack overflow with huge sorts.
+    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(n_threads).stack_size(1 << 23).build().unwrap();
     thread_pool.install(|| triples.par_sort_unstable()); // Sorts by fingerprint
 
     // Now we go from this:
@@ -197,7 +200,7 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
             colex_set_id_sizes.len() / 2,
         )
     };
-    pairs.par_sort_unstable(); // Sorts by colex because colex is at the MSB bits of the first word
+    thread_pool.install(|| pairs.par_sort_unstable()); // Sorts by colex because colex is at the MSB bits of the first word
 
     log::info!("Storing final color set ids and sizes");
 
