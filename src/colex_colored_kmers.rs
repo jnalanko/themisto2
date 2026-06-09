@@ -694,6 +694,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         Self::check_magic_and_version(input);
         let color_names = Self::load_color_names_internal(input);
 
+        log::info!("Loading the SBWT");
         let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
         if enable_select {
             log::info!("Building select support");
