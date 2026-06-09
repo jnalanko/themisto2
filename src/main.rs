@@ -557,35 +557,32 @@ impl std::io::Write for CountingWriter {
 }
 
 fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    // Compute quick-to-access statistics first
 
-    // Direct field access — instant
     println!("n_kmers\t{}", index.sbwt().n_kmers());
+    println!("n_colors\t{}", index.get_set_storage().n_colors());
     println!("sbwt_length\t{}", index.sbwt().n_sets());
     println!("n_sampled_positions\t{}", index.get_map().sampling.count_ones());
 
-    // Color set counts — cheap
     let n_color_sets = index.get_set_storage().n_sets();
-    println!("n_color_sets\t{}", n_color_sets);
+    println!("n_distinct_color_sets\t{}", n_color_sets);
     log::info!("Counting sparse and dense color sets");
     let n_dense_color_sets = index.get_set_storage().get_dense_marks().count_ones();
     let n_sparse_color_sets = n_color_sets - n_dense_color_sets;
     println!("n_sparse_color_sets\t{}", n_sparse_color_sets);
     println!("n_dense_color_sets\t{}", n_dense_color_sets);
 
-    // Mean distinct color set size — iterate over all distinct sets
     log::info!("Computing mean distinct color set size");
     let total_distinct_size: usize = (0..n_color_sets).map(|i| index.get_set_storage().get_set_view(i).len()).sum();
     println!("mean_distinct_color_set_size\t{:.6}", total_distinct_size as f64 / n_color_sets as f64);
 
-    // Component sizes — serialize to counting writer
     log::info!("Computing SBWT size");
     let sbwt_size_bytes = {
         let mut cw = CountingWriter { bytes: 0 };
         index.sbwt().serialize(&mut cw).unwrap();
         cw.bytes
     };
-    println!("sbwt_size_gib\t{:.6}", sbwt_size_bytes as f64 / GIB);
+    println!("sbwt_size_bytes\t{}", sbwt_size_bytes);
 
     log::info!("Computing LCS size");
     let lcs_size_bytes = {
@@ -593,7 +590,7 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.lcs().serialize(&mut cw).unwrap();
         cw.bytes
     };
-    println!("lcs_size_gib\t{:.6}", lcs_size_bytes as f64 / GIB);
+    println!("lcs_size_bytes\t{}", lcs_size_bytes);
 
     log::info!("Computing color set storage size");
     let css_size_bytes = {
@@ -601,16 +598,9 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.get_set_storage().serialize(&mut cw);
         cw.bytes
     };
-    println!("color_set_storage_size_gib\t{:.6}", css_size_bytes as f64 / GIB);
+    println!("color_set_storage_size_bytes\t{}", css_size_bytes);
 
-    // DBG traversal — slow; computes unitig and k-mer color set stats
-    log::info!("Computing unitig and k-mer color set stats (DBG traversal)");
-    let stats = index.compute_index_stats(n_threads);
-    println!("n_unitigs\t{}", stats.n_unitigs);
-    println!("mean_unitig_length\t{:.6}", stats.mean_unitig_length());
-    println!("mean_kmer_color_set_size\t{:.6}", stats.mean_kmer_color_set_size());
-
-    // Full index size — serialize everything
+    // Full index size.
     log::info!("Computing full index size");
     let full_size_bytes = {
         let mut cw = CountingWriter { bytes: 0 };
@@ -618,7 +608,15 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.serialize(&mut cw);
         cw.bytes
     };
-    println!("full_index_size_gib\t{:.6}", full_size_bytes as f64 / GIB);
+    println!("full_index_size_bytes\t{}", full_size_bytes);
+
+    // DBG traversal. Slow: computes unitig and k-mer color set stats
+    log::info!("Computing unitig and k-mer color set stats (DBG traversal)");
+    let stats = index.compute_index_stats(n_threads);
+    println!("n_unitigs\t{}", stats.n_unitigs);
+    println!("mean_unitig_length\t{:.6}", stats.mean_unitig_length());
+    println!("mean_kmer_color_set_size\t{:.6}", stats.mean_kmer_color_set_size());
+
 }
 
 
