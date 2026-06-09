@@ -559,22 +559,32 @@ impl std::io::Write for CountingWriter {
 fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) {
     // Compute quick-to-access statistics first
 
-    println!("n_kmers\t{}", index.sbwt().n_kmers());
-    println!("n_colors\t{}", index.get_set_storage().n_colors());
-    println!("sbwt_length\t{}", index.sbwt().n_sets());
-    println!("n_sampled_positions\t{}", index.get_map().sampling.count_ones());
+    let stdout = std::io::stdout();
+
+    // Macro to flush stdout after every print
+    macro_rules! printstat {
+        ($($arg:tt)*) => {
+            println!($($arg)*);
+            stdout.lock().flush().unwrap();
+        };
+    }
+
+    printstat!("n_kmers\t{}", index.sbwt().n_kmers());
+    printstat!("n_colors\t{}", index.get_set_storage().n_colors());
+    printstat!("sbwt_length\t{}", index.sbwt().n_sets());
+    printstat!("n_sampled_positions\t{}", index.get_map().sampling.count_ones());
 
     let n_color_sets = index.get_set_storage().n_sets();
-    println!("n_distinct_color_sets\t{}", n_color_sets);
+    printstat!("n_distinct_color_sets\t{}", n_color_sets);
     log::info!("Counting sparse and dense color sets");
     let n_dense_color_sets = index.get_set_storage().get_dense_marks().count_ones();
     let n_sparse_color_sets = n_color_sets - n_dense_color_sets;
-    println!("n_sparse_color_sets\t{}", n_sparse_color_sets);
-    println!("n_dense_color_sets\t{}", n_dense_color_sets);
+    printstat!("n_sparse_color_sets\t{}", n_sparse_color_sets);
+    printstat!("n_dense_color_sets\t{}", n_dense_color_sets);
 
     log::info!("Computing mean distinct color set size");
     let total_distinct_size: usize = (0..n_color_sets).map(|i| index.get_set_storage().get_set_view(i).len()).sum();
-    println!("mean_distinct_color_set_size\t{:.6}", total_distinct_size as f64 / n_color_sets as f64);
+    printstat!("mean_distinct_color_set_size\t{:.6}", total_distinct_size as f64 / n_color_sets as f64);
 
     log::info!("Computing SBWT size");
     let sbwt_size_bytes = {
@@ -582,7 +592,7 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.sbwt().serialize(&mut cw).unwrap();
         cw.bytes
     };
-    println!("sbwt_size_bytes\t{}", sbwt_size_bytes);
+    printstat!("sbwt_size_bytes\t{}", sbwt_size_bytes);
 
     log::info!("Computing LCS size");
     let lcs_size_bytes = {
@@ -590,7 +600,7 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.lcs().serialize(&mut cw).unwrap();
         cw.bytes
     };
-    println!("lcs_size_bytes\t{}", lcs_size_bytes);
+    printstat!("lcs_size_bytes\t{}", lcs_size_bytes);
 
     log::info!("Computing color set storage size");
     let css_size_bytes = {
@@ -598,7 +608,7 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.get_set_storage().serialize(&mut cw);
         cw.bytes
     };
-    println!("color_set_storage_size_bytes\t{}", css_size_bytes);
+    printstat!("color_set_storage_size_bytes\t{}", css_size_bytes);
 
     // Full index size.
     log::info!("Computing full index size");
@@ -608,14 +618,14 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
         index.serialize(&mut cw);
         cw.bytes
     };
-    println!("full_index_size_bytes\t{}", full_size_bytes);
+    printstat!("full_index_size_bytes\t{}", full_size_bytes);
 
     // DBG traversal. Slow: computes unitig and k-mer color set stats
     log::info!("Computing unitig and k-mer color set stats (DBG traversal)");
     let stats = index.compute_index_stats(n_threads);
-    println!("n_unitigs\t{}", stats.n_unitigs);
-    println!("mean_unitig_length\t{:.6}", stats.mean_unitig_length());
-    println!("mean_kmer_color_set_size\t{:.6}", stats.mean_kmer_color_set_size());
+    printstat!("n_unitigs\t{}", stats.n_unitigs);
+    printstat!("mean_unitig_length\t{:.6}", stats.mean_unitig_length());
+    printstat!("mean_kmer_color_set_size\t{:.6}", stats.mean_kmer_color_set_size());
 
 }
 
