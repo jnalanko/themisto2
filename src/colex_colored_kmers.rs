@@ -699,12 +699,16 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             log::info!("Building select support");
             sbwt.build_select();
         }
+        log::info!("Loading the LCS array");
         let lcs = LcsArray::load(input).unwrap();
+        log::info!("Loading color sets");
         let sets = CSS::load(input);
+        log::info!("Loading color set mapping");
         let map = ColexToColorSetMap::load(input);
         assert_eq!(map.sampling.len(), sbwt.n_sets());
         assert_eq!(color_names.len(), sets.n_colors());
 
+        log::info!("Index loaded");
         CompactColexKmers{sbwt, lcs, sets, map, color_names}
     }
 
