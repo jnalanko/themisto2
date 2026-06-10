@@ -105,7 +105,7 @@ pub enum Subcommands {
         #[arg(help = "Number of parallel worker threads", short = 't', long = "n-threads", default_value = "4")]
         n_threads: usize,
 
-        #[arg(help = "Number of parallel input parsing threads. This might speed up construction if the file system is slow or the number of input sequence files is massive. If you observe that the program is using less CPU time than what is available during construction phases 2 or 3, increasing the number of parsing threads might help with keeping the cores busy. Only use this if the storage hardware actually supports concurrent reads (i.e. not a single spinning HDD). Otherwise this will probably just make things slower.", long = "n-parser-threads", default_value = "1")]
+        #[arg(help = "Number of parallel input parsing threads (only matters with --file-colors). This might speed up construction if the file system is slow or the number of input sequence files is massive. If you observe that the program is using less CPU time than what is available during construction phases 2 or 3, increasing the number of parsing threads might help with keeping the cores busy. Only use this if the storage hardware actually supports concurrent reads (i.e. not a single spinning HDD). Otherwise this will probably just make things slower.", long = "n-parser-threads", default_value = "1")]
         n_parser_threads: usize,
 
         #[arg(long = "to-disk-in-pieces", help = "Build the final sets in pieces, flushing to disk after each piece. This is useful if there is not enough memory to hold the final data structure in memory at once.")]
