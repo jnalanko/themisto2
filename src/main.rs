@@ -75,9 +75,12 @@ impl ColoringType {
 pub enum Subcommands {
     #[command(arg_required_else_help = true)]
     Build {
+
+        // The maximum number of colors is 2^32 because we use 32-bit color ids in phase 2 of the construction.
         #[arg(help = "A file with one fasta/fastq filename per line. Maximum supported number of colors: 2^32.", long = "file-colors")]
         color_fof: Option<PathBuf>,
 
+        // The maximum number of colors is 2^32 because we use 32-bit color ids in phase 2 of the construction.
         #[arg(help = "A fasta/fastq file, with one color per sequence. Maximum supported number of colors: 2^32.", long = "seq-colors")]
         sequence_colors_file: Option<PathBuf>,
 
