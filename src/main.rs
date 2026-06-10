@@ -90,7 +90,7 @@ pub enum Subcommands {
         #[arg(help = "Output filename. If --to-disk-in-pieces is given, this is interpreted as a filename prefix.", short, long, required = true)]
         output: PathBuf,
 
-        #[arg(help = "Optional: Build from unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", long)]
+        #[arg(help = "Optional: Build from per-color unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", long)]
         from_unitigs: bool,
 
         #[arg(help = "Directory for temporary files. Required if --sbwt is not given. Should point to a location with fast IO and plenty of free space.", long = "temp-dir", required_unless_present="sbwt_path")]
