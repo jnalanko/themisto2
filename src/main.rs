@@ -6,7 +6,7 @@
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
-use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
+use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
@@ -297,6 +297,9 @@ pub enum Subcommands {
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
+
+        #[arg(long = "colors-to-stdout", default_value = "false", help = "Write the color dump to stdout instead of a file.")]
+        colors_to_stdout: bool,
     },
     #[command(arg_required_else_help = true, name = "stats")]
     Stats {
@@ -771,7 +774,12 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
     }
 }
 
-fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out_prefix: &Path, n_threads: usize) {
+fn export_index<CSS: ColorSetStorage + Sync>(
+    index: &CompactColexKmers<CSS>, 
+    out_prefix: &Path,
+    colors_to_stdout: bool,
+    n_threads: usize) {
+
     let out_prefix = out_prefix.as_os_str().to_str().unwrap().to_owned();
 
     let mut metadata_filename = out_prefix.clone();
@@ -785,9 +793,14 @@ fn export_index<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, out
 
     let metadata_out = BufWriter::new(File::create(metadata_filename).unwrap());
     let unitigs_out = BufWriter::new(File::create(unitig_filename).unwrap());
-    let colors_out = BufWriter::new(File::create(colors_filename).unwrap());
 
-    index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+    if colors_to_stdout {
+        let colors_out = BufWriter::new(std::io::stdout());
+        index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+    } else {
+        let colors_out = BufWriter::new(File::create(colors_filename).unwrap());
+        index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+    }
 }
 
 fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, temp_dir: &Option<PathBuf>, input_stream: io::ChainedInputStream, k: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, LcsArray) {
@@ -1078,11 +1091,11 @@ fn main() -> std::process::ExitCode {
             log::info!("Serializing Themisto 2 index to {}", output.display());
             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
         },
-        Subcommands::Export { index: index_path, color_dump_prefix, n_threads } => {
+        Subcommands::Export { index: index_path, color_dump_prefix, n_threads, colors_to_stdout } => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for export
             match index {
-                IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, colors_to_stdout, n_threads),
             };
         },
         Subcommands::Stats { index: index_path, n_threads } => {
