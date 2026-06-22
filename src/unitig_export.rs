@@ -138,7 +138,7 @@ pub fn export_gfa(sbwt: &SbwtIndex<SubsetMatrix>, dbg: &Dbg<SubsetMatrix>, map: 
     
     log::info!("Exporting unitigs (GFA format)");
     log::info!("Computing GFA segments");
-    let (n_segments, bvs) = export_canonical_unitigs_for_gfa(&mut gfa_out, &dbg, map, sbwt, k, sbwt.n_sets(), n_threads);
+    let (n_segments, bvs) = export_canonical_unitigs_for_gfa(&mut gfa_out, dbg, map, sbwt, k, sbwt.n_sets(), n_threads);
 
     log::info!("Computing GFA links");
 

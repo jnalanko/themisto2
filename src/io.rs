@@ -68,6 +68,7 @@ pub struct ChainedInputStreamWithRevComp{
 }
 
 impl ChainedInputStreamWithRevComp {
+    #[allow(dead_code)]
     pub fn new(filenames: Vec<PathBuf>) -> Self {
         let inner = ChainedInputStream::new(filenames);
         Self{inner, rev_comp_next: false}
@@ -112,6 +113,7 @@ impl ChainedInputStreamWithRevComp {
 pub trait RewindableSeqStreamGenerator {
     // Gives a stream and the index of the stream
 	fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)>;
+    #[allow(dead_code)]
 	fn rewind(&mut self);
 }
 
@@ -159,6 +161,7 @@ impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
     }
 }
 
+#[allow(dead_code)]
 pub struct SeqStreamGeneratorFromSingleFile {
     file: PathBuf,
     cur_stream: jseqio::reader::DynamicFastXReader,
@@ -166,6 +169,7 @@ pub struct SeqStreamGeneratorFromSingleFile {
 }
 
 impl SeqStreamGeneratorFromSingleFile {
+    #[allow(dead_code)]
     pub fn new(file: PathBuf) -> Self {
         let cur_stream = jseqio::reader::DynamicFastXReader::from_file(&file).unwrap();
         Self {file, cur_stream, n_seqs_read: 0}
@@ -207,6 +211,7 @@ impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromSingleFile {
 
 // Chains multiple fasta/fastq files (gzipped or not), uppercases sequences,
 // and emits each sequence followed by its reverse complement.
+#[allow(dead_code)]
 pub struct NeedletailSeqStreamWithRevComp {
     paths: Vec<PathBuf>,
     cur_idx: usize,
@@ -216,6 +221,7 @@ pub struct NeedletailSeqStreamWithRevComp {
 }
 
 impl NeedletailSeqStreamWithRevComp {
+    #[allow(dead_code)]
     pub fn new(paths: Vec<PathBuf>) -> Self {
         let cur_reader = paths.first().map(|p| needletail::parse_fastx_file(p).unwrap());
         Self { paths, cur_idx: 0, cur_reader, seq_buf: vec![], rev_comp_next: false }
@@ -255,6 +261,7 @@ impl SeqStream for NeedletailSeqStreamWithRevComp {
 }
 
 // Chains multiple fasta/fastq files (gzipped or not), uppercases sequences.
+#[allow(dead_code)]
 pub struct NeedletailSeqStream {
     paths: Vec<PathBuf>,
     cur_idx: usize,
@@ -263,6 +270,7 @@ pub struct NeedletailSeqStream {
 }
 
 impl NeedletailSeqStream {
+    #[allow(dead_code)]
     pub fn new(paths: Vec<PathBuf>) -> Self {
         let cur_reader = paths.first().map(|p| needletail::parse_fastx_file(p).unwrap());
         Self { paths, cur_idx: 0, cur_reader, seq_buf: vec![] }
@@ -295,6 +303,7 @@ impl SeqStream for NeedletailSeqStream {
     }
 }
 
+#[allow(dead_code)]
 pub struct EmptyRewindableSeqStreamGenerator { // Generates nothing
 
 }

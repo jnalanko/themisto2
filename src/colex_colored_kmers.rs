@@ -1,5 +1,4 @@
 use crossbeam::channel::{Sender, bounded};
-use jseqio::seq_db::SeqDB;
 use rayon::slice::ParallelSliceMut;
 use sbwt::dbg::Dbg;
 use sbwt::reverse_complement_in_place;
@@ -37,42 +36,6 @@ pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
 pub struct ColexToColorSetMap {
     pub sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
     pub color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
-}
-
-struct SeqBatch {
-    seqs: SeqDB,
-}
-
-impl SeqBatch {
-    fn process(self, sbwt: &SbwtIndex<SubsetMatrix>, dbg: &Dbg<SubsetMatrix>, marks: &AtomicBitmap) {
-        let k = sbwt.k();
-        let mut in_neighbor_buf = Vec::<(Node, u8)>::new();
-        for rec in self.seqs.iter() {
-            let seq = rec.seq;
-            for ACGT_run in seq.split(|&c| !crate::util::IS_DNA[c as usize]) {
-                if ACGT_run.len() < k { continue }
-
-                let first = sbwt.search(&ACGT_run[0..k]).unwrap_or_else(|| {
-                    panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[0..k]));
-                });
-
-                assert!(first.len() == 1);
-
-                in_neighbor_buf.clear();
-                dbg.push_in_neighbors(Node{id: first.start}, &mut in_neighbor_buf);
-                for (in_node, _) in in_neighbor_buf.iter() {
-                    marks.set(in_node.id, true);
-                }
-
-                let last = sbwt.search(&ACGT_run[ACGT_run.len()-k..]).unwrap_or_else(|| {
-                    panic!("k-mer {} not found in SBWT", String::from_utf8_lossy(&ACGT_run[ACGT_run.len()-k..]));
-                });
-
-                assert!(last.len() == 1);
-                marks.set(last.start, true);
-            }
-        }
-    }
 }
 
 struct FirstLastKmerWorker<'a> {
@@ -872,6 +835,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
     }
 }
 
+#[allow(dead_code)]
 pub struct IndexStats {
     pub n_colors: usize,
     pub n_kmers: usize,
@@ -887,6 +851,7 @@ pub struct IndexStats {
 }
 
 impl IndexStats {
+    #[allow(dead_code)]
     pub fn mean_size_of_distinct_sets(&self) -> f64 {
         self.total_size_of_distinct_color_sets as f64 / self.n_distinct_color_sets as f64
     }
@@ -895,6 +860,7 @@ impl IndexStats {
         self.total_kmer_color_set_size as f64 / self.n_kmers as f64
     }
 
+    #[allow(dead_code)]
     pub fn sample_fraction(&self) -> f64 {
         self.n_sampled_kmers as f64 / self.n_kmers as f64
     }

@@ -544,6 +544,7 @@ mod tests {
 
         // CGC appears in both the forward and the reverse complement of seq0,
         // so it must be reported twice for color 0 (the non-deduplication property).
+        #[allow(clippy::iter_skip_next)] // I don't want to touch it
         let colex_cgc = si_ref
             .matching_statistics_iter(b"CGC")
             .skip(k - 1)

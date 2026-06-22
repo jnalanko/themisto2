@@ -22,7 +22,6 @@ use std::{
 };
 
 use io::RewindableSeqStreamGenerator;
-use sbwt::SeqStream as _;
 
 struct Batch {
     seq_concat: Vec<u8>,
@@ -68,7 +67,7 @@ fn main() {
         .collect();
     let n_colors = input_paths.len();
 
-    let mut gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> =
+    let gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> =
         Box::new(io::SeqStreamGeneratorFromFiles::new(input_paths));
 
     let total_bases = AtomicU64::new(0);
@@ -87,7 +86,7 @@ fn main() {
     std::thread::scope(|scope| {
 
         let mut producers = vec![];
-        for producer_id in 0..n_producers { // Create producers
+        for _producer_id in 0..n_producers { // Create producers
             let sender_clone = sender.clone();
             let gen_mutex_clone = gen_mutex.clone();
             let handle = scope.spawn(move || {

@@ -435,6 +435,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_format: OutputFormat) {
 
     let batch_size = 10_000_usize;
@@ -503,7 +504,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
                         let n_in = n_bases_processed.load(Relaxed);
                         let n_out = n_bytes_output.load(Relaxed);
                         let t = last_wakeup_time.elapsed().as_secs_f64();
-                        let in_throughput = (n_in - last_n_bases_processed) as f64 / t / 1000000 as f64;
+                        let in_throughput = (n_in - last_n_bases_processed) as f64 / t / 1000000.0;
                         let out_throughput = (n_out - last_n_bytes_output) as f64 / t / (1 << 20) as f64;
                         log::info!("Input {:.3} Mbases/s, output {:.3} MiB/s (total: {} bases, {} out)", in_throughput, out_throughput, n_in, human_bytes::human_bytes(n_out as f64));
                         last_n_bases_processed = n_in;

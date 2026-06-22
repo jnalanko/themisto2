@@ -25,20 +25,6 @@ struct Edge {
     to_sign: bool,
 }
 
-impl Edge {
-    fn flipped(&self) -> Edge {
-        Edge { 
-            from: self.to, 
-            to: self.from, 
-            from_sign: !self.to_sign, 
-            to_sign: !self.from_sign,
-        }
-    }
-    // ++ <-> --
-    // +- <-> +-
-    // -+ <-> -+
-}
-
 fn main() {
     let cli = clap::Command::new("verify_gfa_links")
         .about("Verify that every link in a Themisto 2 GFA export is correct and no link is missing")

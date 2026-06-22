@@ -466,7 +466,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                 color_set_ids: key_kmer_idx_to_set_id,
             };
 
-            let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names));
+            let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(color_names));
             Some(cck) 
         },
         BuildMode::ToDisk(out_prefix, n_pieces) => {
@@ -702,7 +702,7 @@ fn open_query_reader(query_path: Option<&Path>) -> jseqio::reader::DynamicFastXR
     }
 }
 
-#[allow(clippy::manual_flatten)]
+#[allow(clippy::too_many_arguments)]
 fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     let create_new_aligner = move || {
         let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
@@ -717,7 +717,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
     log::info!("Finished");
 }
 
-#[allow(clippy::manual_flatten, clippy::len_zero)]
+#[allow(clippy::too_many_arguments)]
 fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_format: pseudoalignment::OutputFormat) {
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
@@ -906,7 +906,7 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
             .build_lcs(true)
             .n_threads(n_threads)
             .precalc_length(8)
-            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(&temp_dir))
+            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(temp_dir))
         .run(input_stream);
         log::info!("Building SBWT select support");
         sbwt.build_select();
@@ -971,7 +971,7 @@ fn get_input_and_output_files(query_path: Option<PathBuf>, output_path: Option<P
             std::process::exit(1);
         }
         let output_files: Vec<Option<PathBuf>> = if let Some(output_listfile) = output_listfile {
-            read_file_of_paths(&output_listfile).into_iter().map(|p| Some(p)).collect()
+            read_file_of_paths(&output_listfile).into_iter().map(Some).collect()
         } else {
             vec![None; query_files.len()]
         };
@@ -1068,7 +1068,7 @@ fn main() -> std::process::ExitCode {
 
                 let out = open_output(outfile);
                 match &index {
-                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(&idx, infile.as_deref(), min_hits, &metrics, n_threads, out, sort_output, output_format),
+                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(idx, infile.as_deref(), min_hits, &metrics, n_threads, out, sort_output, output_format),
                 };
 
             }
@@ -1088,7 +1088,7 @@ fn main() -> std::process::ExitCode {
 
                 let out = open_output(outfile);
                 match &index {
-                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(&idx, infile.as_deref(), min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
+                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(idx, infile.as_deref(), min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_format),
                 };
             }
         },

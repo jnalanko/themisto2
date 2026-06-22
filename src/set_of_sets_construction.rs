@@ -65,6 +65,7 @@ pub static SET_OF_SETS_CONSTRUCTION_MAX_SBWT_LEN: usize = 1_usize << 40; // We a
 /// * A vector of length key_kmer_marks.count_ones() that gives the color set id for each key k-mer.
 ///   The color set id is the rank of the 1-bit of the representative k-mer of the color set in the returned marks.
 /// * The provided key_kmer_marks as a simple_sds_sbwt bitvector, now with rank support
+#[allow(clippy::identity_op)] // There are offsets like i+0, i+1, i+2 etc. It's clearer with an explicit zero offset.
 pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates(
     mut gen: impl ParallelElementGenerator,
     key_kmer_marks: bitvec::vec::BitVec,

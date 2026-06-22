@@ -112,6 +112,7 @@ pub fn for_each_run<T: Eq, F: FnMut(Range<usize>)>(items: &[T], mut callback: F)
     callback(run_start..items.len());
 }
 
+#[allow(dead_code)]
 pub fn for_each_run_with_key<T: Eq, KeyType: Eq, F1: Fn(&T) -> KeyType, F2: FnMut(Range<usize>)>(items: &[T], key_fn: F1, mut callback: F2) {
     if items.is_empty() { return }
 
@@ -127,6 +128,7 @@ pub fn for_each_run_with_key<T: Eq, KeyType: Eq, F1: Fn(&T) -> KeyType, F2: FnMu
     callback(run_start..n);
 }
 
+#[allow(dead_code)]
 pub fn for_each_run_with_key_mut<T: Eq, KeyType: Eq, F1: Fn(&T) -> KeyType, F2: FnMut(&mut [T])>(items: &mut [T], key_fn: F1, mut callback: F2) {
     if items.is_empty() { return }
 
