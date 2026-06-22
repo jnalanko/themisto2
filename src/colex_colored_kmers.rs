@@ -3,6 +3,8 @@ use crossbeam::channel::{Sender, bounded};
 use indicatif::ProgressStyle;
 use jseqio::reverse_complement;
 use jseqio::seq_db::SeqDB;
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use rayon::slice::ParallelSliceMut;
 use sbwt::dbg::Dbg;
 use sbwt::reverse_complement_in_place;
@@ -12,6 +14,7 @@ use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 use std::io::Write;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Acquire;
@@ -44,7 +47,6 @@ pub struct ColexToColorSetMap {
     pub sampling: simple_sds_sbwt::bit_vector::BitVector, // Marks colex ranks that have a color set stored. Has rank support.
     pub color_set_ids: CompactIntVec, // One color set id for every 1-bit in the sampling
 }
-
 
 struct SeqBatch {
     seqs: SeqDB,
@@ -246,7 +248,7 @@ impl ColexToColorSetMap {
         }
     }
 
-    fn colex_to_color_set_id(&self, colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> usize {
+    pub fn colex_to_color_set_id(&self, colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> usize {
         let pos = self.walk_to_next_sample(colex, sbwt).0;
         self.color_set_ids.get(self.sampling.rank(pos))
     }
@@ -822,274 +824,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
     pub fn get_color_names(&self) -> &Vec<String> {
         &self.color_names
-    }
-
-    pub fn break_to_colored_subunitigs(&self, unitig_colex_ranks: &[usize], _unitig_string: &[u8]) -> (Vec<usize>, Vec<Range<usize>>){
-        if unitig_colex_ranks.len() == 0 {
-            // Make this a special case to ensure that there is always at least
-            // one run to avoid a special case at the end.
-            return (vec![], vec![]);
-        }
-        let mut subunitig_color_set_ids: Vec<usize> = vec![];
-        let mut subunitigs: Vec<Range<usize>> = vec![]; // Ranges of k-mers (= starts of k-mers)
-        let mut current_run_set_id = usize::MAX; // Will be set at the start of the first iteration
-        let mut current_run_end = unitig_colex_ranks.len(); 
-
-        // Iterate from end to start, updating the color set when the current
-        // node is marked.
-        for (pos, &colex) in unitig_colex_ranks.iter().enumerate().rev() {
-            if pos == unitig_colex_ranks.len()-1 {
-                assert!(self.map.sampling.get(colex)); // Last position of a unitig should always be marked
-            }
-
-            if self.map.sampling.get(colex) {
-                // Update the set id
-                let new_set_id = self.colex_to_set_id(colex);
-
-                if new_set_id != current_run_set_id {
-                    // Close the active run (if exists)
-                    let start = pos + 1;
-                    if current_run_end > start { // Active run exists
-                        subunitigs.push(start..current_run_end);
-                        subunitig_color_set_ids.push(current_run_set_id);
-                        current_run_end = pos + 1;
-                    }
-                }
-                current_run_set_id = new_set_id;
-            }
-        }
-
-        // Close the active run (exists because of the assert at the start)
-        assert!(current_run_set_id != usize::MAX);
-        subunitigs.push(0..current_run_end);
-        subunitig_color_set_ids.push(current_run_set_id);
-
-        subunitigs.reverse();
-        subunitig_color_set_ids.reverse();
-
-        (subunitig_color_set_ids, subunitigs)
-    }
-
-    #[allow(clippy::type_complexity)] // Yeah yeah I know
-    fn search_unitig_from(&self, v: Node, dbg: &Dbg<'_, SubsetMatrix>) -> (Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>) {
-        // Walk the unitig in forward orientation, and then backwards
-        let k = self.sbwt.k();
-        let mut workspace = Vec::<u8>::new();
-        let nodes = dbg.walk_unitig_from(v, &mut workspace);
-        workspace.clear();
-        let mut unitig_string = Vec::<u8>::new();
-        dbg.push_unitig_string(&nodes, &mut unitig_string);
-
-        let string_len = unitig_string.len();
-        assert!(string_len >= k);
-        let last_kmer = &unitig_string[string_len-k..];
-        let last_kmer_rc = reverse_complement(last_kmer);
-        let last_kmer_rc_colex = self.sbwt.search(&last_kmer_rc).unwrap_or_else(|| panic!(
-            "Reverse complement of k-mer {} not found in index", 
-            String::from_utf8_lossy(last_kmer))
-        ).start;
-        let rc_nodes = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
-
-        let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
-        let rc_colex: Vec<usize> = rc_nodes.into_iter().rev().map(|v| v.id).collect();
-        assert_eq!(fw_colex.len(), rc_colex.len());
-
-        // Figure out color set id runs in the forward strand 
-        let (subuniting_color_set_ids, subunitig_kmer_ranges) = self.break_to_colored_subunitigs(&fw_colex, &unitig_string);
-
-        (fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subuniting_color_set_ids)
-    }
-
-    #[allow(clippy::too_many_arguments)] // Yeah yeah I know
-    fn visit_and_output_kmers(&self, unitig_string: &[u8], subunitig_kmer_ranges: &[Range<usize>], subunitig_color_set_ids: &[usize], fw_colex: &[usize], rc_colex: &[usize], visited: &mut bitvec::vec::BitVec, unitigs_out: &mut impl Write, unitig_id: &mut usize) {
-
-        let k = self.sbwt.k();
-
-        for (subunitig_idx, r) in subunitig_kmer_ranges.iter().enumerate() {
-            // All k-mers in this subunitig have the same color set id.
-            // It would be nice if we could just figure out the unvisited
-            // runs of k-mers and visit and output those, but there is a subtle problem:
-            // A subunitig may loop back to itself in reverse complement orientation.
-            // Printing the subunitig would print the same k-mer in both orientations.
-            // So, we need to keep track of the visited bit vector also while processing
-            // a subunitig, and end the subunitig when we encounter a visited k-mer.
-            let subunitig = &unitig_string[r.start..r.end+k-1];
-            let color_set_id = subunitig_color_set_ids[subunitig_idx];
-            let fw_colex_slice = &fw_colex[r.start..r.end];
-            let rc_colex_slice = &rc_colex[r.start..r.end];
-
-            let mut subsubunitig_start: Option<usize> = None;
-            for kmer_idx in 0..fw_colex_slice.len() {
-                if !visited[fw_colex_slice[kmer_idx]] {
-                    // Extend the current subunitig and visit this k-mer
-                    if subsubunitig_start.is_none() {
-                        subsubunitig_start = Some(kmer_idx);
-                    }
-                    visited.set(fw_colex_slice[kmer_idx], true);
-                    visited.set(rc_colex_slice[kmer_idx], true);
-                } else {
-                    // Already visited! Output the current subunitig
-                    if let Some(s) = subsubunitig_start {
-                        let e = kmer_idx + k - 1;
-                        writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
-                        unitigs_out.write_all(&subunitig[s..e]).unwrap();
-                        unitigs_out.write_all(b"\n").unwrap();
-                        *unitig_id += 1;
-                    }
-                    subsubunitig_start = None;
-                }
-            }
-
-            // Write the last subunitig if it's still open
-            if let Some(s) = subsubunitig_start {
-                let e = fw_colex_slice.len() + k - 1;
-                writeln!(unitigs_out, "> unitig_id={} color_set_id={}", unitig_id, color_set_id).unwrap();
-                unitigs_out.write_all(&subunitig[s..e]).unwrap();
-                unitigs_out.write_all(b"\n").unwrap();
-                *unitig_id += 1;
-            }
-        }
-    }
-
-    /// Canonical here means whichever strand is visited first.
-    /// This assumes that the color set of a forward k-mer and a reverse k-mer is the same.
-    /// Returns the number of unitigs written
-    fn export_canonical_unitigs_with_shared_color_set(&self, mut unitigs_out: impl Write + Sync + Send, n_threads: usize) -> usize where CSS : Sync {
-
-        log::info!("Initializing the de Bruijn graph");
-        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
-        let dbg_ref = &dbg;
-
-        let k = self.get_k();
-
-        log::info!("Computing unitigs");
-        let n_unitig_searches = std::sync::atomic::AtomicUsize::new(0);
-        let n_unitig_searches_ref = &n_unitig_searches;
-
-        let bar = indicatif::ProgressBar::new(self.sbwt.n_sets() as u64);
-        let n_unitigs = std::thread::scope(|scope| {
-
-            // Channels of tuples of with these fields: 
-            //   * forward colex ranks 
-            //   * reverse complement colex ranks
-            //   * unitig string
-            //   * colored subunitig k-mer ranges
-            //   * color set ids of the colored subunitig ranges
-            // TODO: less heap allocation
-            let (worker_out, collector_in) = bounded::<(Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>)>(n_threads);
-
-            // Create unitig search threads 
-            let mut worker_handles = Vec::<_>::new();
-            let bar_ref = &bar;
-            for thread_id in 0..n_threads { 
-                let worker_out_clone = worker_out.clone();
-                let handle = scope.spawn(move || {
-                    // Iterating all colex positions that have remainder thread_id modulo number of threads
-                    let mut colex = thread_id;
-                    while colex < self.sbwt.n_sets() {
-                        let v = Node { id: colex };
-                        if !dbg_ref.is_dummy_colex_position(colex) && dbg_ref.is_first_kmer_of_unitig(v) {
-                            n_unitig_searches_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            worker_out_clone.send(self.search_unitig_from(v, dbg_ref)).unwrap();
-                        }
-                        colex += n_threads;
-                        if ((colex - thread_id)/n_threads) % 10000 == 0 {
-                            bar_ref.inc(10000);
-                            //eprintln!("number of unitig searches: {}", n_unitig_searches_ref.load(std::sync::atomic::Ordering::Relaxed));
-                        }
-                    }
-                    log::info!("Thread {} finished", thread_id);
-                });
-                worker_handles.push(handle);
-            }
-
-            let collector_handle = scope.spawn(move || {
-                // We maintain the visited bit vector so that when we mark a k-mer, we also mark its
-                // reverse complement.
-                let mut unitig_id = 0_usize;
-
-                // Bitvector marking visited colex ranks 
-                let mut visited = bitvec::bitvec![usize, Lsb0; 0; self.sbwt.n_sets()];
-
-                // Process all non-cyclic unitigs
-                while let Ok((fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subunitig_color_set_ids)) = collector_in.recv() {
-                    self.visit_and_output_kmers(&unitig_string, &subunitig_kmer_ranges, &subunitig_color_set_ids, &fw_colex, &rc_colex, &mut visited, &mut unitigs_out, &mut unitig_id); 
-                }
-
-                // Process remaining cyclic unitigs
-                log::info!("Processing remaining cyclic unitigs");
-                let n_acyclic = unitig_id; // This many unitigs have been written so far
-                let mut colex = 0_usize;
-                while colex < visited.len() {
-                    colex = match visited[colex..].first_zero() {
-                        Some(i) => colex + i,
-                        None => break,
-                    };
-                    if !dbg_ref.is_dummy_colex_position(colex) {
-                        let (fw_colex, rc_colex, unitig_string, subunitig_kmer_ranges, subunitig_color_set_ids)
-                        = self.search_unitig_from(Node { id: colex }, dbg_ref);
-
-                        // Make sure it's really cyclic
-                        assert!(unitig_string[..k-1] == unitig_string[unitig_string.len()-(k-1)..]);
-
-                        self.visit_and_output_kmers(&unitig_string, &subunitig_kmer_ranges, &subunitig_color_set_ids, &fw_colex, &rc_colex, &mut visited, &mut unitigs_out, &mut unitig_id);
-                    }
-                    colex += 1;
-                }
-                unitigs_out.flush().unwrap();
-                log::info!("Found {} cyclic unitigs", unitig_id - n_acyclic);
-                unitig_id
-            });
-
-            for h in worker_handles { // Wait for the workers to finish
-                h.join().unwrap();
-            }
-
-            drop(worker_out);
-
-            // Wait for the collector to finish
-            let n_unitigs = collector_handle.join().unwrap();
-
-            #[allow(clippy::let_and_return)] // It's renaming of the variable. Clearer this way.
-            n_unitigs
-        });
-        bar.finish();
-
-        log::info!("Wrote {} unitigs", n_unitigs);
-        n_unitigs
-    }
-
-
-    /// Same format as [crate::index_import].
-    /// Select support must be built before calling this!
-    pub fn export_colored_unitigs(&self, mut metadata_out: impl Write + Sync + Send, unitigs_out: impl Write + Sync + Send, mut colors_out: impl Write + Sync + Send, n_threads: usize)
-        where CSS: Sync {
-        // The metadata should look like this:
-        // num_colors=3682
-        // num_unitigs=9314735
-        // num_color_sets=5591009
-        // k=31
-
-        log::info!("Exporting to colored unitigs");
-
-        let n_unitigs = self.export_canonical_unitigs_with_shared_color_set(unitigs_out, n_threads);
-
-        // Write color sets
-        // Lines should look like this:
-        // color_set_id=9 size=7 3 4 9 12 14 15 16
-        for set_id in 0..self.sets.n_sets() {
-            let set_view = self.sets.get_set_view(set_id);
-            write!(colors_out, "color_set_id={} size={}", set_id, set_view.len()).unwrap();
-            for color in set_view.iter() { 
-                write!(colors_out, " {}", color).unwrap(); // TODO: faster IO
-            }
-            writeln!(colors_out).unwrap();
-        }
-
-        metadata_out.write_all(format!("num_colors={}\n", self.sets.n_colors()).as_bytes()).unwrap();
-        metadata_out.write_all(format!("num_unitigs={}\n", n_unitigs).as_bytes()).unwrap();
-        metadata_out.write_all(format!("num_color_sets={}\n", self.sets.n_sets()).as_bytes()).unwrap();
-        metadata_out.write_all(format!("k={}\n", self.sbwt.k()).as_bytes()).unwrap();
     }
 
     pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {

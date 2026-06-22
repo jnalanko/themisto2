@@ -12,7 +12,7 @@ use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, dbg::Dbg};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use simple_sds_sbwt::serialize::Serialize as SdsSbwtSerialize;
 use sparse_dense_storage::SparseDenseStorage;
@@ -41,6 +41,7 @@ mod sparse_dense_storage_to_disk;
 mod report;
 mod filter_reads;
 mod work_dispatcher;
+mod unitig_export;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -298,8 +299,17 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
 
-        #[arg(long = "colors-to-stdout", default_value = "false", help = "Write the color dump to stdout instead of a file.")]
+        #[arg(long = "gfa", action = clap::ArgAction::SetTrue, help = "Export as GFA 1.0 with links (written to <prefix>.gfa)")]
+        gfa: bool,
+
+        #[arg(long = "colors-to-stdout", action = clap::ArgAction::SetTrue, help = "Write the color dump to stdout instead of a file.")]
         colors_to_stdout: bool,
+
+        #[arg(long = "no-unitigs", action = clap::ArgAction::SetTrue, help = "Do not export unitig sequences.")]
+        no_unitigs: bool,
+
+        #[arg(long = "no-color-sets", action = clap::ArgAction::SetTrue, help = "Do not export color sets.")]
+        no_color_sets: bool,
     },
     #[command(arg_required_else_help = true, name = "stats")]
     Stats {
@@ -774,11 +784,57 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
     }
 }
 
-fn export_index<CSS: ColorSetStorage + Sync>(
-    index: &CompactColexKmers<CSS>, 
+// Dispatch with monomorphized output streams
+fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
+    index: CompactColexKmers<CSS>, 
+    unitigs_out: Option<impl Write + Sync + Send>,
+    metadata_out: impl Write + Sync + Send,
+    colors_out: Option<impl Write + Sync + Send>,
+    unitigs_as_gfa: bool,
+    n_threads: usize
+) {
+
+    // Destructure the index
+    let (sbwt, lcs, map, sets, _color_names) = index.into_parts();
+
+    if let Some(mut colors_out) = colors_out {
+        log::info!("Exporting color sets");
+        unitig_export::write_color_sets(&mut colors_out, &sets);
+    } else {
+        log::info!("Skipped exporting color sets");
+    }
+
+    log::info!("Initializing the DBG");
+    let dbg = Dbg::new(&sbwt, Some(&lcs), n_threads);
+    drop(lcs); // This is why we destructured the index. Saves a lot of memory!
+
+    let n_unitigs: Option<usize> = if let Some(unitigs_out) = unitigs_out {
+        if unitigs_as_gfa {
+            log::info!("Exporting unitigs (format: GFA)");
+            Some(unitig_export::export_gfa(&sbwt, &dbg, &map, unitigs_out, n_threads))
+        } else {
+            log::info!("Exporting unitigs (format: fasta)");
+            Some(unitig_export::export_colored_unitigs(&sbwt, &dbg, &map, unitigs_out, n_threads))
+        }
+    } else { 
+        log::info!("Skipped exporting unitigs");
+        None 
+    };
+
+    log::info!("Exporting metadata");
+    unitig_export::write_metadata(metadata_out, n_unitigs, &sets, sbwt.k());
+
+}
+
+fn export_index<CSS: ColorSetStorage + Sync + Send>(
+    index: CompactColexKmers<CSS>, 
     out_prefix: &Path,
     colors_to_stdout: bool,
-    n_threads: usize) {
+    unitigs_as_gfa: bool,
+    no_unitigs: bool,
+    no_color_sets: bool,
+    n_threads: usize
+) {
 
     let out_prefix = out_prefix.as_os_str().to_str().unwrap().to_owned();
 
@@ -786,20 +842,40 @@ fn export_index<CSS: ColorSetStorage + Sync>(
     metadata_filename.push_str(".metadata.txt");
 
     let mut unitig_filename = out_prefix.clone();
-    unitig_filename.push_str(".unitigs.fa");
+    if unitigs_as_gfa {
+        unitig_filename.push_str(".unitigs.gfa");
+    } else {
+        unitig_filename.push_str(".unitigs.fa");
+    }
 
     let mut colors_filename = out_prefix.clone();
     colors_filename.push_str(".color_sets.txt");
 
     let metadata_out = BufWriter::new(File::create(metadata_filename).unwrap());
-    let unitigs_out = BufWriter::new(File::create(unitig_filename).unwrap());
+
+    let unitigs_out: Option<BufWriter<File>> = if no_unitigs {
+        None    
+    } else {
+        Some(BufWriter::new(File::create(unitig_filename).unwrap()))
+    };
 
     if colors_to_stdout {
-        let colors_out = BufWriter::new(std::io::stdout());
-        index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+        let colors_out: Option<BufWriter<Stdout>> = if no_color_sets {
+            None
+        } else {
+            Some(BufWriter::new(std::io::stdout()))
+        };
+
+        export_index_dispatch(index, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
     } else {
-        let colors_out = BufWriter::new(File::create(colors_filename).unwrap());
-        index.export_colored_unitigs(metadata_out, unitigs_out, colors_out, n_threads); 
+
+        let colors_out: Option<BufWriter<File>> = if no_color_sets {
+            None
+        } else {
+            Some(BufWriter::new(File::create(colors_filename).unwrap()))
+        };
+
+        export_index_dispatch(index, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
     }
 }
 
@@ -1091,11 +1167,13 @@ fn main() -> std::process::ExitCode {
             log::info!("Serializing Themisto 2 index to {}", output.display());
             write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
         },
-        Subcommands::Export { index: index_path, color_dump_prefix, n_threads, colors_to_stdout } => {
+        Subcommands::Export { index: index_path, color_dump_prefix, n_threads, gfa, colors_to_stdout, no_unitigs, no_color_sets } => {
             log::info!("Loading index");
             let index = load_index_variant(&index_path, true); // Select support is required for export
             match index {
-                IndexVariant::SparseDenseIndex(idx) => export_index(&idx, &color_dump_prefix, colors_to_stdout, n_threads),
+                IndexVariant::SparseDenseIndex(idx) => {
+                    export_index(idx, &color_dump_prefix, colors_to_stdout, gfa, no_unitigs, no_color_sets, n_threads)
+                },
             };
         },
         Subcommands::Stats { index: index_path, n_threads } => {

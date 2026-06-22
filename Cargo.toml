@@ -6,16 +6,31 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
+name = "themisto2"
+path = "src/main.rs"
+
+[[bin]]
+name = "verify_gfa_links"
+path = "src/bin/verify_gfa_links.rs"
+required-features = ["extra-tools"]
+
+[[bin]]
+name = "compare_color_dumps"
+path = "src/bin/compare_color_dumps.rs"
+required-features = ["extra-tools"]
+
+[[bin]]
 name = "bench_producer_consumer_io"
 path = "src/bench_producer_consumer_io.rs"
+required-features = ["extra-tools"]
 
 [[bin]]
 name = "extract_from_three_files"
 path = "src/extract_from_three_files.rs"
+required-features = ["extra-tools"]
 
-[[bin]]
-name = "themisto2"
-path = "src/main.rs"
+[features]
+extra-tools = []
 
 [dependencies]
 
