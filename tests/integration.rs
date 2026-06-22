@@ -27,6 +27,9 @@ fn tmp_dir() -> PathBuf {
 fn themisto2() -> Command {
     let mut cmd = Command::new(BIN);
     cmd.current_dir(PROJECT_DIR);
+    // Pipe stderr so subprocess log output doesn't leak into the test terminal.
+    // Tests that need to inspect stderr can still read it via .output().stderr.
+    cmd.stderr(Stdio::piped());
     cmd
 }
 
@@ -591,7 +594,7 @@ fn run_with_stdin(cmd: &mut Command, query_file: &str) -> Vec<u8> {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped()) // capture stderr so it doesn't leak into test output
         .spawn()
         .unwrap();
     child.stdin.as_mut().unwrap().write_all(&query_bytes).unwrap();

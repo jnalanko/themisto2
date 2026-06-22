@@ -334,10 +334,8 @@ mod tests {
     #[test]
     fn test_merge() {
 
-        if std::env::var("RUST_LOG").is_err() {
-            std::env::set_var("RUST_LOG", "info")
-        }
-        env_logger::init();
+        // Opt-in logging: set RUST_LOG=info to see output; silent by default.
+        let _ = env_logger::try_init();
 
         let n_threads = 3;
 
