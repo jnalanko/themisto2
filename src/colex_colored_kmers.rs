@@ -1,10 +1,5 @@
-use bitvec::order::Lsb0;
 use crossbeam::channel::{Sender, bounded};
-use indicatif::ProgressStyle;
-use jseqio::reverse_complement;
 use jseqio::seq_db::SeqDB;
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::ParallelIterator;
 use rayon::slice::ParallelSliceMut;
 use sbwt::dbg::Dbg;
 use sbwt::reverse_complement_in_place;
@@ -12,9 +7,6 @@ use sbwt::LcsArray;
 use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::serialize::Serialize;
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
-use std::io::Write;
-use std::ops::Range;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Acquire;
@@ -26,7 +18,6 @@ use crate::coloring_interface::{self, ColorSetStorage, ColorSetView};
 use crate::index_import;
 use crate::io::RewindableSeqStreamGenerator;
 use crate::iterators::VecVecUsizeIteratorGenerator;
-use crate::work_dispatcher;
 
 /// This is the main data structure in this file: a set of compressed color sets, and a mapping
 /// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its

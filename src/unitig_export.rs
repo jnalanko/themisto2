@@ -1,12 +1,12 @@
 use bitvec::order::Lsb0;
-use crossbeam::channel::{Sender, bounded};
+use crossbeam::channel::bounded;
 use jseqio::reverse_complement;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use sbwt::dbg::Dbg;
 use sbwt::reverse_complement_in_place;
-use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix, SubsetSeq};
-use simple_sds_sbwt::{ops::BitVec, raw_vector::AccessRaw};
+use sbwt::{dbg::Node, SbwtIndex, SubsetMatrix};
+use simple_sds_sbwt::ops::BitVec;
 use std::io::Write;
 use std::ops::Range;
 use std::sync::Mutex;

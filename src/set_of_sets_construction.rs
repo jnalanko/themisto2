@@ -3,7 +3,7 @@ use std::{ops::Range, path::Path, sync::{Arc, atomic::{AtomicU64, Ordering::{Acq
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::slice::ParallelSliceMut;
 use simple_sds_sbwt::ops::{BitVec, Rank, Select};
-use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec, util};
+use crate::{coloring_interface::ColorSetStorage, int_vec::CompactIntVec};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetElement {

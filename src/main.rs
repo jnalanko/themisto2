@@ -14,7 +14,6 @@ use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
 use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, dbg::Dbg};
 use simple_sds_sbwt::ops::{BitVec, Rank};
-use simple_sds_sbwt::serialize::Serialize as SdsSbwtSerialize;
 use sparse_dense_storage::SparseDenseStorage;
 
 use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};

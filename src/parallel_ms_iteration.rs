@@ -4,7 +4,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}, work_dispatcher};
+use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 pub struct MsElementGenerator<'a> {
     color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>,
