@@ -298,7 +298,7 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
 
-        #[arg(long = "gfa", action = clap::ArgAction::SetTrue, help = "Export as GFA 1.0 with links (written to <prefix>.gfa)")]
+        #[arg(long = "gfa", action = clap::ArgAction::SetTrue, help = "Export as GFA 1.0 with links (written to <prefix>.unitigs.gfa)")]
         gfa: bool,
 
         #[arg(long = "colors-to-stdout", action = clap::ArgAction::SetTrue, help = "Write the color dump to stdout instead of a file.")]
