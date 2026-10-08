@@ -41,6 +41,7 @@ mod report;
 mod filter_reads;
 mod work_dispatcher;
 mod unitig_export;
+mod suffix_color_sets;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -314,6 +315,21 @@ pub enum Subcommands {
     Stats {
         #[arg(long = "index", short = 'i', required = true)]
         index: PathBuf,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+    },
+
+    #[command(arg_required_else_help = true, name = "suffix-color-sets")]
+    SuffixColorSets {
+        #[arg(long = "index", short = 'i', required = true)]
+        index: PathBuf,
+
+        #[arg(help = "Smallest suffix length k' to report. Counts are reported for all k' from this up to the k of the index. The color set of a k'-mer is the union of the color sets of the k-mers that have it as a suffix.", long = "k-min", required = true)]
+        k_min: usize,
+
+        #[arg(help = "Output TSV file. If omitted, writes to stdout.", long = "output", short = 'o')]
+        output: Option<PathBuf>,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
@@ -1181,6 +1197,28 @@ fn main() -> std::process::ExitCode {
                 IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
             };
         }
+        Subcommands::SuffixColorSets { index: index_path, k_min, output, n_threads } => {
+            log::info!("Loading index");
+            let index = load_index_variant(&index_path, false);
+            let counts = match index {
+                IndexVariant::SparseDenseIndex(idx) => {
+                    if k_min < 1 || k_min > idx.get_k() {
+                        log::error!("--k-min must be between 1 and the k of the index ({})", idx.get_k());
+                        return ExitCode::FAILURE;
+                    }
+                    suffix_color_sets::count_distinct_suffix_color_sets(&idx, k_min, n_threads)
+                },
+            };
+            let mut out: Box<dyn Write> = match output {
+                Some(path) => Box::new(BufWriter::new(File::create(path).unwrap())),
+                None => Box::new(BufWriter::new(std::io::stdout())),
+            };
+            writeln!(out, "k\tn_distinct_color_sets").unwrap();
+            for (k_prime, count) in counts {
+                writeln!(out, "{}\t{}", k_prime, count).unwrap();
+            }
+            out.flush().unwrap();
+        },
         Subcommands::Report { index: index_path, input, output } => {
             log::info!("Loading color names from index");
             let color_names = load_index_color_names_only(&index_path);
