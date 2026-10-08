@@ -1213,9 +1213,10 @@ fn main() -> std::process::ExitCode {
                 Some(path) => Box::new(BufWriter::new(File::create(path).unwrap())),
                 None => Box::new(BufWriter::new(std::io::stdout())),
             };
-            writeln!(out, "k\tn_distinct_color_sets").unwrap();
-            for (k_prime, count) in counts {
-                writeln!(out, "{}\t{}", k_prime, count).unwrap();
+            writeln!(out, "k\tn_distinct_color_sets\tn_sparse\tn_dense\tsparse_bytes\tdense_bytes\tcolor_set_storage_bytes").unwrap();
+            for c in counts {
+                writeln!(out, "{}\t{}\t{}\t{}\t{}\t{}\t{}", c.k_prime, c.n_distinct_color_sets, c.n_sparse, c.n_dense,
+                    c.storage_size.sparse_bytes, c.storage_size.dense_bytes, c.storage_size.total()).unwrap();
             }
             out.flush().unwrap();
         },

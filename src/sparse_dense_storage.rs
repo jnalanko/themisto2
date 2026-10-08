@@ -467,7 +467,57 @@ pub fn is_dense_formula_without_overhead(n_elements: usize, sparse_bit_width: us
     bitmap_size <= intvec_size
 }
 
+/// Breakdown of the serialized size of a SparseDenseStorage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageSizeEstimate {
+    pub sparse_bytes: usize, // Concatenated sparse sets and their start offsets
+    pub dense_bytes: usize, // Concatenated bitmaps
+    pub other_bytes: usize, // Dense marks with rank support, headers and length prefixes
+}
+
+impl StorageSizeEstimate {
+    pub fn total(&self) -> usize {
+        self.sparse_bytes + self.dense_bytes + self.other_bytes
+    }
+}
+
 impl SparseDenseStorage {
+
+    /// Size in bytes that `serialize` would write for a storage built with `new` from
+    /// n_sparse sparse and n_dense dense sets (as decided by `is_dense_formula`), where
+    /// the sparse sets have total_sparse_elements elements in total.
+    pub fn serialized_size_estimate(n_colors: usize, n_sparse: usize, n_dense: usize, total_sparse_elements: usize) -> StorageSizeEstimate {
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        let concat_bit_width = std::cmp::max(color_id_bit_width, 1); // CompactIntVec bumps 0 to 1
+        let n_sets = n_sparse + n_dense;
+
+        // Headers and length prefixes, measured from an empty storage
+        let empty = SparseDenseStorage {
+            dense_sets: BitMaps::new(n_colors),
+            sparse_sets: SortedIntVecs::new(concat_bit_width),
+            n_colors,
+            is_dense_marks: {
+                let mut bv = simple_sds_sbwt::bit_vector::BitVector::from(simple_sds_sbwt::raw_vector::RawVector::new());
+                bv.enable_rank();
+                bv
+            },
+        };
+        let mut buf = Vec::<u8>::new();
+        crate::coloring_interface::ColorSetStorage::serialize(&empty, &mut buf);
+        let fixed = buf.len();
+
+        let rank_block_bits = simple_sds_sbwt::bit_vector::rank_support::RankSupport::BLOCK_SIZE;
+        let is_dense_marks = 8 * n_sets.div_ceil(64) + 16 * n_sets.div_ceil(rank_block_bits); // Bits and (u64, u64) rank samples
+        let sparse_concat = 8 * (total_sparse_elements * concat_bit_width).div_ceil(64);
+        let sparse_starts = 8 * n_sparse;
+        let dense_bitmaps = 8 * (n_dense * n_colors).div_ceil(64);
+
+        StorageSizeEstimate {
+            sparse_bytes: sparse_concat + sparse_starts,
+            dense_bytes: dense_bitmaps,
+            other_bytes: fixed + is_dense_marks,
+        }
+    }
 
     pub fn get(&self, id: usize) -> SparseDenseColorSetView<'_> {
         if self.is_dense_marks.get(id) {
@@ -843,6 +893,41 @@ mod tests {
                 let mut our_intersection = owned_i.iter().collect::<Vec::<usize>>();
                 our_intersection.sort();
                 assert_eq!(our_intersection, true_intersection);
+            }
+        }
+    }
+
+    #[test]
+    fn serialized_size_estimate_is_exact() {
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for &n_colors in &[1_usize, 2, 3, 64, 100, 1000, 5000] {
+            let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+            for &n_sets in &[0, 1, 2, 7, 100, 600] {
+                // Mix of small and large sets so that both encodings are present
+                let sets: Vec<Vec<usize>> = (0..n_sets).map(|_| {
+                    let size = if rng.gen_bool(0.5) { rng.gen_range(0..=std::cmp::min(5, n_colors)) } else { rng.gen_range(0..=n_colors) };
+                    let mut set: Vec<usize> = rand::seq::index::sample(&mut rng, n_colors, size).into_vec();
+                    set.sort_unstable();
+                    set
+                }).collect();
+
+                let (mut n_sparse, mut n_dense, mut total_sparse_elements) = (0, 0, 0);
+                for set in sets.iter() {
+                    if is_dense_formula(set.len(), color_id_bit_width, n_colors) {
+                        n_dense += 1;
+                    } else {
+                        n_sparse += 1;
+                        total_sparse_elements += set.len();
+                    }
+                }
+
+                let storage = SparseDenseStorage::new(VecVecUsizeIteratorGenerator::new(sets), n_colors);
+                let mut buf = Vec::<u8>::new();
+                storage.serialize(&mut buf);
+
+                let estimate = SparseDenseStorage::serialized_size_estimate(n_colors, n_sparse, n_dense, total_sparse_elements).total();
+                assert_eq!(estimate, buf.len(), "n_colors = {}, n_sets = {}, n_sparse = {}, n_dense = {}", n_colors, n_sets, n_sparse, n_dense);
             }
         }
     }

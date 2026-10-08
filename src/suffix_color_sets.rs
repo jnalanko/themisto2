@@ -10,6 +10,10 @@
 //
 // k'-mers whose union is empty (only dummy k-mers have it as a suffix, or the
 // k'-mer contains $) are not counted.
+//
+// For each k', we also estimate the size of a sparse-dense color set storage
+// holding the distinct sets. That size only depends on the sizes of the sets,
+// so we pack the set size into the fingerprint.
 
 use std::hash::BuildHasher;
 use std::collections::hash_map::RandomState;
@@ -20,8 +24,10 @@ use rustc_hash::FxHashSet;
 
 use crate::colex_colored_kmers::CompactColexKmers;
 use crate::coloring_interface::{ColorSetStorage, ColorSetView};
+use crate::sparse_dense_storage::{is_dense_formula, SparseDenseStorage, StorageSizeEstimate};
 
-// 128-bit fingerprint of a color set from two independently keyed SipHashes.
+// 128-bit fingerprint of a color set: 96 bits from two independently keyed SipHashes,
+// and the size of the set in the low 32 bits.
 struct Fingerprinter {
     h1: RandomState,
     h2: RandomState,
@@ -33,8 +39,14 @@ impl Fingerprinter {
     }
 
     fn fingerprint(&self, set: &[u32]) -> u128 {
-        ((self.h1.hash_one(set) as u128) << 64) | self.h2.hash_one(set) as u128
+        let hash = ((self.h1.hash_one(set) as u128) << 64) | self.h2.hash_one(set) as u128;
+        let size = std::cmp::min(set.len(), u32::MAX as usize) as u128; // Clamps only the full set of 2^32 colors
+        (hash & !(u32::MAX as u128)) | size
     }
+}
+
+fn fingerprint_set_size(fp: u128) -> usize {
+    (fp & u32::MAX as u128) as usize
 }
 
 // Per-k' sets of fingerprints. fingerprints[i] is for k' = k_min + i.
@@ -160,8 +172,36 @@ fn split_range<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, k_min: usiz
     ranges
 }
 
-/// Returns pairs (k', number of distinct non-empty color sets of k'-mers) for k' = k_min..=k.
-pub fn count_distinct_suffix_color_sets<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, k_min: usize, n_threads: usize) -> Vec<(usize, usize)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuffixColorSetStats {
+    pub k_prime: usize,
+    pub n_distinct_color_sets: usize,
+    pub n_sparse: usize,
+    pub n_dense: usize,
+    pub total_sparse_elements: usize,
+    pub storage_size: StorageSizeEstimate, // Of a sparse-dense storage of the distinct sets
+}
+
+impl SuffixColorSetStats {
+    // Aggregates the stats from the sizes of the distinct sets
+    fn from_set_sizes(k_prime: usize, n_colors: usize, sizes: impl Iterator<Item = usize>) -> Self {
+        let color_id_bit_width = n_colors.next_power_of_two().trailing_zeros() as usize;
+        let (mut n_sparse, mut n_dense, mut total_sparse_elements) = (0, 0, 0);
+        for size in sizes {
+            if is_dense_formula(size, color_id_bit_width, n_colors) {
+                n_dense += 1;
+            } else {
+                n_sparse += 1;
+                total_sparse_elements += size;
+            }
+        }
+        let storage_size = SparseDenseStorage::serialized_size_estimate(n_colors, n_sparse, n_dense, total_sparse_elements);
+        Self { k_prime, n_distinct_color_sets: n_sparse + n_dense, n_sparse, n_dense, total_sparse_elements, storage_size }
+    }
+}
+
+/// Returns the stats of the distinct non-empty color sets of k'-mers for k' = k_min..=k.
+pub fn count_distinct_suffix_color_sets<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, k_min: usize, n_threads: usize) -> Vec<SuffixColorSetStats> {
     let k = index.get_k();
     assert!(k_min >= 1 && k_min <= k, "k_min must be in the range [1, k]");
     let n_k_values = k - k_min + 1;
@@ -196,7 +236,10 @@ pub fn count_distinct_suffix_color_sets<CSS: ColorSetStorage + Sync>(index: &Com
     });
     bar.finish();
 
-    fingerprints.iter().enumerate().map(|(i, s)| (k_min + i, s.len())).collect()
+    let n_colors = index.get_set_storage().n_colors();
+    fingerprints.iter().enumerate().map(|(i, s)| {
+        SuffixColorSetStats::from_set_sizes(k_min + i, n_colors, s.iter().map(|&fp| fingerprint_set_size(fp)))
+    }).collect()
 }
 
 #[cfg(test)]
@@ -208,7 +251,7 @@ mod tests {
     use super::*;
     use crate::sparse_dense_storage::SparseDenseStorage;
 
-    fn brute_force(index: &CompactColexKmers<SparseDenseStorage>, k_min: usize) -> Vec<(usize, usize)> {
+    fn brute_force(index: &CompactColexKmers<SparseDenseStorage>, k_min: usize) -> Vec<SuffixColorSetStats> {
         let k = index.get_k();
         let mut kmers = vec![];
         for colex in 0..index.sbwt().n_sets() {
@@ -226,7 +269,7 @@ mod tests {
                 unions.entry(kmer[k - k_prime..].to_vec()).or_default().extend(set.iter().copied());
             }
             let distinct: HashSet<&BTreeSet<usize>> = unions.values().collect();
-            (k_prime, distinct.len())
+            SuffixColorSetStats::from_set_sizes(k_prime, index.get_set_storage().n_colors(), distinct.iter().map(|s| s.len()))
         }).collect()
     }
 
@@ -247,7 +290,8 @@ mod tests {
     #[test]
     fn matches_brute_force() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(1234);
-        for &(k, n_colors, seq_len) in &[(5, 3, 50), (7, 6, 200), (11, 10, 300), (31, 8, 500)] {
+        // With more than 64 colors, small sets are sparse and large sets are dense
+        for &(k, n_colors, seq_len) in &[(5, 3, 50), (7, 6, 200), (11, 10, 300), (31, 8, 500), (9, 100, 150)] {
             let base = random_seq(&mut rng, seq_len);
             let seqs: Vec<Vec<u8>> = (0..n_colors).map(|_| mutate(&mut rng, &base, seq_len / 20)).collect();
             let colored_seqs: Vec<(&[u8], usize)> = seqs.iter().enumerate().map(|(c, s)| (s.as_slice(), c)).collect();
@@ -260,6 +304,22 @@ mod tests {
                     assert_eq!(got, expected, "k = {}, k_min = {}, n_threads = {}", k, k_min, n_threads);
                 }
             }
+
+            // At k' = k, the distinct sets are the non-empty sets of the storage of the index.
+            // The storage built by new_from_small_input also contains the empty set of the dummy
+            // k-mers, so we include it when checking the size estimate against the real storage.
+            let storage = index.get_set_storage();
+            let sizes: Vec<usize> = (0..storage.n_sets()).map(|i| storage.get_set_view(i).len()).collect();
+            let got = count_distinct_suffix_color_sets(&index, k, 2);
+            if n_colors > 64 {
+                assert!(got[0].n_sparse > 0 && got[0].n_dense > 0, "Expected both sparse and dense sets: {:?}", got[0]);
+            }
+            assert_eq!(got[0], SuffixColorSetStats::from_set_sizes(k, storage.n_colors(), sizes.iter().copied().filter(|&s| s > 0)), "k = {}", k);
+
+            let mut buf = Vec::<u8>::new();
+            storage.serialize(&mut buf);
+            let with_empty = SuffixColorSetStats::from_set_sizes(k, storage.n_colors(), sizes.iter().copied());
+            assert_eq!(with_empty.storage_size.total(), buf.len(), "k = {}", k);
         }
     }
 }
