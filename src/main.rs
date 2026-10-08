@@ -331,6 +331,15 @@ pub enum Subcommands {
         #[arg(help = "Output TSV file. If omitted, writes to stdout.", long = "output", short = 'o')]
         output: Option<PathBuf>,
 
+        #[arg(help = "Directory for temporary files. Needs about 8 bytes per k-mer of the index, plus space for spilled shards if the memory budget is exceeded.", long = "temp-dir", required = true)]
+        temp_dir: PathBuf,
+
+        #[arg(help = "Memory budget in GB for the traversal phase. The fingerprint map is spilled to disk shard by shard so that the LCS array, the color sets, buffers and the map fit in this. The first phase needs the whole index plus about 3 bits per k-mer regardless. Default: no limit.", long = "mem-gb")]
+        mem_gb: Option<f64>,
+
+        #[arg(help = "Number of shards of the fingerprint map. Spilling happens one shard at a time.", long = "n-shards", default_value = "1024", hide = true)]
+        n_shards: usize,
+
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
     },
@@ -1197,16 +1206,28 @@ fn main() -> std::process::ExitCode {
                 IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
             };
         }
-        Subcommands::SuffixColorSets { index: index_path, k_min, output, n_threads } => {
+        Subcommands::SuffixColorSets { index: index_path, k_min, output, temp_dir, mem_gb, n_shards, n_threads } => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path, false);
+            let index = load_index_variant(&index_path, true); // Select support is required for the de Bruijn graph
+            let config = suffix_color_sets::Config {
+                k_min,
+                n_threads,
+                temp_dir,
+                mem_budget_bytes: mem_gb.map_or(usize::MAX, |gb| (gb * 1e9) as usize),
+                n_shards,
+            };
             let counts = match index {
                 IndexVariant::SparseDenseIndex(idx) => {
-                    if k_min < 1 || k_min > idx.get_k() {
-                        log::error!("--k-min must be between 1 and the k of the index ({})", idx.get_k());
+                    let k = idx.get_k();
+                    if k_min < 1 || k_min > k {
+                        log::error!("--k-min must be between 1 and the k of the index ({})", k);
                         return ExitCode::FAILURE;
                     }
-                    suffix_color_sets::count_distinct_suffix_color_sets(&idx, k_min, n_threads)
+                    if k - k_min + 1 > suffix_color_sets::MAX_N_K_VALUES {
+                        log::error!("At most {} values of k' are supported per run, so --k-min must be at least {}", suffix_color_sets::MAX_N_K_VALUES, k + 1 - suffix_color_sets::MAX_N_K_VALUES);
+                        return ExitCode::FAILURE;
+                    }
+                    suffix_color_sets::count_distinct_suffix_color_sets(idx, &config).0
                 },
             };
             let mut out: Box<dyn Write> = match output {
