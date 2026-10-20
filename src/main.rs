@@ -1,12 +1,6 @@
-#![allow(non_snake_case, clippy::needless_range_loop)] // Using upper-case variable names from the source material
-#![allow(clippy::len_zero)] // !is_empty reads as "not is empty" which is not English 
-#![allow(clippy::manual_is_multiple_of)] // Oh please
+#![allow(non_snake_case)] // Using upper-case variable names from the source material
 
-// We assume that usize is 64 bits in many places
-#[cfg(not(target_pointer_width = "64"))]
-compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
-
-use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Read, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
+use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
 use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
@@ -16,31 +10,9 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
+use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, finimizers, merge, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
+use themisto2::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
 
-mod EM;
-mod bitmap_storage;
-mod index_import;
-mod compatibility_criteria;
-mod colex_colored_kmers;
-mod coloring_interface;
-mod sparse_dense_storage;
-mod io;
-mod set_of_sets_construction;
-mod iterators;
-mod parallel_ms_iteration;
-mod atomic_bitmap;
-mod int_vec;
-mod finimizers;
-mod util;
-mod merge;
-mod pseudoalignment;
-mod pseudoalignment_metrics;
-mod sparse_dense_storage_to_disk;
-mod report;
-mod filter_reads;
-mod work_dispatcher;
-mod unitig_export;
 
 #[derive(Parser)]
 #[command(arg_required_else_help = true)]
@@ -54,21 +26,6 @@ pub enum Denominator { // Options for the CLI
     All,
     Relevant,
     MaxHits,
-}
-
-#[derive(clap::ValueEnum, Clone, Debug)]
-pub enum ColoringType{ // Options for the CLI. This is old code: now only SparseDense is supported.
-    Bitmaps,
-    SparseDense,
-}
-
-impl ColoringType {
-    pub fn serialization_id(&self) -> [u8; 8] {
-        match self {
-            ColoringType::Bitmaps => [0, 0, 0, 0, 0, 0, 0, 1],
-            ColoringType::SparseDense => [0, 0, 0, 0, 0, 0, 0, 2],
-        }
-    }
 }
 
 #[derive(Subcommand)]
@@ -514,34 +471,17 @@ enum IndexVariant {
 }
 
 fn load_index_color_names_only(path: &Path) -> Vec<String> {
-    let mut input = BufReader::new(File::open(path).unwrap());
-    let mut id_buf = [0u8; 8];
-    input.read_exact(&mut id_buf).unwrap();
-    if id_buf == ColoringType::SparseDense.serialization_id() {
-        CompactColexKmers::<SparseDenseStorage>::load_color_names_only(&mut input)
-    } else {
-        panic!("Unrecognized index serialization ID: {:?}", id_buf);
-    }
+    themisto2::load_color_names(path).unwrap_or_else(|e| panic!("Could not load index {}: {}", path.display(), e))
 }
 
 fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
-    let mut input = BufReader::new(File::open(path).unwrap());
-    let mut id_buf = [0u8; 8];
-    input.read_exact(&mut id_buf).unwrap();
-    if id_buf == ColoringType::SparseDense.serialization_id() {
-        let index = CompactColexKmers::<SparseDenseStorage>::load(&mut input, build_select);
-        IndexVariant::SparseDenseIndex(index)
-    } else {
-        panic!("Unrecognized index serialization ID: {:?}", id_buf);
-    }
+    let index = themisto2::load_index(path, build_select).unwrap_or_else(|e| panic!("Could not load index {}: {}", path.display(), e));
+    IndexVariant::SparseDenseIndex(index)
 }
 
 fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
     match index {
-        IndexVariant::SparseDenseIndex(idx) => {
-            out.write_all(&ColoringType::SparseDense.serialization_id()).unwrap();
-            idx.serialize(out);
-        },
+        IndexVariant::SparseDenseIndex(idx) => themisto2::write_index(idx, out).unwrap(),
     }
 }
 
@@ -630,8 +570,7 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
     log::info!("Computing full index size");
     let full_size_bytes = {
         let mut cw = CountingWriter { bytes: 0 };
-        cw.write_all(&ColoringType::SparseDense.serialization_id()).unwrap();
-        index.serialize(&mut cw);
+        themisto2::write_index(index, &mut cw).unwrap();
         cw.bytes
     };
     printstat!("full_index_size_bytes\t{}", full_size_bytes);
@@ -919,7 +858,7 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
 
 }
 
-fn into_metric_list(report_hit_counts: bool, report_bases_covered: bool) -> Vec<crate::pseudoalignment_metrics::Metric> {
+fn into_metric_list(report_hit_counts: bool, report_bases_covered: bool) -> Vec<pseudoalignment_metrics::Metric> {
     let mut metrics: Vec<pseudoalignment_metrics::Metric> = vec![];
     if report_hit_counts {
         metrics.push(pseudoalignment_metrics::Metric::KmerHits);
