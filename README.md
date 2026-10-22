@@ -91,7 +91,7 @@ This will use 32 threads.
 
 # Rust API
 
-Themisto 2 can also be used as a Rust library. The API loads a Themisto 2 index and gives a colored de Bruijn graph view on it: k-mer lookup, graph navigation, color sets of k-mers, and parallel iteration over unitigs and their color runs. To use it, add the dependency to your `Cargo.toml`:
+Themisto 2 provides a Rust API for navigating the colored de Bruijn graph that is encoded in the Themisto 2 index. Currently, the API provides k-mer lookup, graph navigation, color sets of k-mers, and parallel iteration over unitigs and their color runs. To use it, add the dependency to your `Cargo.toml`:
 
 ```
 [dependencies]
