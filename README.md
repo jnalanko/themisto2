@@ -89,6 +89,30 @@ themisto2 build --file-colors input_file_list.txt -s unitigs-k31.sbwt -l unitigs
 
 This will use 32 threads.
 
+# Rust API
+
+Themisto 2 can also be used as a Rust library. The API loads a Themisto 2 index and gives a colored de Bruijn graph view on it: k-mer lookup, graph navigation, color sets of k-mers, and parallel iteration over unitigs and their color runs. To use it, add the dependency to your `Cargo.toml`:
+
+```
+[dependencies]
+themisto2 = { git = "https://github.com/jnalanko/themisto2" }
+```
+
+For example, the following prints every maximal unitig segment where all k-mers have the same color set, along with the colors:
+
+```rust
+use themisto2::{ColoredDbg, ColorSetView};
+
+let index = themisto2::load_index("index.thm2".as_ref(), true).unwrap(); // true: select support for the DBG
+let dbg = ColoredDbg::new(&index, 4);
+dbg.par_for_each_colored_unitig(|u| {
+    let colors: Vec<usize> = u.color_set.iter().collect();
+    println!("{}\t{:?}", String::from_utf8_lossy(u.seq), colors);
+}, 4);
+```
+
+Run `cargo doc --open` in the repository to browse the full API documentation.
+
 # Citation
 
 A Themisto 2 paper is forthcoming, but in the meantime, you can cite the preprint describing the construction algorithm:
