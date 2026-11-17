@@ -58,6 +58,12 @@ pub enum OutputFormat {
     Themisto1,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputSettings {
+    pub format: OutputFormat,
+    pub report_only_reads_that_hit_something: bool,
+}
+
 #[derive(Clone)]
 pub struct ThresholdPseudoaligner {
     counts: Vec<usize>,
@@ -194,7 +200,7 @@ impl QueryBatch {
     }
 
     // Returns formatted bytes, and the batch id.
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>], output_format: OutputFormat) -> (Vec<u8>, usize) {
+    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>], output_settings: OutputSettings) -> (Vec<u8>, usize) {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -214,9 +220,10 @@ impl QueryBatch {
         result.computed_metric_names.extend(metrics.iter().map(|proc| proc.metric_id()));
 
         let mut bytes_out = Vec::<u8>::new();
-        match output_format {
-            OutputFormat::Jsonl => result.into_json(&mut bytes_out),
-            OutputFormat::Themisto1 => result.into_themisto1(self.first_query_index, &mut bytes_out),
+        let filter_output = output_settings.report_only_reads_that_hit_something; 
+        match output_settings.format {
+            OutputFormat::Jsonl => result.into_json(&mut bytes_out, filter_output),
+            OutputFormat::Themisto1 => result.into_themisto1(self.first_query_index, &mut bytes_out, filter_output),
         }
 
         (bytes_out, self.batch_id)
@@ -298,7 +305,7 @@ impl QueryResult {
         out.push(b']');
     }
 
-    fn into_json(self, out: &mut impl Write) {
+    fn into_json(self, out: &mut impl Write, write_only_hitting_reads: bool) {
         // I'm rolling my own JSON serialization because I don't trust
         // that the serde json implementation is fast enough because it
         // must be quite generic.
@@ -309,11 +316,17 @@ impl QueryResult {
         let n_queries = self.query_names_starts.len()-1;
 
         for seq_idx in 0..n_queries {
-            bytes.push(b'{');
             let name_s = self.query_names_starts[seq_idx];
             let name_e = self.query_names_starts[seq_idx+1];
             let compat_s = self.compatibility_class_starts[seq_idx]; 
             let compat_e = self.compatibility_class_starts[seq_idx+1]; 
+
+            let n_compatible = compat_e - compat_s;
+            if n_compatible == 0 && write_only_hitting_reads {
+                continue
+            }
+
+            bytes.push(b'{');
 
             bytes.extend(b"\"name\": \"");
             // Escape double quotes. '"' is ASCII (0x22), which never appears as a byte
@@ -355,13 +368,18 @@ impl QueryResult {
     // Metrics (kmer_hits, bases_covered) have no representation in this format
     // and are silently ignored here; callers must reject metric requests up
     // front (see OutputFormat::Themisto1).
-    fn into_themisto1(self, first_query_index: usize, out: &mut impl Write) {
+    fn into_themisto1(self, first_query_index: usize, out: &mut impl Write, write_only_hitting_reads: bool) {
         let mut bytes = Vec::<u8>::new();
         let n_queries = self.query_names_starts.len() - 1;
 
         for seq_idx in 0..n_queries {
             let compat_s = self.compatibility_class_starts[seq_idx];
             let compat_e = self.compatibility_class_starts[seq_idx + 1];
+
+            let n_compatible = compat_e - compat_s;
+            if n_compatible == 0 && write_only_hitting_reads {
+                continue
+            }
 
             push_decimal(&mut bytes, first_query_index + seq_idx);
             for &color in &self.compatibility_class_concat[compat_s..compat_e] {
@@ -436,7 +454,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_format: OutputFormat) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_settings: OutputSettings) {
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);
@@ -480,7 +498,7 @@ pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactCo
                     metric_processors.push(create_metric_processor(*metric, index.get_set_storage().n_colors()));
                 }
                 while let Ok(batch) = work_recv_clone.recv() {
-                    let (bytes, batch_id) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors, output_format);
+                    let (bytes, batch_id) = batch.process(index_ref, &mut aligner, n_bases_processed_ref, &mut metric_processors, output_settings);
                     results_send_clone.send((bytes, batch_id)).unwrap();
                 }
             });
