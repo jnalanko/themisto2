@@ -6,7 +6,7 @@ use colex_colored_kmers::CompactColexKmers;
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
-use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, dbg::Dbg};
+use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, dbg::Dbg, sbwt_index_variant::SbwtIndexVariant};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
@@ -827,7 +827,10 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
     let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
         log::info!("Loading SBWT from {}", sbwt_path.display());
         let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
-        let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+        let mut sbwt = match SbwtIndexVariant::load(&mut sbwt_in).unwrap() {
+            sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetMatrix(inner) => inner,
+            sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetCorrectionSets(_inner) => panic!("Subset correction sets SBWT not supported"),
+        };
 
         assert_eq!(sbwt.k(), k);
 
@@ -845,14 +848,15 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
     } else {
         log::info!("SBWT not provided -> building the SBWT.");
         let temp_dir = temp_dir.as_ref().expect("Tempory directory not specified (must be specified for SBWT construction)");
-        let (mut sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
+        let (mut sbwt, lcs) = sbwt::BitPackedKmerSortingDisk::new(input_stream, k)
             .add_rev_comp(true)
             .k(k)
             .build_lcs(true)
             .n_threads(n_threads)
             .precalc_length(8)
-            .algorithm(BitPackedKmerSortingDisk::new().dedup_batches(true).temp_dir(temp_dir))
-        .run(input_stream);
+            .dedup_batches(true)
+            .temp_dir(temp_dir)
+        .run();
         log::info!("Building SBWT select support");
         sbwt.build_select();
         let sbwt = sbwt;
@@ -1092,7 +1096,10 @@ fn main() -> std::process::ExitCode {
         Subcommands::ImportSbwt { sbwt_path, lcs_path, output, sample_distance, n_threads, color_name } => {
             log::info!("Loading SBWT from {}", sbwt_path.display());
             let mut sbwt_in = BufReader::new(File::open(&sbwt_path).unwrap());
-            let sbwt::SbwtIndexVariant::SubsetMatrix(mut sbwt) = sbwt::load_sbwt_index_variant(&mut sbwt_in).unwrap();
+            let mut sbwt = match SbwtIndexVariant::load(&mut sbwt_in).unwrap() {
+                sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetMatrix(inner) => inner,
+                sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetCorrectionSets(_inner) => panic!("Subset correction sets SBWT not supported"),
+            };
 
             log::info!("Building select support for SBWT");
             sbwt.build_select();

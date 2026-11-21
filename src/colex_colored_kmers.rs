@@ -385,12 +385,10 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let just_seqs: Vec<&[u8]> = colored_seqs.iter().map(|x| x.0).collect();
 
-        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-            .algorithm(sbwt::BitPackedKmerSortingMem::new())
-            .k(k)
+        let (sbwt, lcs) = sbwt::BitPackedKmerSortingMem::new_from_slices(&just_seqs, k)
             .build_select_support(true) // Required for colex map creation from sbwt
             .build_lcs(true)
-            .run_from_slices(&just_seqs);
+            .run();
 
         let lcs = lcs.unwrap(); // .build_lcs(true)
 

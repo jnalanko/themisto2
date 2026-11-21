@@ -514,12 +514,10 @@ mod tests {
         let seq0: &[u8] = b"ACGCG";
         let seq1: &[u8] = b"TTTGGG";
 
-        let (sbwt, lcs) = sbwt::SbwtIndexBuilder::new()
-            .algorithm(BitPackedKmerSortingMem::new())
-            .k(k)
+        let (sbwt, lcs) = sbwt::BitPackedKmerSortingMem::new_from_slices(&[seq0, seq1], k)
             .add_rev_comp(true)
             .build_lcs(true)
-            .run_from_slices(&[seq0, seq1]);
+            .run();
         let lcs = lcs.unwrap();
 
         let color_seqs: Vec<Vec<Vec<u8>>> = vec![

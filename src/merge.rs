@@ -372,32 +372,29 @@ mod tests {
                 dbs_both.push(db);
             }
 
-            let (mut sbwt1, lcs1) = sbwt::SbwtIndexBuilder::new()
+            let (mut sbwt1, lcs1) = BitPackedKmerSortingMem::new_from_vecs(&input_seqs_1, k)
                 .add_rev_comp(false)
-                .k(k)
                 .build_lcs(true)
                 .n_threads(3)
                 .precalc_length(5)
-                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
-            .run_from_vecs(&input_seqs_1);
+                .dedup_batches(true)
+            .run();
 
-            let (mut sbwt2, lcs2) = sbwt::SbwtIndexBuilder::new()
+            let (mut sbwt2, lcs2) = BitPackedKmerSortingMem::new_from_vecs(&input_seqs_2, k)
                 .add_rev_comp(false)
-                .k(k)
                 .build_lcs(true)
                 .n_threads(3)
                 .precalc_length(5)
-                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
-            .run_from_vecs(&input_seqs_2);
+                .dedup_batches(true)
+            .run();
 
-            let (mut sbwt_both, lcs_both) = sbwt::SbwtIndexBuilder::new()
+            let (mut sbwt_both, lcs_both) = BitPackedKmerSortingMem::new_from_slices(&all_input_seq_slices, k)
                 .add_rev_comp(false)
-                .k(k)
                 .build_lcs(true)
                 .n_threads(3)
                 .precalc_length(5)
-                .algorithm(BitPackedKmerSortingMem::new().dedup_batches(true))
-            .run_from_slices(&all_input_seq_slices);
+                .dedup_batches(true)
+            .run();
 
             sbwt1.build_select();
             sbwt2.build_select();

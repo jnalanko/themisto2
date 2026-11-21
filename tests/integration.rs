@@ -348,16 +348,14 @@ fn filter_reads_missing_read_errors() {
 }
 
 fn build_sbwt_file(fasta_path: &PathBuf, sbwt_path: &PathBuf, k: usize) {
-    use sbwt::{BitPackedKmerSortingMem, SbwtIndexBuilder, SbwtIndexVariant, write_sbwt_index_variant};
-    let (sbwt, _lcs) = SbwtIndexBuilder::<BitPackedKmerSortingMem>::new()
-        .k(k)
+    use sbwt::{BitPackedKmerSortingMem, sbwt_index_variant::SbwtIndexVariant};
+    let (sbwt, _lcs) = BitPackedKmerSortingMem::new_from_fasta(std::fs::File::open(fasta_path).unwrap(), k)
         .n_threads(1)
         .add_rev_comp(true)
         .build_lcs(false)
-        .algorithm(BitPackedKmerSortingMem::default())
-        .run_from_fasta(std::fs::File::open(fasta_path).unwrap());
+        .run();
     let mut out = std::io::BufWriter::new(std::fs::File::create(sbwt_path).unwrap());
-    write_sbwt_index_variant(&SbwtIndexVariant::SubsetMatrix(sbwt), &mut out).unwrap();
+    SbwtIndexVariant::SubsetMatrix(sbwt).serialize(&mut out).unwrap();
 }
 
 #[test]
