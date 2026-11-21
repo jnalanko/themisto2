@@ -108,18 +108,6 @@ fn file_colors_with_grouped_files_match_concatenated_files() {
 }
 
 #[test]
-fn file_colors_with_grouped_files_rejects_from_unitigs() {
-    let dir = tmp_dir();
-    let output = themisto2()
-        .args(["build", "--from-unitigs", "--file-colors", "tests/data/fof-grouped.txt"])
-        .args(["--temp-dir"]).arg(&dir)
-        .args(["-k", "3", "-t", "1", "-o"]).arg(dir.join("index.thm2"))
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-}
-
-#[test]
 fn seq_colors_by_name_match_file_colors_with_grouped_files() {
     let dir = tmp_dir();
     let build = |args: &[&str], name: &str| -> PathBuf {
@@ -136,7 +124,7 @@ fn seq_colors_by_name_match_file_colors_with_grouped_files() {
         index
     };
 
-    // The two AB sequences are not adjacent in the file, but they still form one color
+    // The two AB sequences are consecutive in the file, so they form one color
     let by_name = build(&["--seq-colors", "tests/data/seq-colors-grouped.fna", "--seq-colors-by-name"], "by-name");
     let grouped = build(&["--file-colors", "tests/data/fof-grouped.txt"], "grouped");
 
@@ -149,35 +137,61 @@ fn seq_colors_by_name_match_file_colors_with_grouped_files() {
     assert_eq!(std::fs::read(&by_name).unwrap(), std::fs::read(&grouped).unwrap(),
         "Index with --seq-colors-by-name differs from index with grouped --file-colors");
 
-    // The same index as from a file where the AB sequences are adjacent
-    let content = std::fs::read_to_string("tests/data/seq-colors-grouped.fna").unwrap();
-    let records: Vec<&str> = content.split('>').filter(|r| !r.is_empty()).collect();
-    assert_eq!(records.len(), 3);
-    let adjacent_file = dir.join("seq-colors-adjacent.fna");
-    write_file(&adjacent_file, &format!(">{}>{}>{}", records[0], records[2], records[1]));
-    let adjacent = build(&["--seq-colors", adjacent_file.to_str().unwrap(), "--seq-colors-by-name"], "adjacent");
-    assert_eq!(std::fs::read(&by_name).unwrap(), std::fs::read(&adjacent).unwrap(),
-        "Index with non-adjacent sequences of a color differs from index with adjacent ones");
-
     // Without --seq-colors-by-name, each sequence is still its own color
     let per_seq = build(&["--seq-colors", "tests/data/seq-colors-grouped.fna"], "per-seq");
     let names = themisto2()
         .args(["dump-color-names", "-i"]).arg(&per_seq)
         .output().unwrap();
     assert!(names.status.success());
-    assert_eq!(String::from_utf8(names.stdout).unwrap(), "0\tAB\n1\tC\n2\tAB\n");
+    assert_eq!(String::from_utf8(names.stdout).unwrap(), "0\tAB\n1\tAB\n2\tC\n");
 }
 
 #[test]
-fn seq_colors_by_name_with_grouped_sequences_rejects_from_unitigs() {
+fn seq_colors_by_name_rejects_non_consecutive_names() {
+    // The two AB sequences are separated by C: the build must stop before it starts
     let dir = tmp_dir();
+    let content = std::fs::read_to_string("tests/data/seq-colors-grouped.fna").unwrap();
+    let records: Vec<&str> = content.split('>').filter(|r| !r.is_empty()).collect();
+    assert_eq!(records.len(), 3);
+    let non_consecutive = dir.join("seq-colors-non-consecutive.fna");
+    write_file(&non_consecutive, &format!(">{}>{}>{}", records[0], records[2], records[1]));
     let output = themisto2()
-        .args(["build", "--from-unitigs", "--seq-colors", "tests/data/seq-colors-grouped.fna", "--seq-colors-by-name"])
+        .args(["build", "--seq-colors"]).arg(&non_consecutive).arg("--seq-colors-by-name")
         .args(["--temp-dir"]).arg(&dir)
         .args(["-k", "3", "-t", "1", "-o"]).arg(dir.join("index.thm2"))
         .output()
         .unwrap();
     assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not consecutive"));
+}
+
+#[test]
+fn from_unitigs_allows_colors_with_several_inputs() {
+    // With k = 11, no k-mer occurs twice within a color of these inputs (in either orientation),
+    // so --from-unitigs must give the same index as the deduplicating construction
+    let dir = tmp_dir();
+    let build = |args: &[&str], name: &str| -> Vec<u8> {
+        let tmp = dir.join(format!("{}-tmp", name));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let index = dir.join(format!("{}.thm2", name));
+        let status = themisto2()
+            .arg("build").args(args)
+            .args(["--temp-dir"]).arg(&tmp)
+            .args(["-k", "11", "-t", "1", "-o"]).arg(&index)
+            .status()
+            .unwrap();
+        assert!(status.success(), "build of {} failed", name);
+        std::fs::read(&index).unwrap()
+    };
+    let inputs: [(&[&str], &str); 2] = [
+        (&["--file-colors", "tests/data/fof-grouped.txt"], "files"),
+        (&["--seq-colors", "tests/data/seq-colors-grouped.fna", "--seq-colors-by-name"], "seqs"),
+    ];
+    for (input, name) in inputs {
+        let dedup = build(input, &format!("{}-dedup", name));
+        let from_unitigs = build(&[input, &["--from-unitigs"]].concat(), &format!("{}-from-unitigs", name));
+        assert_eq!(dedup, from_unitigs, "--from-unitigs differs from the deduplicating construction ({})", name);
+    }
 }
 
 fn read_jsonl(path: &PathBuf) -> Vec<PseudoalignmentRecord> {

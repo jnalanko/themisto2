@@ -42,7 +42,7 @@ pub enum Subcommands {
         #[arg(help = "A fasta/fastq file, with one color per sequence. The color name of a sequence is its header up to the first space. Maximum supported number of colors: 2^32.", long = "seq-colors")]
         sequence_colors_file: Option<PathBuf>,
 
-        #[arg(help = "With --seq-colors: sequences with the same color name form a single color, instead of each sequence having its own color. Colors are numbered in the order their names first appear. Not supported with --from-unitigs if a color has more than one sequence.", long = "seq-colors-by-name", requires = "sequence_colors_file")]
+        #[arg(help = "With --seq-colors: sequences with the same color name form a single color, instead of each sequence having its own color. IMPORTANT: all sequences with the same color name must be CONSECUTIVE in the file; otherwise the build stops with an error before it starts. All sequences of a color are held in memory at once while the color is processed (several colors at a time, up to a few per thread), so for colors too large for that, use --file-colors with one or more files per color instead, which reads them one sequence at a time.", long = "seq-colors-by-name", requires = "sequence_colors_file")]
         seq_colors_by_name: bool,
 
         #[arg(help = "Precomputed bit matrix SBWT (optional). Maximum supported SBWT length: 2^40.", long = "sbwt", short = 's')]
@@ -54,7 +54,7 @@ pub enum Subcommands {
         #[arg(help = "Output filename. If --to-disk-in-pieces is given, this is interpreted as a filename prefix.", short, long, required = true)]
         output: PathBuf,
 
-        #[arg(help = "Optional: Build from per-color unitigs (requires odd k). This makes the construction much faster because now we can exploit the fact that the k-mers have already been deduplicated in the unitigs", long)]
+        #[arg(help = "Optional: Build from per-color unitigs (requires odd k). This makes the construction much faster, because the k-mers of a color are not deduplicated. IMPORTANT: the user is responsible for making sure that no k-mer occurs more than once within a color, counting both orientations, over all sequences of that color (for example, the unitigs of each color from GGCAT). This is not checked: if it does not hold, the index is silently wrong. A color may consist of several files (--file-colors) or several sequences (--seq-colors-by-name).", long)]
         from_unitigs: bool,
 
         #[arg(help = "Directory for temporary files. Required if --sbwt is not given. Should point to a location with fast IO and plenty of free space.", long = "temp-dir", required_unless_present="sbwt_path")]
@@ -485,8 +485,9 @@ fn parse_color_fof(reader: impl BufRead) -> Result<(Vec<Vec<PathBuf>>, Vec<Strin
 
 /// Assigns colors to the sequences of a --seq-colors file, given the color name of each
 /// sequence. Without by_name, each sequence is its own color. With by_name, sequences with the
-/// same name are one color, and colors are numbered in the order their names first appear.
-/// Returns the color of each sequence and the color names.
+/// same name are one color, and colors are numbered in file order. The sequences of a color
+/// must then be consecutive in the file, which is checked here so that the build fails before
+/// it starts. Returns the color of each sequence and the color names.
 fn assign_seq_colors(seq_names: Vec<String>, by_name: bool) -> Result<(Vec<usize>, Vec<String>), String> {
     if !by_name {
         return Ok(((0..seq_names.len()).collect(), seq_names));
@@ -494,16 +495,18 @@ fn assign_seq_colors(seq_names: Vec<String>, by_name: bool) -> Result<(Vec<usize
 
     let mut record_colors = Vec::<usize>::with_capacity(seq_names.len());
     let mut color_names = Vec::<String>::new();
-    let mut name_to_color = std::collections::HashMap::<String, usize>::new();
+    let mut seen_names = std::collections::HashSet::<String>::new();
     for (seq_idx, name) in seq_names.into_iter().enumerate() {
         if name.is_empty() {
             return Err(format!("Sequence {} of the --seq-colors file has an empty color name, which --seq-colors-by-name can not group", seq_idx + 1));
         }
-        let color = *name_to_color.entry(name).or_insert_with_key(|name| {
-            color_names.push(name.clone());
-            color_names.len() - 1
-        });
-        record_colors.push(color);
+        if color_names.last() != Some(&name) {
+            if !seen_names.insert(name.clone()) {
+                return Err(format!("Sequence {} of the --seq-colors file has color name {:?}, but the sequences with that name are not consecutive in the file. With --seq-colors-by-name, all sequences with the same color name must be consecutive.", seq_idx + 1, name));
+            }
+            color_names.push(name);
+        }
+        record_colors.push(color_names.len() - 1);
     }
     Ok((record_colors, color_names))
 }
@@ -1113,10 +1116,11 @@ fn main() -> std::process::ExitCode {
                         log::error!("{}", e);
                         panic!("{}", e);
                     });
-                    if from_unitigs && file_groups.iter().any(|group| group.len() > 1) {
-                        let e = "--from-unitigs requires exactly one file per color, because k-mers of different files of the same color are not deduplicated";
-                        log::error!("{}", e);
-                        panic!("{}", e);
+                    if from_unitigs {
+                        let n_multi = file_groups.iter().filter(|group| group.len() > 1).count();
+                        if n_multi > 0 {
+                            log::warn!("{} colors have more than one unitig file. With --from-unitigs, no k-mer may occur more than once within a color (counting both orientations), which is not checked. Files from separate unitig runs usually share k-mers, which would make the index silently wrong.", n_multi);
+                        }
                     }
                     let input_paths: Vec<PathBuf> = file_groups.concat();
                     (ColoredSeqInput::FileColors(file_groups), input_paths, color_names)
@@ -1140,11 +1144,6 @@ fn main() -> std::process::ExitCode {
                     });
                     if seq_colors_by_name {
                         log::info!("Grouped {} sequences into {} colors by name", n_seqs, color_names.len());
-                    }
-                    if from_unitigs && color_names.len() < n_seqs {
-                        let e = "--from-unitigs requires exactly one sequence per color, because k-mers of different sequences of the same color are not deduplicated";
-                        log::error!("{}", e);
-                        panic!("{}", e);
                     }
                     (ColoredSeqInput::SequenceColors(sequence_colors_file.clone(), record_colors), vec![sequence_colors_file], color_names)
                 },
@@ -1437,9 +1436,17 @@ mod tests {
 
     #[test]
     fn test_assign_seq_colors_mixed() {
-        let (colors, color_names) = super::assign_seq_colors(names(&["x", "y", "x", "z", "y", "w", "x"]), true).unwrap();
-        assert_eq!(colors, vec![0, 1, 0, 2, 1, 3, 0]);
+        let (colors, color_names) = super::assign_seq_colors(names(&["x", "x", "y", "z", "z", "z", "w"]), true).unwrap();
+        assert_eq!(colors, vec![0, 0, 1, 2, 2, 2, 3]);
         assert_eq!(color_names, names(&["x", "y", "z", "w"]));
+    }
+
+    #[test]
+    fn test_assign_seq_colors_rejects_non_consecutive_names() {
+        let e = super::assign_seq_colors(names(&["x", "y", "x"]), true).unwrap_err();
+        assert!(e.contains("Sequence 3") && e.contains("not consecutive"), "{}", e);
+        // Without grouping, the order of the names does not matter
+        assert!(super::assign_seq_colors(names(&["x", "y", "x"]), false).is_ok());
     }
 
     #[test]
