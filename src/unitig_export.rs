@@ -269,9 +269,7 @@ pub fn break_to_colored_subunitigs(unitig_colex_ranks: &[usize], _unitig_string:
 // Todo: add a function to dbg to get the k from there
 fn search_unitig_from(v: Node, dbg: &Dbg<'_, SubsetMatrix>, k: usize, map: &ColexToColorSetMap, sbwt: &SbwtIndex<SubsetMatrix>) -> (Vec<usize>, Vec<usize>, Vec<u8>, Vec<Range<usize>>, Vec<usize>) {
     // Walk the unitig in forward orientation, and then backwards
-    let mut workspace = Vec::<u8>::new();
-    let nodes = dbg.walk_unitig_from(v, &mut workspace);
-    workspace.clear();
+    let nodes = dbg.walk_unitig_from(v);
     let mut unitig_string = Vec::<u8>::new();
     dbg.push_unitig_string(&nodes, &mut unitig_string);
 
@@ -283,7 +281,7 @@ fn search_unitig_from(v: Node, dbg: &Dbg<'_, SubsetMatrix>, k: usize, map: &Cole
         "Reverse complement of k-mer {} not found in index", 
         String::from_utf8_lossy(last_kmer))
     ).id;
-    let rc_nodes = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex}, &mut workspace);
+    let rc_nodes = dbg.walk_unitig_from(sbwt::dbg::Node{id: last_kmer_rc_colex});
 
     let fw_colex: Vec<usize> = nodes.into_iter().map(|v| v.id).collect();
     let rc_colex: Vec<usize> = rc_nodes.into_iter().rev().map(|v| v.id).collect();

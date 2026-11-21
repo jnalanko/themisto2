@@ -117,92 +117,90 @@ pub trait RewindableSeqStreamGenerator {
 	fn rewind(&mut self);
 }
 
+// Generates one stream per group of files. The files of a group are read one after
+// the other as a single stream.
 pub struct SeqStreamGeneratorFromFiles {
-    files: Vec<PathBuf>,
-    cur_file_idx: usize,
+    file_groups: Vec<Vec<PathBuf>>,
+    cur_group_idx: usize,
 }
 
 impl SeqStreamGeneratorFromFiles {
-    pub fn new(files: Vec<PathBuf>) -> Self {
-        Self {files, cur_file_idx: 0}
-    }
-}
-
-pub struct JSeqIOWrapper { // So that we can implement sbwt::SeqStream for jseqio::reader
-    inner: jseqio::reader::DynamicFastXReader,
-    cur_buf: Vec<u8>,
-}
-
-impl sbwt::SeqStream for JSeqIOWrapper {
-    fn stream_next(&mut self) -> Option<&[u8]> {
-        let maybe_rec = self.inner.read_next().unwrap(); // Unwrap the IO Result
-        let rec = maybe_rec?; // If None -> end of stream
-        self.cur_buf.clear();
-        self.cur_buf.extend_from_slice(rec.seq);
-        Some(&self.cur_buf)
+    pub fn new(file_groups: Vec<Vec<PathBuf>>) -> Self {
+        Self {file_groups, cur_group_idx: 0}
     }
 }
 
 impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromFiles {
     fn next(&mut self) -> Option<(Box<dyn SeqStream + Send + Sync>, usize)> {
-        if self.cur_file_idx == self.files.len() { return None; }
+        if self.cur_group_idx == self.file_groups.len() { return None; }
 
-        let reader = jseqio::reader::DynamicFastXReader::from_file(&self.files[self.cur_file_idx]).unwrap();
-        let reader = JSeqIOWrapper {inner: reader, cur_buf: vec![]};
+        let reader = ChainedInputStream::new(self.file_groups[self.cur_group_idx].clone());
         let reader: Box<dyn SeqStream + Send+ Sync> = Box::new(reader);
 
-        let stream_idx = self.cur_file_idx;
-        self.cur_file_idx += 1;
+        let stream_idx = self.cur_group_idx;
+        self.cur_group_idx += 1;
         Some((reader, stream_idx))
     }
 
     fn rewind(&mut self) {
-        self.cur_file_idx = 0;
+        self.cur_group_idx = 0;
     }
 }
 
-#[allow(dead_code)]
+// Generates one stream per color from a single file, where record_colors[i] is the color
+// of the i-th record. Colors must be numbered in the order they first appear in the file.
+// Streams are generated in color order, and the stream of a color holds all of its records,
+// so records of a color that are not adjacent in the file are buffered in memory until
+// that color is generated.
 pub struct SeqStreamGeneratorFromSingleFile {
     file: PathBuf,
     cur_stream: jseqio::reader::DynamicFastXReader,
+    record_colors: Vec<usize>,
+    last_record_of_color: Vec<usize>,
     n_seqs_read: usize,
+    next_color: usize,
+    buffered: Vec<Vec<Vec<u8>>>, // Sequences read so far for each color that has not been generated yet
 }
 
 impl SeqStreamGeneratorFromSingleFile {
-    #[allow(dead_code)]
-    pub fn new(file: PathBuf) -> Self {
+    pub fn new(file: PathBuf, record_colors: Vec<usize>) -> Self {
+        let mut last_record_of_color = Vec::<usize>::new();
+        for (record_idx, &color) in record_colors.iter().enumerate() {
+            assert!(color <= last_record_of_color.len(), "Colors must be numbered in order of first appearance");
+            if color == last_record_of_color.len() {
+                last_record_of_color.push(record_idx);
+            } else {
+                last_record_of_color[color] = record_idx;
+            }
+        }
         let cur_stream = jseqio::reader::DynamicFastXReader::from_file(&file).unwrap();
-        Self {file, cur_stream, n_seqs_read: 0}
-    }
-}
-
-pub struct SingleSeqStream {
-    seq: Vec<u8>,
-    done: bool,
-}
-
-impl SeqStream for SingleSeqStream {
-    fn stream_next(&mut self) -> Option<&[u8]> {
-        if self.done { return None };
-
-        self.done = true;
-        Some(&self.seq)
+        let buffered = vec![vec![]; last_record_of_color.len()];
+        Self {file, cur_stream, record_colors, last_record_of_color, n_seqs_read: 0, next_color: 0, buffered}
     }
 }
 
 impl RewindableSeqStreamGenerator for SeqStreamGeneratorFromSingleFile {
     fn next(&mut self) -> Option<(Box<dyn SeqStream + Sync + Send>, usize)> {
-        let rec = self.cur_stream.read_next().unwrap()?;
-        let seq = SingleSeqStream { seq: rec.seq.to_vec(), done: false };
-        let seq: Box<dyn SeqStream + Sync + Send> = Box::new(seq);
-        let seq_idx = self.n_seqs_read;
-        self.n_seqs_read += 1;
-        Some((seq, seq_idx))
+        let color = self.next_color;
+        if color == self.last_record_of_color.len() { return None; }
+
+        while self.n_seqs_read <= self.last_record_of_color[color] {
+            let rec = self.cur_stream.read_next().unwrap()
+                .unwrap_or_else(|| panic!("{} has fewer sequences than expected", self.file.display()));
+            self.buffered[self.record_colors[self.n_seqs_read]].push(rec.seq.to_vec());
+            self.n_seqs_read += 1;
+        }
+
+        let seqs = std::mem::take(&mut self.buffered[color]);
+        self.next_color += 1;
+        Some((Box::new(crate::util::VecVecSeqStream::new(seqs)), color))
     }
 
     fn rewind(&mut self) {
         let mut new_reader = jseqio::reader::DynamicFastXReader::from_file(&self.file).unwrap();
         self.n_seqs_read = 0;
+        self.next_color = 0;
+        self.buffered.iter_mut().for_each(|b| b.clear());
         std::mem::swap(&mut self.cur_stream, &mut new_reader);
 
         // Thd old reader is dropped here
@@ -314,4 +312,69 @@ impl RewindableSeqStreamGenerator for EmptyRewindableSeqStreamGenerator {
     }
 
     fn rewind(&mut self) {}
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Writes the sequences as a fasta file in the temp directory of the project and returns its path
+    fn write_fasta(name: &str, seqs: &[&str]) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("temp").join("io-unit-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        let content: String = seqs.iter().enumerate().map(|(i, s)| format!(">seq{}\n{}\n", i, s)).collect();
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    // Returns the (color, sequences) pairs generated by the generator
+    fn collect(gen: &mut SeqStreamGeneratorFromSingleFile) -> Vec<(usize, Vec<String>)> {
+        let mut out = vec![];
+        while let Some((mut stream, color)) = gen.next() {
+            let mut seqs = vec![];
+            while let Some(seq) = stream.stream_next() {
+                seqs.push(String::from_utf8(seq.to_vec()).unwrap());
+            }
+            out.push((color, seqs));
+        }
+        out
+    }
+
+    fn owned(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn single_file_generator_one_color_per_record() {
+        let path = write_fasta("one-per-record.fna", &["AAA", "CCC", "GGG"]);
+        let mut gen = SeqStreamGeneratorFromSingleFile::new(path, vec![0, 1, 2]);
+        let expected = vec![(0, owned(&["AAA"])), (1, owned(&["CCC"])), (2, owned(&["GGG"]))];
+        assert_eq!(collect(&mut gen), expected);
+    }
+
+    #[test]
+    fn single_file_generator_groups_non_adjacent_records() {
+        let path = write_fasta("grouped.fna", &["AAA", "CCC", "GGG", "TTT", "ACG"]);
+        let mut gen = SeqStreamGeneratorFromSingleFile::new(path, vec![0, 1, 0, 2, 1]);
+        let expected = vec![(0, owned(&["AAA", "GGG"])), (1, owned(&["CCC", "ACG"])), (2, owned(&["TTT"]))];
+        assert_eq!(collect(&mut gen), expected);
+
+        // Rewinding must generate the same streams again
+        gen.rewind();
+        assert_eq!(collect(&mut gen), expected);
+    }
+
+    #[test]
+    fn single_file_generator_all_records_one_color() {
+        let path = write_fasta("all-one-color.fna", &["AAA", "CCC", "GGG"]);
+        let mut gen = SeqStreamGeneratorFromSingleFile::new(path, vec![0, 0, 0]);
+        assert_eq!(collect(&mut gen), vec![(0, owned(&["AAA", "CCC", "GGG"]))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "order of first appearance")]
+    fn single_file_generator_rejects_colors_out_of_order() {
+        let path = write_fasta("out-of-order.fna", &["AAA", "CCC"]);
+        SeqStreamGeneratorFromSingleFile::new(path, vec![1, 0]);
+    }
 }

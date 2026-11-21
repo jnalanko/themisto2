@@ -10,8 +10,9 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, finimizers, merge, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
+use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, finimizers, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
 use themisto2::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
+use themisto2::set_operations::{difference, intersect, merge, subset};
 
 
 #[derive(Parser)]
@@ -34,12 +35,15 @@ pub enum Subcommands {
     Build {
 
         // The maximum number of colors is 2^32 because we use 32-bit color ids in phase 2 of the construction.
-        #[arg(help = "A file with one fasta/fastq filename per line. Maximum supported number of colors: 2^32.", long = "file-colors")]
+        #[arg(help = "A file with one fasta/fastq filename per line, optionally followed by a tab and a color name. A line without a color name uses the filename as the color name. Maximum supported number of colors: 2^32.", long = "file-colors")]
         color_fof: Option<PathBuf>,
 
         // The maximum number of colors is 2^32 because we use 32-bit color ids in phase 2 of the construction.
-        #[arg(help = "A fasta/fastq file, with one color per sequence. Maximum supported number of colors: 2^32.", long = "seq-colors")]
+        #[arg(help = "A fasta/fastq file, with one color per sequence. The color name of a sequence is its header up to the first space. Maximum supported number of colors: 2^32.", long = "seq-colors")]
         sequence_colors_file: Option<PathBuf>,
+
+        #[arg(help = "With --seq-colors: sequences with the same color name form a single color, instead of each sequence having its own color. Colors are numbered in the order their names first appear. Not supported with --from-unitigs if a color has more than one sequence.", long = "seq-colors-by-name", requires = "sequence_colors_file")]
+        seq_colors_by_name: bool,
 
         #[arg(help = "Precomputed bit matrix SBWT (optional). Maximum supported SBWT length: 2^40.", long = "sbwt", short = 's')]
         sbwt_path: Option<PathBuf>,
@@ -201,7 +205,91 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
 
-        #[arg(long = "low-ram-mode", help = "Use more slower but more compact algorithm invert and merge SBWTs")]
+        #[arg(long = "low-ram-mode", help = "Use slower algorithms that need less memory to combine the SBWTs. The result is the same.")]
+        low_ram_mode: bool,
+
+        #[arg(long = "merge-shared-colors", help = "Treat colors with identical names in different input indexes as the same color. Color names must be unique within each input index.")]
+        merge_shared_colors: bool,
+
+        #[arg(long = "keep-redundant-dummies", help = "Do not remove the dummy nodes that become redundant when merging SBWTs. The result has the same k-mers and colors, but may have more dummy nodes. With more than two input indexes, the intermediate merges always keep them, and only the last merge removes them (unless this option is given).")]
+        keep_redundant_dummies: bool,
+    },
+
+    #[command(arg_required_else_help = true, name = "intersect", about = "Intersect two indexes: keep the k-mers that are in both")]
+    Intersect {
+        #[arg(long = "index1", required = true)]
+        index1: PathBuf,
+
+        #[arg(long = "index2", required = true)]
+        index2: PathBuf,
+
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
+        #[arg(long = "colors", value_enum, default_value = "union", help = "How the color set of each k-mer is computed from its color sets in the two indexes. With 'intersect', colors are matched by name, only the colors in both indexes are kept, and k-mers whose color sets do not intersect get an empty color set. Color names must be unique within each input index.")]
+        colors: intersect::IntersectColors,
+
+        #[arg(long = "merge-shared-colors", help = "With '--colors union': treat colors with identical names in the two indexes as the same color. Color names must be unique within each input index.")]
+        merge_shared_colors: bool,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
+        sample_distance: usize,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(long = "low-ram-mode", help = "Use slower algorithms that need less memory to combine the SBWTs. The result is the same.")]
+        low_ram_mode: bool,
+    },
+
+    #[command(arg_required_else_help = true, name = "subset", about = "Keep the k-mers of an index whose color set contains at least one of the given colors, with only those colors: the same as an index built from the sequences of these colors")]
+    Subset {
+        #[arg(long = "index", required = true)]
+        index: PathBuf,
+
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
+        #[arg(long = "colors", value_delimiter = ',', help = "Comma-separated names of the colors to keep (to remove, with --complement)")]
+        colors: Vec<String>,
+
+        #[arg(long = "colors-file", help = "A file with the names of the colors to keep (to remove, with --complement), one per line")]
+        colors_file: Option<PathBuf>,
+
+        #[arg(long = "complement", help = "Remove the given colors and keep all others")]
+        complement: bool,
+
+        #[arg(long = "keep-all-colors", help = "Keep the whole color sets of the kept k-mers, with all colors of the index, instead of only the given colors")]
+        keep_all_colors: bool,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
+        sample_distance: usize,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(long = "low-ram-mode", help = "Use slower algorithms that need less memory to combine the SBWTs. The result is the same.")]
+        low_ram_mode: bool,
+    },
+
+    #[command(arg_required_else_help = true, name = "difference", about = "Subtract two indexes: keep the k-mers of index1 that are not in index2, with their colors in index1")]
+    Difference {
+        #[arg(long = "index1", required = true)]
+        index1: PathBuf,
+
+        #[arg(long = "index2", required = true)]
+        index2: PathBuf,
+
+        #[arg(long = "output", short = 'o', required = true)]
+        outfile: PathBuf,
+
+        #[arg(long = "sample-distance", short = 'd', default_value = "30")]
+        sample_distance: usize,
+
+        #[arg(long = "n-threads", short = 't', default_value = "4")]
+        n_threads: usize,
+
+        #[arg(long = "low-ram-mode", help = "Use slower algorithms that need less memory to combine the SBWTs. The result is the same.")]
         low_ram_mode: bool,
     },
 
@@ -348,21 +436,76 @@ enum BuildMode {
 }
 
 enum ColoredSeqInput {
-    FileColors(Vec<PathBuf>), // One file per color
-    SequenceColors(PathBuf), // One file, containing one sequence per color.
+    FileColors(Vec<Vec<PathBuf>>), // One group of files per color
+    SequenceColors(PathBuf, Vec<usize>), // One file, and the color of each of its sequences
 }
 
 impl ColoredSeqInput {
     fn get_generator(&self) -> Box<dyn RewindableSeqStreamGenerator + Sync + Send> {
         match self {
-            ColoredSeqInput::FileColors(path_bufs) => {
-                Box::new(io::SeqStreamGeneratorFromFiles::new(path_bufs.clone()))
+            ColoredSeqInput::FileColors(file_groups) => {
+                Box::new(io::SeqStreamGeneratorFromFiles::new(file_groups.clone()))
             },
-            ColoredSeqInput::SequenceColors(path_buf) => {
-                Box::new(io::SeqStreamGeneratorFromSingleFile::new(path_buf.clone()))
+            ColoredSeqInput::SequenceColors(path_buf, record_colors) => {
+                Box::new(io::SeqStreamGeneratorFromSingleFile::new(path_buf.clone(), record_colors.clone()))
             }
         }
     }
+}
+
+/// Parses a --file-colors file. Each non-empty line is a path, optionally followed by a tab and
+/// a color name. A line without a name uses the path as its name. Lines with the same name are
+/// one color. Colors are numbered in the order their names first appear. Returns the files of
+/// each color and the color names.
+fn parse_color_fof(reader: impl BufRead) -> Result<(Vec<Vec<PathBuf>>, Vec<String>), String> {
+    let mut file_groups = Vec::<Vec<PathBuf>>::new();
+    let mut color_names = Vec::<String>::new();
+    let mut name_to_color = std::collections::HashMap::<String, usize>::new();
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line = line.map_err(|e| format!("Error reading the --file-colors file: {}", e))?;
+        if line.is_empty() { continue; }
+
+        let (path, name) = match line.split_once('\t') {
+            Some((path, name)) => (path, name),
+            None => (line.as_str(), line.as_str()),
+        };
+        if path.is_empty() || name.is_empty() {
+            return Err(format!("Line {} of the --file-colors file has an empty path or color name: {:?}", line_idx + 1, line));
+        }
+
+        let color = *name_to_color.entry(name.to_string()).or_insert_with(|| {
+            file_groups.push(Vec::new());
+            color_names.push(name.to_string());
+            color_names.len() - 1
+        });
+        file_groups[color].push(PathBuf::from(path));
+    }
+    Ok((file_groups, color_names))
+}
+
+/// Assigns colors to the sequences of a --seq-colors file, given the color name of each
+/// sequence. Without by_name, each sequence is its own color. With by_name, sequences with the
+/// same name are one color, and colors are numbered in the order their names first appear.
+/// Returns the color of each sequence and the color names.
+fn assign_seq_colors(seq_names: Vec<String>, by_name: bool) -> Result<(Vec<usize>, Vec<String>), String> {
+    if !by_name {
+        return Ok(((0..seq_names.len()).collect(), seq_names));
+    }
+
+    let mut record_colors = Vec::<usize>::with_capacity(seq_names.len());
+    let mut color_names = Vec::<String>::new();
+    let mut name_to_color = std::collections::HashMap::<String, usize>::new();
+    for (seq_idx, name) in seq_names.into_iter().enumerate() {
+        if name.is_empty() {
+            return Err(format!("Sequence {} of the --seq-colors file has an empty color name, which --seq-colors-by-name can not group", seq_idx + 1));
+        }
+        let color = *name_to_color.entry(name).or_insert_with_key(|name| {
+            color_names.push(name.clone());
+            color_names.len() - 1
+        });
+        record_colors.push(color);
+    }
+    Ok((record_colors, color_names))
 }
 
 // Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to disk.
@@ -381,20 +524,18 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     }
 
     if let ColoredSeqInput::FileColors(v) = &input_mode {
-        assert!(v.len() == n_colors as usize, "Number of color names does not match the number of input files");
+        assert!(v.len() == n_colors as usize, "Number of color names does not match the number of input file groups");
     }
 
-    let mut all_input_seq_files = Vec::<PathBuf>::new();
-    match &input_mode {
-        ColoredSeqInput::FileColors(v) => all_input_seq_files.extend(v.clone()),
-        ColoredSeqInput::SequenceColors(file) => all_input_seq_files.push(file.clone()),
-    }
+    log::info!("Initializing DBG");
+    let dbg = Dbg::new(&sbwt, Some(&lcs), n_threads);
 
     log::info!("=== PHASE 1/3: Marking key k-mers ===");
     let key_kmer_marks = {
         let mut phase1_input_stream = input_mode.get_generator();
-        mark_key_kmers(&sbwt, &lcs, sample_distance, &mut phase1_input_stream, n_threads, n_parser_threads, true)
+        mark_key_kmers(&sbwt, &dbg, sample_distance, &mut phase1_input_stream, n_threads, n_parser_threads, true)
     };
+    drop(dbg); // Only needed in phase 1
     log::info!("Marked {:.2} % of all k-mers", key_kmer_marks.count_ones() as f64 / sbwt.n_kmers() as f64 * 100.0);
     assert_eq!(key_kmer_marks.len(), sbwt.n_sets());
 
@@ -434,9 +575,9 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
         },
         BuildMode::ToDisk(out_prefix, n_pieces) => {
             assert!(n_pieces != 0);
-            let input_paths = match &input_mode {
-                ColoredSeqInput::FileColors(path_bufs) => path_bufs,
-                ColoredSeqInput::SequenceColors(_) => {
+            let file_groups = match &input_mode {
+                ColoredSeqInput::FileColors(file_groups) => file_groups,
+                ColoredSeqInput::SequenceColors(..) => {
                     panic!("ToDisk mode with sequence colors is not yet supported");
                     // The issue is that the current code chunks the input files.
                     // It takes some work to translate this behaviour to a single
@@ -446,7 +587,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             let chunk_size = (n_colors as usize).div_ceil(n_pieces);
             if from_unitigs {
                 let mut gens = Vec::<(MsElementGenerator, Range::<usize>)>::new();
-                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
+                for (chunk_id, chunk) in file_groups.chunks(chunk_size).enumerate() {
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors as usize);
                     let gen = Box::new(io::SeqStreamGeneratorFromFiles::new(chunk.to_owned()));
                     let ms_gen = MsElementGenerator::new(gen, StreamingIndex::new(&sbwt, &lcs), true, n_parser_threads);
@@ -455,7 +596,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                 set_of_sets_construction::build_color_set_storage_to_disk::<CSS>(repr_kmer_marks, distinct_set_sizes, gens, &out_prefix, n_threads);
             } else {
                 let mut gens = Vec::<(DeduplicatingColorElementGenerator, Range::<usize>)>::new();
-                for (chunk_id, chunk) in input_paths.chunks(chunk_size).enumerate() {
+                for (chunk_id, chunk) in file_groups.chunks(chunk_size).enumerate() {
                     let color_id_range = chunk_id*chunk_size .. min((chunk_id+1)*chunk_size, n_colors as usize);
                     let gen = Box::new(io::SeqStreamGeneratorFromFiles::new(chunk.to_owned()));
                     let ms_gen = DeduplicatingColorElementGenerator::new(&sbwt, &lcs, gen, true);
@@ -483,6 +624,11 @@ fn load_index_color_names_only(path: &Path) -> Vec<String> {
 fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
     let index = themisto2::load_index(path, build_select).unwrap_or_else(|e| panic!("Could not load index {}: {}", path.display(), e));
     IndexVariant::SparseDenseIndex(index)
+}
+
+/// Loads an index for a query.
+fn load_index_for_query(path: &Path) -> IndexVariant {
+    load_index_variant(path, false) // No select support required
 }
 
 fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
@@ -693,7 +839,8 @@ fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Compact
     log::info!("Finished");
 }
 
-fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, low_ram_mode: bool, sample_distance: usize) {
+#[allow(clippy::too_many_arguments)]
+fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_threads: usize, merge_shared_colors: bool, low_ram_mode: bool, keep_redundant_dummies: bool, sample_distance: usize) {
     let n_rounds = (infiles.len().next_power_of_two()).trailing_zeros() as usize;
     let mut current_files: Vec<PathBuf> = infiles.to_vec();
     for round in 0..n_rounds {
@@ -706,6 +853,9 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 } else {
                     temp_dir.join(format!("merge_round{}_{}.thm2", round, next_files.len()))
                 };
+                // Only the last round removes the redundant dummy nodes: it also removes those kept
+                // in the inputs, so the result is the same, without a cleanup pass in every round
+                let keep_dummies = keep_redundant_dummies || round != n_rounds - 1;
                 log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
                 let mut out = BufWriter::new(File::create(&outpath).unwrap());
                 let colors1 = load_index_variant(&pair[0], true); // Select support is required
@@ -714,7 +864,7 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 match (colors1, colors2) {
                     (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
                         log::info!("Merging sparse-dense indexes");
-                        let merged_colored_kmers = merge::merge_compact_colex_kmers(c1, c2, low_ram_mode, sample_distance, n_threads);
+                        let merged_colored_kmers = merge::merge_compact_colex_kmers(c1, c2, merge_shared_colors, low_ram_mode, keep_dummies, sample_distance, n_threads);
                         log::info!("Serializing merged index to {}", outpath.display());
                         write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
                     },
@@ -827,9 +977,11 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
     let (sbwt, lcs) = if let Some(sbwt_path) = sbwt_path {
         log::info!("Loading SBWT from {}", sbwt_path.display());
         let mut sbwt_in = BufReader::new(File::open(sbwt_path).unwrap());
-        let mut sbwt = match SbwtIndexVariant::load(&mut sbwt_in).unwrap() {
-            sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetMatrix(inner) => inner,
-            sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetCorrectionSets(_inner) => panic!("Subset correction sets SBWT not supported"),
+        // TODO: support other SBWT variants (e.g. SubsetCorrectionSets) instead of only SubsetMatrix.
+        // Themisto is hardcoded to SbwtIndex<SubsetMatrix> throughout, so this needs generics or a conversion.
+        let SbwtIndexVariant::SubsetMatrix(mut sbwt) = SbwtIndexVariant::load(&mut sbwt_in).unwrap() else {
+            log::error!("Only SBWT indexes with the SubsetMatrix subset rank structure are supported");
+            std::process::exit(1);
         };
 
         assert_eq!(sbwt.k(), k);
@@ -848,19 +1000,17 @@ fn get_sbwt_and_lcs(sbwt_path: &Option<PathBuf>, lcs_path: &Option<PathBuf>, tem
     } else {
         log::info!("SBWT not provided -> building the SBWT.");
         let temp_dir = temp_dir.as_ref().expect("Tempory directory not specified (must be specified for SBWT construction)");
-        let (mut sbwt, lcs) = sbwt::BitPackedKmerSortingDisk::new(input_stream, k)
+        let (mut sbwt, lcs) = BitPackedKmerSortingDisk::new(input_stream, k)
             .add_rev_comp(true)
-            .k(k)
             .build_lcs(true)
             .n_threads(n_threads)
-            .precalc_length(8)
             .dedup_batches(true)
             .temp_dir(temp_dir)
-        .run();
+            .run();
         log::info!("Building SBWT select support");
         sbwt.build_select();
         let sbwt = sbwt;
-        let lcs = lcs.unwrap(); // Ok because we used .build_lcs(true)
+        let lcs = lcs.unwrap();
         (sbwt, lcs)
     };
 
@@ -950,7 +1100,7 @@ fn main() -> std::process::ExitCode {
     let args = Cli::parse();
 
     match args.command {
-        Subcommands::Build { color_fof, sequence_colors_file, output, temp_dir, k, n_threads, sample_distance, sbwt_path, lcs_path, from_unitigs, n_pieces, n_parser_threads} => {
+        Subcommands::Build { color_fof, sequence_colors_file, seq_colors_by_name, output, temp_dir, k, n_threads, sample_distance, sbwt_path, lcs_path, from_unitigs, n_pieces, n_parser_threads} => {
             if k % 2 == 0 && from_unitigs {
                 panic!("--from_unitigs requires odd k");
             }
@@ -959,25 +1109,44 @@ fn main() -> std::process::ExitCode {
                 (None, None) => panic!("Must give one of --file-colors or --seq-colors"),
                 (Some(_), Some(_)) => todo!("Must not give both --file-colors and --seq-colors"),
                 (Some(color_fof), None) => {
-                    let input_paths: Vec<PathBuf> = BufReader::new(File::open(color_fof).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-
-                    // Use input paths also as color names
-                    let color_names: Vec<String> = input_paths.iter().map(|p| p.clone().into_os_string().into_string().unwrap()).collect();
-                    (ColoredSeqInput::FileColors(input_paths.clone()), input_paths, color_names)
+                    let (file_groups, color_names) = parse_color_fof(BufReader::new(File::open(color_fof).unwrap())).unwrap_or_else(|e| {
+                        log::error!("{}", e);
+                        panic!("{}", e);
+                    });
+                    if from_unitigs && file_groups.iter().any(|group| group.len() > 1) {
+                        let e = "--from-unitigs requires exactly one file per color, because k-mers of different files of the same color are not deduplicated";
+                        log::error!("{}", e);
+                        panic!("{}", e);
+                    }
+                    let input_paths: Vec<PathBuf> = file_groups.concat();
+                    (ColoredSeqInput::FileColors(file_groups), input_paths, color_names)
                 }
                 (None, Some(sequence_colors_file)) => {
                     // Read color names from the sequence file
                     log::info!("Reading all sequence names from the input file");
-                    let mut color_names = Vec::<String>::new();
+                    let mut seq_names = Vec::<String>::new();
                     let mut reader = needletail::parse_fastx_file(&sequence_colors_file).unwrap();
                     while let Some(rec) = reader.next() {
                         let rec = rec.unwrap();
                         let id = rec.id();
                         let name = id.split(|&b| b == b' ').next().unwrap_or(id);
-                        color_names.push(String::from_utf8(name.to_owned()).unwrap());
+                        seq_names.push(String::from_utf8(name.to_owned()).unwrap());
                     }
-                    log::info!("Read {} sequences", color_names.len());
-                    (ColoredSeqInput::SequenceColors(sequence_colors_file.clone()), vec![sequence_colors_file], color_names)
+                    log::info!("Read {} sequences", seq_names.len());
+                    let n_seqs = seq_names.len();
+                    let (record_colors, color_names) = assign_seq_colors(seq_names, seq_colors_by_name).unwrap_or_else(|e| {
+                        log::error!("{}", e);
+                        panic!("{}", e);
+                    });
+                    if seq_colors_by_name {
+                        log::info!("Grouped {} sequences into {} colors by name", n_seqs, color_names.len());
+                    }
+                    if from_unitigs && color_names.len() < n_seqs {
+                        let e = "--from-unitigs requires exactly one sequence per color, because k-mers of different sequences of the same color are not deduplicated";
+                        log::error!("{}", e);
+                        panic!("{}", e);
+                    }
+                    (ColoredSeqInput::SequenceColors(sequence_colors_file.clone(), record_colors), vec![sequence_colors_file], color_names)
                 },
             };
 
@@ -1005,7 +1174,7 @@ fn main() -> std::process::ExitCode {
 
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, themisto1_output_format, output, positive_reads_only} => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path, false); // No select support required
+            let index = load_index_for_query(&index_path);
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_settings = resolve_output_settings(themisto1_output_format, positive_reads_only, &metrics);
 
@@ -1026,7 +1195,7 @@ fn main() -> std::process::ExitCode {
         },
         Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, themisto1_output_format, output, positive_reads_only} => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path, false); // No select support required
+            let index = load_index_for_query(&index_path);
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_settings = resolve_output_settings(themisto1_output_format, positive_reads_only, &metrics);
             let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
@@ -1044,7 +1213,7 @@ fn main() -> std::process::ExitCode {
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers, output } => {
             log::info!("Loading index");
-            let index = load_index_variant(&index_path, false); // No select support required
+            let index = load_index_for_query(&index_path);
             let out = open_output(output);
             match index {
                 IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
@@ -1057,9 +1226,71 @@ fn main() -> std::process::ExitCode {
             log::info!("Dumping color names");
             print_color_names(&color_names, out);
         },
-        Subcommands::Merge { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, sample_distance } => {
+        Subcommands::Merge { index_file_list, temp_dir, outfile, n_threads, low_ram_mode, merge_shared_colors, keep_redundant_dummies, sample_distance } => {
             let infiles: Vec<PathBuf> = BufReader::new(File::open(index_file_list).unwrap()).lines().map(|f| PathBuf::from(f.unwrap())).collect();
-            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, low_ram_mode, sample_distance);
+            run_merge_tree(&infiles, &temp_dir, &outfile, n_threads, merge_shared_colors, low_ram_mode, keep_redundant_dummies, sample_distance);
+        },
+        Subcommands::Intersect { index1, index2, outfile, colors, merge_shared_colors, sample_distance, n_threads, low_ram_mode } => {
+            if merge_shared_colors && colors != intersect::IntersectColors::Union {
+                log::warn!("--merge-shared-colors has no effect with --colors {:?}: colors are always matched by name", colors);
+            }
+            let mut out = BufWriter::new(File::create(&outfile).unwrap());
+            let colors1 = load_index_variant(&index1, true); // Select support is required
+            let colors2 = load_index_variant(&index2, true); // Select support is required
+            match (colors1, colors2) {
+                (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
+                    log::info!("Intersecting {} and {}", index1.display(), index2.display());
+                    let result = intersect::intersect_compact_colex_kmers(c1, c2, colors, merge_shared_colors, low_ram_mode, sample_distance, n_threads);
+                    log::info!("Serializing intersection to {}", outfile.display());
+                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
+                },
+            }
+        },
+        Subcommands::Subset { index, outfile, colors, colors_file, complement, keep_all_colors, sample_distance, n_threads, low_ram_mode } => {
+            let mut names = colors;
+            if let Some(colors_file) = colors_file {
+                let content = std::fs::read_to_string(&colors_file).unwrap_or_else(|e| {
+                    log::error!("Could not read {}: {}", colors_file.display(), e);
+                    std::process::exit(1);
+                });
+                names.extend(content.lines().map(|line| line.trim().to_string()).filter(|line| !line.is_empty()));
+            }
+            if names.is_empty() {
+                log::error!("No colors given: use --colors or --colors-file");
+                std::process::exit(1);
+            }
+            match load_index_variant(&index, true) { // Select support is required
+                IndexVariant::SparseDenseIndex(coloring) => {
+                    let color_names = coloring.get_color_names();
+                    // Sets of the names, so that matching them takes time linear in the number of
+                    // names: with lists, keeping 108,930 of the 121,034 colors of an index took 46 s
+                    let index_names: std::collections::HashSet<&str> = color_names.iter().map(|name| name.as_str()).collect();
+                    if let Some(unknown) = names.iter().find(|name| !index_names.contains(name.as_str())) {
+                        log::error!("The index has no color named {:?}", unknown);
+                        std::process::exit(1);
+                    }
+                    let kept_names: std::collections::HashSet<&str> = names.iter().map(|name| name.as_str()).collect();
+                    let kept_colors: Vec<bool> = color_names.iter().map(|name| kept_names.contains(name.as_str()) != complement).collect();
+                    log::info!("Taking the subset of {} for {} of its {} colors{}", index.display(), kept_colors.iter().filter(|&&kept| kept).count(), kept_colors.len(), if keep_all_colors { ", keeping all colors of its k-mers" } else { "" });
+                    let mut out = BufWriter::new(File::create(&outfile).unwrap());
+                    let result = subset::subset_compact_colex_kmers(coloring, &kept_colors, keep_all_colors, low_ram_mode, sample_distance, n_threads);
+                    log::info!("Serializing subset to {}", outfile.display());
+                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
+                },
+            }
+        },
+        Subcommands::Difference { index1, index2, outfile, sample_distance, n_threads, low_ram_mode } => {
+            let mut out = BufWriter::new(File::create(&outfile).unwrap());
+            let colors1 = load_index_variant(&index1, true); // Select support is required
+            let colors2 = load_index_variant(&index2, false);
+            match (colors1, colors2) {
+                (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
+                    log::info!("Subtracting {} from {}", index2.display(), index1.display());
+                    let result = difference::difference_compact_colex_kmers(c1, c2, low_ram_mode, sample_distance, n_threads);
+                    log::info!("Serializing difference to {}", outfile.display());
+                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
+                },
+            }
         },
         Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
@@ -1096,9 +1327,10 @@ fn main() -> std::process::ExitCode {
         Subcommands::ImportSbwt { sbwt_path, lcs_path, output, sample_distance, n_threads, color_name } => {
             log::info!("Loading SBWT from {}", sbwt_path.display());
             let mut sbwt_in = BufReader::new(File::open(&sbwt_path).unwrap());
-            let mut sbwt = match SbwtIndexVariant::load(&mut sbwt_in).unwrap() {
-                sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetMatrix(inner) => inner,
-                sbwt::sbwt_index_variant::SbwtIndexVariant::SubsetCorrectionSets(_inner) => panic!("Subset correction sets SBWT not supported"),
+            // TODO: support other SBWT variants, see get_sbwt_and_lcs
+            let SbwtIndexVariant::SubsetMatrix(mut sbwt) = SbwtIndexVariant::load(&mut sbwt_in).unwrap() else {
+                log::error!("Only SBWT indexes with the SubsetMatrix subset rank structure are supported");
+                std::process::exit(1);
             };
 
             log::info!("Building select support for SBWT");
@@ -1167,4 +1399,85 @@ fn main() -> std::process::ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_parse_color_fof() {
+        let fof = "a.fna\nb.fna\tX\n\nc.fna\tY\nd.fna\tX\na.fna\n";
+        let (groups, names) = super::parse_color_fof(fof.as_bytes()).unwrap();
+        assert_eq!(names, vec!["a.fna", "X", "Y"]);
+        let paths = |v: &[&str]| -> Vec<PathBuf> { v.iter().map(PathBuf::from).collect() };
+        assert_eq!(groups, vec![paths(&["a.fna", "a.fna"]), paths(&["b.fna", "d.fna"]), paths(&["c.fna"])]);
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_assign_seq_colors_duplicate_names_collapse() {
+        let (colors, color_names) = super::assign_seq_colors(names(&["chr1", "chr1", "chr1", "chr2", "chr2"]), true).unwrap();
+        assert_eq!(colors, vec![0, 0, 0, 1, 1]);
+        assert_eq!(color_names, names(&["chr1", "chr2"]));
+    }
+
+    #[test]
+    fn test_assign_seq_colors_distinct_names() {
+        // With distinct names, grouping by name gives the same colors as one color per sequence
+        for by_name in [false, true] {
+            let (colors, color_names) = super::assign_seq_colors(names(&["a", "b", "c"]), by_name).unwrap();
+            assert_eq!(colors, vec![0, 1, 2]);
+            assert_eq!(color_names, names(&["a", "b", "c"]));
+        }
+    }
+
+    #[test]
+    fn test_assign_seq_colors_mixed() {
+        let (colors, color_names) = super::assign_seq_colors(names(&["x", "y", "x", "z", "y", "w", "x"]), true).unwrap();
+        assert_eq!(colors, vec![0, 1, 0, 2, 1, 3, 0]);
+        assert_eq!(color_names, names(&["x", "y", "z", "w"]));
+    }
+
+    #[test]
+    fn test_assign_seq_colors_without_by_name_keeps_one_color_per_sequence() {
+        let (colors, color_names) = super::assign_seq_colors(names(&["chr1", "chr1", "chr2"]), false).unwrap();
+        assert_eq!(colors, vec![0, 1, 2]);
+        assert_eq!(color_names, names(&["chr1", "chr1", "chr2"]));
+    }
+
+    #[test]
+    fn test_assign_seq_colors_single_sequence() {
+        for by_name in [false, true] {
+            let (colors, color_names) = super::assign_seq_colors(names(&["only"]), by_name).unwrap();
+            assert_eq!(colors, vec![0]);
+            assert_eq!(color_names, names(&["only"]));
+        }
+    }
+
+    #[test]
+    fn test_assign_seq_colors_all_same_name() {
+        let (colors, color_names) = super::assign_seq_colors(names(&["s", "s", "s", "s"]), true).unwrap();
+        assert_eq!(colors, vec![0, 0, 0, 0]);
+        assert_eq!(color_names, names(&["s"]));
+    }
+
+    #[test]
+    fn test_assign_seq_colors_empty_name() {
+        // Grouping would silently merge all unnamed sequences into one color, so it is an error
+        assert!(super::assign_seq_colors(names(&["a", "", "a"]), true).is_err());
+        // Without grouping, unnamed sequences are still accepted, one color each
+        let (colors, color_names) = super::assign_seq_colors(names(&["", ""]), false).unwrap();
+        assert_eq!(colors, vec![0, 1]);
+        assert_eq!(color_names, names(&["", ""]));
+    }
+
+    #[test]
+    fn test_parse_color_fof_rejects_empty_fields() {
+        assert!(super::parse_color_fof("a.fna\t\n".as_bytes()).is_err());
+        assert!(super::parse_color_fof("\tX\n".as_bytes()).is_err());
+    }
 }

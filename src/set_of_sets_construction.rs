@@ -158,6 +158,9 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
     log_memory_usage();
     let mut color_set_id = 0_usize;
     let mut fp_run_start = 0_usize;
+    // Within a run of equal (fp1, fp2), the third word is ascending, so a run's first entry
+    // always has the smallest colex in the run.
+    let mut run_start_colex = 0_u64;
     for fp_idx in 0..n_key_kmers {
         let cur_fp = (sfs[fp_idx*3 + 0], sfs[fp_idx*3 + 1]); // this also includes the 8 MSB bits of the set size -> is ok.
         let size = ((sfs[fp_idx*3 + 1] & 0xFF) << 24) | (sfs[fp_idx*3 + 2] & 0xFFFFFF);
@@ -171,17 +174,16 @@ pub fn find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give
         sfs[fp_idx*2 + 1] = (color_set_id as u64) << 24 ; // 40 bits
         sfs[fp_idx*2 + 1] |= size & 0xFFFFFF ; // 24 bits
 
+        if fp_idx == fp_run_start {
+            run_start_colex = colex;
+        }
+
         if fp_idx + 1 == n_key_kmers || cur_fp != (sfs[(fp_idx+1)*3 + 0], sfs[(fp_idx+1)*3 + 1]) {
-            // End of fingerprint run
-            let fp_run_end = fp_idx + 1; // Exclusive
-            let mut min_colex = usize::MAX;
-            for i in fp_run_start..fp_run_end {
-                min_colex = std::cmp::min(min_colex, sfs[i*2 + 0] as usize >> 8);
-            }
-            sufficient_kmer_marks.set(min_colex, true);
+            // End of fingerprint run. The run's first entry is its representative.
+            sufficient_kmer_marks.set(run_start_colex as usize, true);
 
             color_set_id += 1;
-            fp_run_start = fp_run_end;
+            fp_run_start = fp_idx + 1;
         }
     }
     let n_distinct_sets = color_set_id;

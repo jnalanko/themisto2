@@ -107,10 +107,8 @@ impl<'a> FirstLastKmerWorker<'a> {
 // IMPORTANT: currently assumes that the input `seqs` are all found in the SBWT.
 // If not, we would need to search all of them and first the first and last k-mer of
 // each run of matches to the index. TODO.
-pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, seq_stream_gen: &mut Box<dyn RewindableSeqStreamGenerator + Sync + Send>, n_threads: usize, n_parser_threads: usize, add_rev_comp: bool) -> bitvec::vec::BitVec {
+pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, dbg: &Dbg<SubsetMatrix>, sample_distance: usize, seq_stream_gen: &mut Box<dyn RewindableSeqStreamGenerator + Sync + Send>, n_threads: usize, n_parser_threads: usize, add_rev_comp: bool) -> bitvec::vec::BitVec {
 
-    log::info!("Initializing DBG");
-    let dbg = Dbg::new(sbwt, Some(lcs), n_threads);
     let marks = AtomicBitmap::new(sbwt.n_sets());
 
     log::info!("Searching first and last k-mer of every input sequence");
@@ -119,7 +117,7 @@ pub fn mark_key_kmers(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_dis
         rev_comp_buf: vec![],
         k: sbwt.k(),
         sbwt,
-        dbg: &dbg,
+        dbg,
         marks: &marks,
         add_rev_comp
     }).collect();
@@ -700,8 +698,6 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
             return;
         }
 
-        let si = sbwt::StreamingIndex::new(&self.sbwt, &self.lcs);
-
         #[derive(Eq, PartialEq, Debug)]
         enum ColorId { // Contains colex rank in the value, if exists
             Sampled(usize),
@@ -711,19 +707,16 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let mut colex_positions = Vec::<ColorId>::with_capacity(seq.len()-k+1);
 
+        let color_id = |colex: Option<usize>| match colex {
+            Some(colex) if self.map.sampling.get(colex) => ColorId::Sampled(colex),
+            Some(colex) => ColorId::SameAsNext(colex),
+            None => ColorId::AbsentKmer,
+        };
+
         // Pass 1: Compute colex ranks and whether the k-mers are sampled
-        for (len, range) in si.matching_statistics_iter(seq).skip(k-1) {
-            if len == k {
-                assert!(range.len() == 1);
-                let colex = range.start;
-                if self.map.sampling.get(colex) {
-                    colex_positions.push(ColorId::Sampled(colex));
-                } else {
-                    colex_positions.push(ColorId::SameAsNext(colex));
-                }
-            } else {
-                colex_positions.push(ColorId::AbsentKmer);
-            }
+        for (len, range) in sbwt::StreamingIndex::new(&self.sbwt, &self.lcs).matching_statistics_iter(seq).skip(k-1) {
+            assert!(len < k || range.len() == 1);
+            colex_positions.push(color_id((len == k).then_some(range.start)));
         }
 
         // Pass 2: look up set ids right-to-left, reusing set ids for the next k-mer whenever possible
@@ -774,6 +767,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         &self.sets
     }
 
+    #[allow(dead_code)]
     pub fn get_color_names(&self) -> &Vec<String> {
         &self.color_names
     }

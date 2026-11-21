@@ -28,6 +28,7 @@ pub use index_file::{Index, load_index, read_index, load_color_names, write_inde
 
 pub mod colored_dbg;
 pub mod index_file;
+pub mod set_operations;
 
 // Internals. Public so that the themisto2 binary can use them, but hidden from the docs.
 #[doc(hidden)] pub mod EM;
@@ -45,7 +46,6 @@ pub mod index_file;
 #[doc(hidden)] pub mod int_vec;
 #[doc(hidden)] pub mod finimizers;
 #[doc(hidden)] pub mod util;
-#[doc(hidden)] pub mod merge;
 #[doc(hidden)] pub mod pseudoalignment;
 #[doc(hidden)] pub mod pseudoalignment_metrics;
 #[doc(hidden)] pub mod sparse_dense_storage_to_disk;

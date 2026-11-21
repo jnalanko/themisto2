@@ -1,10 +1,9 @@
-use std::{collections::HashSet, ops::Range, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use sbwt::{LcsArray, MergeInterleaving, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
+use sbwt::{LcsArray, SbwtIndex, SeqStream, StreamingIndex, SubsetMatrix, reverse_complement_in_place};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{io::{self, RewindableSeqStreamGenerator}, set_of_sets_construction::SetElement};
 
 pub struct MsElementGenerator<'a> {
     color_stream_generator: Box<dyn RewindableSeqStreamGenerator + Sync + Send>,
@@ -341,104 +340,6 @@ impl<'a> crate::set_of_sets_construction::ParallelElementGenerator for Deduplica
     }
 }
 
-pub struct ElementGeneratorFromMergeInterleaving<'a, CSS: ColorSetStorage + Sync + Send> {
-    pub interleaving: &'a MergeInterleaving,
-    pub coloring1: &'a CompactColexKmers<CSS>,
-    pub coloring2: &'a CompactColexKmers<CSS>,
-    pub merged_key_kmer_marks: &'a bitvec::vec::BitVec, // Only reporting set elements for these
-    pub filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, // With rank support
-}
-
-struct ThreadInput {
-    merged_range: Range<usize>,
-    s1_start_rank: usize,
-    s2_start_rank: usize,
-} 
-
-impl<'a, CSS: ColorSetStorage + Sync + Send> ElementGeneratorFromMergeInterleaving<'a, CSS> {
-    fn maybe_apply_filter(&self, merged_colex: usize) -> Option<usize> {
-        if let Some(filter) = &self.filter {
-            if !filter.get(merged_colex) {
-                None // Do not report this
-            } else {
-                // Assign new id
-                let new_id = filter.rank(merged_colex);
-                Some(new_id)
-            }
-        } else {
-            Some(merged_colex) // No filter
-        }
-    }
-}
-
-impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for ElementGeneratorFromMergeInterleaving<'a, CSS> {
-
-
-    fn run(&mut self, callback: impl Fn(SetElement) + Send + Sync, n_threads: usize) {
-        assert!(self.interleaving.s1.len() == self.interleaving.s2.len());
-        let n = self.interleaving.s1.len();
-
-        let s1 = &self.interleaving.s1;
-        let s2 = &self.interleaving.s2;
-
-        let thread_ranges = crate::util::segment_range(0..n, n_threads);
-        let mut thread_inputs = Vec::<ThreadInput>::with_capacity(n_threads);
-
-        let mut n_bits_s1 = 0_usize;
-        let mut n_bits_s2 = 0_usize;
-        for range in thread_ranges.iter() {
-            let input = ThreadInput {
-                merged_range: range.clone(),
-                s1_start_rank: n_bits_s1,
-                s2_start_rank: n_bits_s2,
-            };
-            thread_inputs.push(input);
-            n_bits_s1 += s1[range.clone()].count_ones();
-            n_bits_s2 += s2[range.clone()].count_ones();
-        }
-
-        let bar = indicatif::ProgressBar::new(n as u64);
-        thread_inputs.into_par_iter().for_each(|input| {
-            let mut s1_colex = input.s1_start_rank;
-            let mut s2_colex = input.s2_start_rank;
-            let offset_for_colors_from_2 = self.coloring1.get_set_storage().n_colors();
-            for merged_colex in input.merged_range {
-                if merged_colex > 0 && merged_colex % 10000 == 0 {
-                    bar.inc(10000);
-                }
-                if self.merged_key_kmer_marks[merged_colex] {
-                    if self.interleaving.s1[merged_colex] {
-                        for color in self.coloring1.colex_to_set(s1_colex).iter() {
-                            if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
-                                callback(SetElement{set_id: new_set_id, color});
-                            }
-                        }
-                    }
-
-                    if self.interleaving.s2[merged_colex] {
-                        for color in self.coloring2.colex_to_set(s2_colex).iter() {
-                            if let Some(new_set_id) = self.maybe_apply_filter(merged_colex) {
-                                callback(SetElement{set_id: new_set_id, color: color + offset_for_colors_from_2});
-                            }
-                        }
-                    }
-                }
-                s1_colex += self.interleaving.s1[merged_colex] as usize;
-                s2_colex += self.interleaving.s2[merged_colex] as usize;
-            }
-        });
-        bar.finish();
-    }
-
-    fn set_filter(&mut self, filter: Arc<simple_sds_sbwt::bit_vector::BitVector>) {
-        self.filter = Some(filter.clone());
-    }
-
-    fn rewind(&mut self) {
-        // Nothing needs to done, calling run() again already works
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use sbwt::{BitPackedKmerSortingMem, SeqStream, StreamingIndex, reverse_complement_in_place};
@@ -514,7 +415,7 @@ mod tests {
         let seq0: &[u8] = b"ACGCG";
         let seq1: &[u8] = b"TTTGGG";
 
-        let (sbwt, lcs) = sbwt::BitPackedKmerSortingMem::new_from_slices(&[seq0, seq1], k)
+        let (sbwt, lcs) = BitPackedKmerSortingMem::new_from_slices(&[seq0, seq1], k)
             .add_rev_comp(true)
             .build_lcs(true)
             .run();

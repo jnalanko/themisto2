@@ -35,6 +35,14 @@ pub(crate) fn bitvec_to_simple_sds_bitvec(bv: bitvec::vec::BitVec) -> simple_sds
     simple_sds_sbwt::bit_vector::BitVector::from(bitvec_to_simple_sds_raw_bitvec(bv))
 }
 
+/// A copy of a bit vector with u64 words (the type of the bit vectors of sbwt, e.g. of a merge
+/// interleaving) as a simple-sds bit vector.
+pub(crate) fn u64_bitvec_to_simple_sds(bv: &bitvec::vec::BitVec<u64, bitvec::order::Lsb0>) -> simple_sds_sbwt::bit_vector::BitVector {
+    let mut copy = bitvec::vec::BitVec::<usize, bitvec::order::Lsb0>::from_vec(bv.as_raw_slice().iter().map(|&w| w as usize).collect());
+    copy.truncate(bv.len());
+    bitvec_to_simple_sds_bitvec(copy)
+}
+
 #[allow(dead_code)]
 pub struct VecVecSeqStream{
     vv: Vec<Vec<u8>>,
