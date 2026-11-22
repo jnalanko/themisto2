@@ -97,7 +97,7 @@ A Themisto 2 index is a directory with one file per component. Each subcommand l
 |---|---|---|
 | `metadata.json` | Format version, k, number of k-mers and colors, whether both orientations of the k-mers are included | every subcommand |
 | `kmers.sbwt` | The SBWT of the k-mers, in the format of [sbwt-rs-cli](https://github.com/jnalanko/sbwt-rs-cli) | all but `dump-color-names` and `report` |
-| `kmers.lcs` | The LCS array of the SBWT | `finimizer-stats`, `minimizer-stats` |
+| `kmers.lcs` | The LCS array of the SBWT | no subcommand currently |
 | `kmers.sufgroups` | The (k-1)-suffix group marks of the SBWT | pseudoalignment, `print-color-sets`, `export`, `stats`, set operations |
 | `kmers.dummymarks` | The marks of the dummy k-mers of the SBWT | `export`, `stats`, set operations |
 | `colors.names` | The color names, one per line | everything that uses colors, including `dump-color-names` and `report` |

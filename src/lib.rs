@@ -47,7 +47,6 @@ pub mod set_operations;
 #[doc(hidden)] pub mod parallel_ms_iteration;
 #[doc(hidden)] pub mod atomic_bitmap;
 #[doc(hidden)] pub mod int_vec;
-#[doc(hidden)] pub mod finimizers;
 #[doc(hidden)] pub mod util;
 #[doc(hidden)] pub mod pseudoalignment;
 #[doc(hidden)] pub mod pseudoalignment_metrics;

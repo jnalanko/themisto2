@@ -2,7 +2,7 @@
 
 use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
-use colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex};
+use colex_colored_kmers::{Coloring, DbgIndex};
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
@@ -10,7 +10,7 @@ use sbwt::{BitPackedKmerSortingDisk, LcsArray, SbwtIndex, StreamingIndex, Subset
 use simple_sds_sbwt::ops::{BitVec, Rank};
 use sparse_dense_storage::SparseDenseStorage;
 
-use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, finimizers, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
+use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
 use themisto2::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
 use themisto2::set_operations::{difference, intersect, merge, subset};
 use themisto2::{Component, IndexDir, IndexWriter, PseudoalignmentIndex};
@@ -396,26 +396,6 @@ pub enum Subcommands {
 
         #[arg(help = "File with one color id (integer) per line. A read is kept if its pseudoalignment matches at least one of these colors.", long = "color-ids", short = 'c', required = true)]
         color_ids: PathBuf,
-    },
-
-    #[command(arg_required_else_help = true, hide = true)]
-    FinimizerStats {
-        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "n-threads", short = 't', default_value = "4")]
-        n_threads: usize,
-    },
-    #[command(arg_required_else_help = true, hide = true)]
-    MinimizerStats {
-        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
-        index: PathBuf,
-
-        #[arg(long = "minimizer-length", short = 'm', required = true)]
-        m: usize,
-
-        #[arg(long = "n-threads", short = 't', default_value = "4")]
-        n_threads: usize,
     },
 }
 
@@ -1349,22 +1329,6 @@ fn main() -> std::process::ExitCode {
         },
         Subcommands::FilterReads { pseudoalignment, reads, output, color_ids } => {
             return filter_reads::filter_reads(&pseudoalignment, &reads, &output, &color_ids);
-        },
-        Subcommands::FinimizerStats { index: index_path, n_threads} => {
-            // Hidden subcommand, might be deleted at any moment
-            let index_dir = open_index(&index_path, &[Component::Sbwt, Component::Lcs, Component::ColorNames, Component::ColorSampling, Component::ColorStorage]);
-            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for verify
-            let lcs = or_exit(index_dir.load_lcs());
-            let coloring = or_exit(index_dir.load_coloring());
-            finimizers::minimizer_stats(&ColoredKmers::new(&sbwt, &coloring), &lcs, n_threads, finimizers::MinimizerType::Finimizer);
-        },
-        Subcommands::MinimizerStats { index: index_path, n_threads, m} => {
-            // Hidden subcommand, might be deleted at any moment
-            let index_dir = open_index(&index_path, &[Component::Sbwt, Component::Lcs, Component::ColorNames, Component::ColorSampling, Component::ColorStorage]);
-            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for verify
-            let lcs = or_exit(index_dir.load_lcs());
-            let coloring = or_exit(index_dir.load_coloring());
-            finimizers::minimizer_stats(&ColoredKmers::new(&sbwt, &coloring), &lcs, n_threads, finimizers::MinimizerType::Minimizer(m));
         },
     }
 
