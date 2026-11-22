@@ -1,15 +1,16 @@
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
-use crate::set_operations::{color_sets::ColorCombination, pipeline::{set_operation, SbwtOperation}};
+use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
+use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use crate::set_operations::{color_sets::ColorCombination, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
-/// Subtracts the second colored index from the first: the result has the k-mers of the first index
-/// that are not in the second. No k-mer of the result is in the second index, so each k-mer keeps
+/// Subtracts the k-mers of the SBWT `sbwt2` from the first colored index: the result has the k-mers
+/// of the first index that are not in `sbwt2`. Only the SBWT of the second index is needed. No k-mer of the result is in the second index, so each k-mer keeps
 /// its color set of the first index, and the result has the colors of the first index, with the
 /// same ids (also colors that no k-mer of the result has anymore).
 ///
 /// The SBWT of the first index needs select support.
-pub fn difference_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn difference_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, sbwt2: SbwtIndex<SubsetMatrix>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
     let result_color_names = coloring1.get_color_names().to_vec();
-    set_operation(coloring1, coloring2, SbwtOperation::Difference, ColorCombination::FromFirst { color1_to_result: None }, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+    set_operation(coloring1, SecondInput::SbwtOnly(sbwt2), SbwtOperation::Difference, ColorCombination::FromFirst { color1_to_result: None }, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
 }
 
 #[cfg(test)]
@@ -38,7 +39,7 @@ mod tests {
             expected.push((kmer, ccc1.colex_to_set(colex1).iter().collect()));
         }
 
-        let result = super::difference_compact_colex_kmers(ccc1, ccc2, true, sample_distance, n_threads);
+        let result = super::difference_compact_colex_kmers(ccc1, ccc2.sbwt, true, sample_distance, n_threads).0;
         assert_eq!(result.get_color_names(), &names1);
         assert_eq!(result.get_set_storage().n_colors(), names1.len());
         assert_eq!(result.sbwt().n_kmers(), expected.len());

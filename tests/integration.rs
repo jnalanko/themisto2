@@ -20,8 +20,26 @@ fn tmp_dir() -> PathBuf {
     let dir = PathBuf::from(PROJECT_DIR)
         .join("temp")
         .join(format!("integration-test-{}", id));
+    // Start empty: an index is not written into a non-empty directory
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// The contents of all files of the index directory `index`, in file name order, for comparing
+/// indexes byte by byte.
+fn read_index(index: &PathBuf) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(index).unwrap_or_else(|e| panic!("Could not read index {}: {}", index.display(), e))
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name().into_string().unwrap(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    files.sort();
+    assert!(files.iter().any(|(name, _)| name == "metadata.json"), "{} has no metadata.json", index.display());
+    files
 }
 
 fn themisto2() -> Command {
@@ -42,8 +60,8 @@ fn file_colors_and_seq_colors_single_seq_per_color_produce_same_index() {
     std::fs::create_dir_all(&tmp1).unwrap();
     std::fs::create_dir_all(&tmp2).unwrap();
 
-    let index1 = dir.join("file_colors.thm2");
-    let index2 = dir.join("seq_colors.thm2");
+    let index1 = dir.join("file_colors");
+    let index2 = dir.join("seq_colors");
 
     let status = themisto2()
         .args(["build", "--file-colors", "tests/data/fof.txt", "--temp-dir"])
@@ -63,8 +81,8 @@ fn file_colors_and_seq_colors_single_seq_per_color_produce_same_index() {
         .unwrap();
     assert!(status.success(), "--seq-colors build failed");
 
-    let bytes1 = std::fs::read(&index1).unwrap();
-    let bytes2 = std::fs::read(&index2).unwrap();
+    let bytes1 = read_index(&index1);
+    let bytes2 = read_index(&index2);
     assert_eq!(bytes1, bytes2, "Indexes built with --file-colors and --seq-colors differ");
 }
 
@@ -74,7 +92,7 @@ fn file_colors_with_grouped_files_match_concatenated_files() {
     let build = |fof: &PathBuf, name: &str| -> PathBuf {
         let tmp = dir.join(format!("{}-tmp", name));
         std::fs::create_dir_all(&tmp).unwrap();
-        let index = dir.join(format!("{}.thm2", name));
+        let index = dir.join(name);
         let status = themisto2()
             .args(["build", "--file-colors"]).arg(fof)
             .args(["--temp-dir"]).arg(&tmp)
@@ -103,7 +121,7 @@ fn file_colors_with_grouped_files_match_concatenated_files() {
     assert!(names.status.success());
     assert_eq!(String::from_utf8(names.stdout).unwrap(), "0\tAB\n1\tC\n");
 
-    assert_eq!(std::fs::read(&grouped).unwrap(), std::fs::read(&concatenated).unwrap(),
+    assert_eq!(read_index(&grouped), read_index(&concatenated),
         "Index with grouped files differs from index with concatenated files");
 }
 
@@ -113,7 +131,7 @@ fn seq_colors_by_name_match_file_colors_with_grouped_files() {
     let build = |args: &[&str], name: &str| -> PathBuf {
         let tmp = dir.join(format!("{}-tmp", name));
         std::fs::create_dir_all(&tmp).unwrap();
-        let index = dir.join(format!("{}.thm2", name));
+        let index = dir.join(name);
         let status = themisto2()
             .arg("build").args(args)
             .args(["--temp-dir"]).arg(&tmp)
@@ -134,7 +152,7 @@ fn seq_colors_by_name_match_file_colors_with_grouped_files() {
     assert!(names.status.success());
     assert_eq!(String::from_utf8(names.stdout).unwrap(), "0\tAB\n1\tC\n");
 
-    assert_eq!(std::fs::read(&by_name).unwrap(), std::fs::read(&grouped).unwrap(),
+    assert_eq!(read_index(&by_name), read_index(&grouped),
         "Index with --seq-colors-by-name differs from index with grouped --file-colors");
 
     // Without --seq-colors-by-name, each sequence is still its own color
@@ -158,7 +176,7 @@ fn seq_colors_by_name_rejects_non_consecutive_names() {
     let output = themisto2()
         .args(["build", "--seq-colors"]).arg(&non_consecutive).arg("--seq-colors-by-name")
         .args(["--temp-dir"]).arg(&dir)
-        .args(["-k", "3", "-t", "1", "-o"]).arg(dir.join("index.thm2"))
+        .args(["-k", "3", "-t", "1", "-o"]).arg(dir.join("index"))
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -170,10 +188,10 @@ fn from_unitigs_allows_colors_with_several_inputs() {
     // With k = 11, no k-mer occurs twice within a color of these inputs (in either orientation),
     // so --from-unitigs must give the same index as the deduplicating construction
     let dir = tmp_dir();
-    let build = |args: &[&str], name: &str| -> Vec<u8> {
+    let build = |args: &[&str], name: &str| -> Vec<(String, Vec<u8>)> {
         let tmp = dir.join(format!("{}-tmp", name));
         std::fs::create_dir_all(&tmp).unwrap();
-        let index = dir.join(format!("{}.thm2", name));
+        let index = dir.join(name);
         let status = themisto2()
             .arg("build").args(args)
             .args(["--temp-dir"]).arg(&tmp)
@@ -181,7 +199,7 @@ fn from_unitigs_allows_colors_with_several_inputs() {
             .status()
             .unwrap();
         assert!(status.success(), "build of {} failed", name);
-        std::fs::read(&index).unwrap()
+        read_index(&index)
     };
     let inputs: [(&[&str], &str); 2] = [
         (&["--file-colors", "tests/data/fof-grouped.txt"], "files"),
@@ -209,7 +227,7 @@ fn pseudoalign_example_data() {
     let tmp = dir.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
 
-    let index = dir.join("index.thm2");
+    let index = dir.join("index");
 
     let status = themisto2()
         .args(["build", "--file-colors", "example/fof.txt", "--temp-dir"])
@@ -488,7 +506,7 @@ fn build_sbwt_file(fasta_path: &PathBuf, sbwt_path: &PathBuf, k: usize) {
 fn import_sbwt_builds_single_colored_index() {
     let dir = tmp_dir();
     let sbwt_path = dir.join("input.sbwt");
-    let index_path = dir.join("single.thm2");
+    let index_path = dir.join("single");
     let query_file = "example/C1.fna";
     let color_name = "my_color";
 
@@ -535,7 +553,7 @@ fn merged_single_colored_indexes_match_normal_build() {
     for fname in ["C1.fna", "C2.fna"] {
         let fasta = PathBuf::from(PROJECT_DIR).join("example").join(fname);
         let sbwt = dir.join(format!("{}.sbwt", fname));
-        let index = dir.join(format!("{}.thm2", fname));
+        let index = dir.join(fname);
         build_sbwt_file(&fasta, &sbwt, k);
 
         // The normal build uses the input path string as the color name, so
@@ -565,7 +583,7 @@ fn merged_single_colored_indexes_match_normal_build() {
     }
     let merge_temp = dir.join("merge_temp");
     std::fs::create_dir_all(&merge_temp).unwrap();
-    let merged_index = dir.join("merged.thm2");
+    let merged_index = dir.join("merged");
     let status = themisto2()
         .args(["merge", "--index-file-list"]).arg(&index_list)
         .args(["--temp-dir"]).arg(&merge_temp)
@@ -580,7 +598,7 @@ fn merged_single_colored_indexes_match_normal_build() {
     write_file(&fof, "example/C1.fna\nexample/C2.fna\n");
     let normal_temp = dir.join("normal_temp");
     std::fs::create_dir_all(&normal_temp).unwrap();
-    let normal_index = dir.join("normal.thm2");
+    let normal_index = dir.join("normal");
     let status = themisto2()
         .args(["build", "--file-colors"]).arg(&fof)
         .args(["--temp-dir"]).arg(&normal_temp)
@@ -646,7 +664,7 @@ fn report_smoke_test() {
     std::fs::create_dir_all(&tmp).unwrap();
 
     // Build a small index with 3 colors.
-    let index = dir.join("index.thm2");
+    let index = dir.join("index");
     let status = themisto2()
         .args(["build", "--file-colors", "example/fof.txt", "--temp-dir"])
         .arg(&tmp)

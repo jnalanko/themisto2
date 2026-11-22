@@ -2,7 +2,7 @@
 
 use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
-use colex_colored_kmers::CompactColexKmers;
+use colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex};
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
@@ -13,6 +13,7 @@ use sparse_dense_storage::SparseDenseStorage;
 use themisto2::{index_import, colex_colored_kmers, coloring_interface, sparse_dense_storage, io, set_of_sets_construction, parallel_ms_iteration, finimizers, pseudoalignment, pseudoalignment_metrics, filter_reads, unitig_export};
 use themisto2::{colex_colored_kmers::{ColexToColorSetMap, mark_key_kmers}, parallel_ms_iteration::MsElementGenerator, report::report};
 use themisto2::set_operations::{difference, intersect, merge, subset};
+use themisto2::{Component, IndexDir, IndexWriter, PseudoalignmentIndex};
 
 
 #[derive(Parser)]
@@ -51,7 +52,7 @@ pub enum Subcommands {
         #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
         lcs_path: Option<PathBuf>,
 
-        #[arg(help = "Output filename. If --to-disk-in-pieces is given, this is interpreted as a filename prefix.", short, long, required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty. If --to-disk-in-pieces is given, this is interpreted as a filename prefix instead.", short, long, required = true)]
         output: PathBuf,
 
         #[arg(help = "Optional: Build from per-color unitigs (requires odd k). This makes the construction much faster, because the k-mers of a color are not deduplicated. IMPORTANT: the user is responsible for making sure that no k-mer occurs more than once within a color, counting both orientations, over all sequences of that color (for example, the unitigs of each color from GGCAT). This is not checked: if it does not hold, the index is silently wrong. A color may consist of several files (--file-colors) or several sequences (--seq-colors-by-name).", long)]
@@ -80,7 +81,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "intersection-pseudoalign")]
     IntersectionPseudoalign {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "query", short = 'q', conflicts_with_all = ["query_list", "query_output_list"], help = "Query file (FASTA/FASTQ, optionally gzipped). If omitted and --query-list is also omitted, reads queries from stdin. Mutually exclusive with --query-list and --query-output-list.")]
@@ -120,7 +121,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "threshold-pseudoalign")]
     ThresholdPseudoalign {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "query", short = 'q', conflicts_with_all = ["query_list", "query_output_list"], help = "Query file (FASTA/FASTQ, optionally gzipped). If omitted and --query-list is also omitted, reads queries from stdin. Mutually exclusive with --query-list and --query-output-list.")]
@@ -166,7 +167,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "print-color-sets")]
     PrintColorSets {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "query", short = 'q', required = true)]
@@ -181,7 +182,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "dump-color-names")]
     DumpColorNames{
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "output", short = 'o', help = "Output file. If omitted, writes to stdout.")]
@@ -190,13 +191,13 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "merge")]
     Merge {
-        #[arg(long = "index-file-list", required = true)]
+        #[arg(help = "A file with one Themisto 2 index directory per line", long = "index-file-list", required = true)]
         index_file_list: PathBuf,
 
         #[arg(long = "temp-dir", required = true)]
         temp_dir: PathBuf,
 
-        #[arg(long = "output", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
@@ -217,13 +218,13 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "intersect", about = "Intersect two indexes: keep the k-mers that are in both")]
     Intersect {
-        #[arg(long = "index1", required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index1", required = true)]
         index1: PathBuf,
 
-        #[arg(long = "index2", required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index2", required = true)]
         index2: PathBuf,
 
-        #[arg(long = "output", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "colors", value_enum, default_value = "union", help = "How the color set of each k-mer is computed from its color sets in the two indexes. With 'intersect', colors are matched by name, only the colors in both indexes are kept, and k-mers whose color sets do not intersect get an empty color set. Color names must be unique within each input index.")]
@@ -244,10 +245,10 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "subset", about = "Keep the k-mers of an index whose color set contains at least one of the given colors, with only those colors: the same as an index built from the sequences of these colors")]
     Subset {
-        #[arg(long = "index", required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", required = true)]
         index: PathBuf,
 
-        #[arg(long = "output", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "colors", value_delimiter = ',', help = "Comma-separated names of the colors to keep (to remove, with --complement)")]
@@ -274,13 +275,13 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, name = "difference", about = "Subtract two indexes: keep the k-mers of index1 that are not in index2, with their colors in index1")]
     Difference {
-        #[arg(long = "index1", required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index1", required = true)]
         index1: PathBuf,
 
-        #[arg(long = "index2", required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index2", required = true)]
         index2: PathBuf,
 
-        #[arg(long = "output", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "output", short = 'o', required = true)]
         outfile: PathBuf,
 
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
@@ -313,7 +314,7 @@ pub enum Subcommands {
         #[arg(long = "n-threads", short = 't', default_value = "4")]
         n_threads: usize,
 
-        #[arg(help = "Index output file", long = "out", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "out", short = 'o', required = true)]
         out: PathBuf,
     },
 
@@ -325,7 +326,7 @@ pub enum Subcommands {
         #[arg(help = "Precomputed LCS array for the SBWT (optional)", long = "lcs", short = 'l')]
         lcs_path: Option<PathBuf>,
 
-        #[arg(help = "Themisto 2 index output file", long = "output", short = 'o', required = true)]
+        #[arg(help = "Output directory for the Themisto 2 index. It must not exist or must be empty.", long = "output", short = 'o', required = true)]
         output: PathBuf,
 
         #[arg(long = "sample-distance", short = 'd', default_value = "30")]
@@ -340,7 +341,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true)]
     Export {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(help = "Output file prefix", long = "output-prefix", short = 'o', required = true)]
@@ -363,7 +364,7 @@ pub enum Subcommands {
     },
     #[command(arg_required_else_help = true, name = "stats")]
     Stats {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
@@ -399,7 +400,7 @@ pub enum Subcommands {
 
     #[command(arg_required_else_help = true, hide = true)]
     FinimizerStats {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "n-threads", short = 't', default_value = "4")]
@@ -407,7 +408,7 @@ pub enum Subcommands {
     },
     #[command(arg_required_else_help = true, hide = true)]
     MinimizerStats {
-        #[arg(long = "index", short = 'i', required = true)]
+        #[arg(help = "Themisto 2 index directory", long = "index", short = 'i', required = true)]
         index: PathBuf,
 
         #[arg(long = "minimizer-length", short = 'm', required = true)]
@@ -511,9 +512,10 @@ fn assign_seq_colors(seq_names: Vec<String>, by_name: bool) -> Result<(Vec<usize
     Ok((record_colors, color_names))
 }
 
-// Returns the index if BuildMode is InMemory, otherwise serializes as a set of files to disk.
+// Returns the index and the LCS array of its SBWT if BuildMode is InMemory, otherwise serializes
+// the color sets as a set of files to disk.
 #[allow(clippy::too_many_arguments)]
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode, n_parser_threads: usize) -> Option<CompactColexKmers<CSS>>{
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode, n_parser_threads: usize) -> Option<(DbgIndex<CSS>, LcsArray)>{
 
     log::info!("Building distinct color set structure");
     let n_colors = u32::try_from(color_names.len()).unwrap_or_else( |_| {
@@ -573,8 +575,10 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
                 color_set_ids: key_kmer_idx_to_set_id,
             };
 
-            let cck = CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(color_names));
-            Some(cck) 
+            let coloring = Coloring::new(colex_map, css, Some(color_names));
+            log::info!("Marking the suffix groups and dummy k-mers");
+            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
+            Some((index, lcs))
         },
         BuildMode::ToDisk(out_prefix, n_pieces) => {
             assert!(n_pieces != 0);
@@ -612,31 +616,53 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
     }
 }
 
-// There used to be two variants. Now there is just one.
-// This enum will serialize with an id specifying the variant.
-// We'll keep this still in case we want to add support for 
-// other variants in the future.
-enum IndexVariant {
-    SparseDenseIndex(CompactColexKmers<SparseDenseStorage>),
+/// Returns the value of `result`, or logs the error and exits.
+fn or_exit<T>(result: std::io::Result<T>) -> T {
+    result.unwrap_or_else(|e| {
+        log::error!("{}", e);
+        std::process::exit(1);
+    })
 }
 
-fn load_index_color_names_only(path: &Path) -> Vec<String> {
-    themisto2::load_color_names(path).unwrap_or_else(|e| panic!("Could not load index {}: {}", path.display(), e))
+/// Opens the Themisto 2 index at `path` and checks that it has all of `components`, so that a
+/// missing component is reported before anything is loaded.
+fn open_index(path: &Path, components: &[Component]) -> IndexDir {
+    let index = or_exit(IndexDir::open(path));
+    or_exit(index.require(components));
+    index
 }
 
-fn load_index_variant(path: &Path, build_select: bool) -> IndexVariant {
-    let index = themisto2::load_index(path, build_select).unwrap_or_else(|e| panic!("Could not load index {}: {}", path.display(), e));
-    IndexVariant::SparseDenseIndex(index)
+const PSEUDOALIGNMENT_COMPONENTS: [Component; 5] = [Component::Sbwt, Component::Sufgroups, Component::ColorNames, Component::ColorSampling, Component::ColorStorage];
+const DBG_COMPONENTS: [Component; 6] = [Component::Sbwt, Component::Sufgroups, Component::DummyMarks, Component::ColorNames, Component::ColorSampling, Component::ColorStorage];
+
+/// The components of an index for pseudoalignment: the SBWT (no select support needed), the
+/// suffix group marks and the coloring.
+fn load_for_pseudoalignment(path: &Path) -> (SbwtIndex<SubsetMatrix>, bitvec::vec::BitVec, Coloring<SparseDenseStorage>) {
+    let index = open_index(path, &PSEUDOALIGNMENT_COMPONENTS);
+    (or_exit(index.load_sbwt(false)), or_exit(index.load_sufgroups()), or_exit(index.load_coloring()))
 }
 
-/// Loads an index for a query.
-fn load_index_for_query(path: &Path) -> IndexVariant {
-    load_index_variant(path, false) // No select support required
+fn load_dbg_index(path: &Path) -> DbgIndex<SparseDenseStorage> {
+    or_exit(open_index(path, &DBG_COMPONENTS).load_dbg_index())
 }
 
-fn write_index_variant(index: &IndexVariant, out: &mut impl Write) {
-    match index {
-        IndexVariant::SparseDenseIndex(idx) => themisto2::write_index(idx, out).unwrap(),
+/// Creates the output directory of an index. Called before the index is built, so that an
+/// unusable output path is reported before the work is done.
+fn create_index_writer(path: &Path) -> IndexWriter {
+    or_exit(IndexWriter::create(path))
+}
+
+fn write_index(writer: IndexWriter, index: &DbgIndex<SparseDenseStorage>, lcs: &LcsArray, both_orientations: Option<bool>) {
+    log::info!("Writing the Themisto 2 index to {}", writer.path().display());
+    or_exit(writer.write_all(index, lcs, both_orientations));
+}
+
+/// The orientation of the result of a set operation on indexes with orientations `a` and `b`:
+/// known only if it is known and the same for both.
+fn combined_orientation(a: Option<bool>, b: Option<bool>) -> Option<bool> {
+    match (a, b) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        _ => None,
     }
 }
 
@@ -653,21 +679,7 @@ fn print_color_names(names: &[String], out: Output) {
     }
 }
 
-struct CountingWriter {
-    bytes: usize,
-}
-
-impl std::io::Write for CountingWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.bytes += buf.len();
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) {
+fn print_stats(index: &DbgIndex<SparseDenseStorage>, index_dir: &IndexDir, n_threads: usize) {
     // Compute quick-to-access statistics first
 
     let stdout = std::io::stdout();
@@ -697,37 +709,18 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
     let total_distinct_size: usize = (0..n_color_sets).map(|i| index.get_set_storage().get_set_view(i).len()).sum();
     printstat!("mean_distinct_color_set_size\t{:.6}", total_distinct_size as f64 / n_color_sets as f64);
 
-    log::info!("Computing SBWT size");
-    let sbwt_size_bytes = {
-        let mut cw = CountingWriter { bytes: 0 };
-        index.sbwt().serialize(&mut cw).unwrap();
-        cw.bytes
-    };
-    printstat!("sbwt_size_bytes\t{}", sbwt_size_bytes);
-
-    log::info!("Computing LCS size");
-    let lcs_size_bytes = {
-        let mut cw = CountingWriter { bytes: 0 };
-        index.lcs().serialize(&mut cw).unwrap();
-        cw.bytes
-    };
-    printstat!("lcs_size_bytes\t{}", lcs_size_bytes);
-
-    log::info!("Computing color set storage size");
-    let css_size_bytes = {
-        let mut cw = CountingWriter { bytes: 0 };
-        index.get_set_storage().serialize(&mut cw);
-        cw.bytes
-    };
-    printstat!("color_set_storage_size_bytes\t{}", css_size_bytes);
-
-    // Full index size.
-    log::info!("Computing full index size");
-    let full_size_bytes = {
-        let mut cw = CountingWriter { bytes: 0 };
-        themisto2::write_index(index, &mut cw).unwrap();
-        cw.bytes
-    };
+    // The sizes of the files of the components. NA for components that the index does not have.
+    let mut full_size_bytes = 0;
+    for (component, size) in index_dir.component_sizes() {
+        let name = component.file_name().replace('.', "_");
+        match size {
+            Some(size) => {
+                printstat!("{}_size_bytes\t{}", name, size);
+                full_size_bytes += size;
+            },
+            None => { printstat!("{}_size_bytes\tNA", name); },
+        }
+    }
     printstat!("full_index_size_bytes\t{}", full_size_bytes);
 
     // DBG traversal. Slow: computes unitig and k-mer color set stats
@@ -740,14 +733,14 @@ fn print_stats(index: &CompactColexKmers<SparseDenseStorage>, n_threads: usize) 
 }
 
 
-fn print_color_sets<CSS: ColorSetStorage>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool, out: Output) {
+fn print_color_sets<CSS: ColorSetStorage>(index: &PseudoalignmentIndex<'_, CSS>, query_path: &Path, print_kmers: bool, out: Output) {
     match out {
         Output::File(w) => print_color_sets_impl(index, query_path, print_kmers, w),
         Output::Stdout(w) => print_color_sets_impl(index, query_path, print_kmers, w),
     }
 }
 
-fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &CompactColexKmers<CSS>, query_path: &Path, print_kmers: bool, mut out: W) {
+fn print_color_sets_impl<CSS: ColorSetStorage, W: Write>(index: &PseudoalignmentIndex<'_, CSS>, query_path: &Path, print_kmers: bool, mut out: W) {
     let mut reader = jseqio::reader::DynamicFastXReader::from_file(&query_path).unwrap();
 
     log::info!("Retrieving color sets for query sequences in {}", query_path.display());
@@ -797,7 +790,7 @@ fn open_query_reader(query_path: Option<&Path>) -> jseqio::reader::DynamicFastXR
 }
 
 #[allow(clippy::too_many_arguments)]
-fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_settings: pseudoalignment::OutputSettings) {
+fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &PseudoalignmentIndex<'_, CSS>, query_path: Option<&Path>, min_hits: usize, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_settings: pseudoalignment::OutputSettings) {
     let create_new_aligner = move || {
         let aligner = pseudoalignment::IntersectionPseudoaligner::new(min_hits);
         Box::new(aligner) as Box<dyn pseudoalignment::Pseudoaligner<CSS> + Send>
@@ -812,7 +805,7 @@ fn intersection_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &Comp
 }
 
 #[allow(clippy::too_many_arguments)]
-fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, query_path: Option<&Path>, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_settings: pseudoalignment::OutputSettings) {
+fn threshold_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &PseudoalignmentIndex<'_, CSS>, query_path: Option<&Path>, min_hits: usize, threshold: f64, denominator: Denominator, metrics: &[pseudoalignment_metrics::Metric], n_threads: usize, out: Output, sort_output: bool, output_settings: pseudoalignment::OutputSettings) {
     // Map from the CLI denominator enum to the pseudoalignment denominator enum.
     let denominator = match denominator {
         Denominator::All => pseudoalignment::Denominator::All,
@@ -854,24 +847,19 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 let outpath = if round == n_rounds - 1 {
                     outfile.to_path_buf() // Final output file
                 } else {
-                    temp_dir.join(format!("merge_round{}_{}.thm2", round, next_files.len()))
+                    temp_dir.join(format!("merge_round{}_{}", round, next_files.len()))
                 };
                 // Only the last round removes the redundant dummy nodes: it also removes those kept
                 // in the inputs, so the result is the same, without a cleanup pass in every round
                 let keep_dummies = keep_redundant_dummies || round != n_rounds - 1;
                 log::info!("Merging {} and {} into {}", pair[0].display(), pair[1].display(), outpath.display());
-                let mut out = BufWriter::new(File::create(&outpath).unwrap());
-                let colors1 = load_index_variant(&pair[0], true); // Select support is required
-                let colors2 = load_index_variant(&pair[1], true); // Select support is required
-
-                match (colors1, colors2) {
-                    (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
-                        log::info!("Merging sparse-dense indexes");
-                        let merged_colored_kmers = merge::merge_compact_colex_kmers(c1, c2, merge_shared_colors, low_ram_mode, keep_dummies, sample_distance, n_threads);
-                        log::info!("Serializing merged index to {}", outpath.display());
-                        write_index_variant(&IndexVariant::SparseDenseIndex(merged_colored_kmers), &mut out);
-                    },
-                }
+                let writer = create_index_writer(&outpath);
+                let orientation1 = open_index(&pair[0], &DBG_COMPONENTS).metadata().both_orientations;
+                let orientation2 = open_index(&pair[1], &DBG_COMPONENTS).metadata().both_orientations;
+                let c1 = load_dbg_index(&pair[0]);
+                let c2 = load_dbg_index(&pair[1]);
+                let (merged, merged_lcs) = merge::merge_compact_colex_kmers(c1, c2, merge_shared_colors, low_ram_mode, keep_dummies, sample_distance, n_threads);
+                write_index(writer, &merged, &merged_lcs, combined_orientation(orientation1, orientation2));
                 next_files.push(outpath);
             } else {
                 next_files.push(pair[0].clone());
@@ -883,7 +871,7 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
 
 // Dispatch with monomorphized output streams
 fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
-    index: CompactColexKmers<CSS>, 
+    index: DbgIndex<CSS>, 
     unitigs_out: Option<impl Write + Sync + Send>,
     metadata_out: impl Write + Sync + Send,
     colors_out: Option<impl Write + Sync + Send>,
@@ -891,8 +879,9 @@ fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
     n_threads: usize
 ) {
 
-    // Destructure the index
-    let (sbwt, lcs, map, sets, _color_names) = index.into_parts();
+    // Destructure the index, so that the DBG can take over the marks without copying them
+    let (sbwt, sufgroups, dummy_marks, coloring) = index.into_parts();
+    let (map, sets, _color_names) = coloring.into_parts();
 
     if let Some(mut colors_out) = colors_out {
         log::info!("Exporting color sets");
@@ -901,9 +890,7 @@ fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
         log::info!("Skipped exporting color sets");
     }
 
-    log::info!("Initializing the DBG");
-    let dbg = Dbg::new(&sbwt, Some(&lcs), n_threads);
-    drop(lcs); // This is why we destructured the index. Saves a lot of memory!
+    let dbg = Dbg::from_marks(&sbwt, sufgroups, dummy_marks);
 
     let n_unitigs: Option<usize> = if let Some(unitigs_out) = unitigs_out {
         if unitigs_as_gfa {
@@ -924,7 +911,7 @@ fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
 }
 
 fn export_index<CSS: ColorSetStorage + Sync + Send>(
-    index: CompactColexKmers<CSS>, 
+    index: DbgIndex<CSS>, 
     out_prefix: &Path,
     colors_to_stdout: bool,
     unitigs_as_gfa: bool,
@@ -1151,29 +1138,29 @@ fn main() -> std::process::ExitCode {
 
             let input_stream = io::ChainedInputStream::new(all_input_paths.clone());
 
-            // Check that the output file can be created
-            let _out_test = File::create(&output).unwrap();
-            std::fs::remove_file(&output).unwrap();
-
-            let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
-
             match n_pieces {
                 None => {
-                    let mut out = BufWriter::new(File::create(&output).unwrap());
+                    // Create the output directory first, to fail before the work if it can't be
+                    let writer = create_index_writer(&output);
+                    let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
                     let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::InMemory, n_parser_threads);
-                    let index = index.unwrap(); // Ok because we passed in InMemory
-                    log::info!("Serializing sparse-dense index to {}", output.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+                    let (index, lcs) = index.unwrap(); // Ok because we passed in InMemory
+                    // The build adds the reverse complements of the input and colors both orientations
+                    write_index(writer, &index, &lcs, Some(true));
                 },
                 Some(n_pieces) => {
+                    // Check that the output file can be created
+                    let _out_test = File::create(&output).unwrap();
+                    std::fs::remove_file(&output).unwrap();
+                    let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
                     build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::ToDisk(output, n_pieces), n_parser_threads);
                 }
             }
         },
 
         Subcommands::IntersectionPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, n_threads, report_bases_covered, report_hit_counts, sort_output, themisto1_output_format, output, positive_reads_only} => {
-            log::info!("Loading index");
-            let index = load_index_for_query(&index_path);
+            let (sbwt, sufgroups, coloring) = load_for_pseudoalignment(&index_path);
+            let index = PseudoalignmentIndex::new(&sbwt, &sufgroups, &coloring);
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_settings = resolve_output_settings(themisto1_output_format, positive_reads_only, &metrics);
 
@@ -1185,16 +1172,14 @@ fn main() -> std::process::ExitCode {
                 log::info!("Running intersection pseudoalignment for query sequences in {}, writing output to {}", input_log_string, output_log_string);
 
                 let out = open_output(outfile);
-                match &index {
-                    IndexVariant::SparseDenseIndex(idx) => intersection_pseudoalignment(idx, infile.as_deref(), min_hits, &metrics, n_threads, out, sort_output, output_settings),
-                };
+                intersection_pseudoalignment(&index, infile.as_deref(), min_hits, &metrics, n_threads, out, sort_output, output_settings);
 
             }
 
         },
         Subcommands::ThresholdPseudoalign { index: index_path, query: query_path, query_list, query_output_list, min_hits, threshold, denominator, n_threads, report_hit_counts, report_bases_covered, sort_output, themisto1_output_format, output, positive_reads_only} => {
-            log::info!("Loading index");
-            let index = load_index_for_query(&index_path);
+            let (sbwt, sufgroups, coloring) = load_for_pseudoalignment(&index_path);
+            let index = PseudoalignmentIndex::new(&sbwt, &sufgroups, &coloring);
             let metrics = into_metric_list(report_hit_counts, report_bases_covered);
             let output_settings = resolve_output_settings(themisto1_output_format, positive_reads_only, &metrics);
             let io_file_pairs = get_input_and_output_files(query_path, output, query_list, query_output_list);
@@ -1205,22 +1190,17 @@ fn main() -> std::process::ExitCode {
                 log::info!("Running threshold pseudoalignment for query sequences in {}, writing output to {}", input_log_string, output_log_string);
 
                 let out = open_output(outfile);
-                match &index {
-                    IndexVariant::SparseDenseIndex(idx) => threshold_pseudoalignment(idx, infile.as_deref(), min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_settings)
-                };
+                threshold_pseudoalignment(&index, infile.as_deref(), min_hits, threshold, denominator, &metrics, n_threads, out, sort_output, output_settings);
             }
         },
         Subcommands::PrintColorSets { index: index_path, query: query_path, print_kmers, output } => {
-            log::info!("Loading index");
-            let index = load_index_for_query(&index_path);
+            let (sbwt, sufgroups, coloring) = load_for_pseudoalignment(&index_path);
+            let index = PseudoalignmentIndex::new(&sbwt, &sufgroups, &coloring);
             let out = open_output(output);
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => print_color_sets(&idx, &query_path, print_kmers, out),
-            };
+            print_color_sets(&index, &query_path, print_kmers, out);
         },
         Subcommands::DumpColorNames{ index: index_path, output } => {
-            log::info!("Loading color names");
-            let color_names = load_index_color_names_only(&index_path);
+            let color_names = or_exit(open_index(&index_path, &[Component::ColorNames]).load_color_names());
             let out = open_output(output);
             log::info!("Dumping color names");
             print_color_names(&color_names, out);
@@ -1233,17 +1213,13 @@ fn main() -> std::process::ExitCode {
             if merge_shared_colors && colors != intersect::IntersectColors::Union {
                 log::warn!("--merge-shared-colors has no effect with --colors {:?}: colors are always matched by name", colors);
             }
-            let mut out = BufWriter::new(File::create(&outfile).unwrap());
-            let colors1 = load_index_variant(&index1, true); // Select support is required
-            let colors2 = load_index_variant(&index2, true); // Select support is required
-            match (colors1, colors2) {
-                (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
-                    log::info!("Intersecting {} and {}", index1.display(), index2.display());
-                    let result = intersect::intersect_compact_colex_kmers(c1, c2, colors, merge_shared_colors, low_ram_mode, sample_distance, n_threads);
-                    log::info!("Serializing intersection to {}", outfile.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
-                },
-            }
+            let writer = create_index_writer(&outfile);
+            let orientation = combined_orientation(open_index(&index1, &DBG_COMPONENTS).metadata().both_orientations, open_index(&index2, &DBG_COMPONENTS).metadata().both_orientations);
+            let c1 = load_dbg_index(&index1);
+            let c2 = load_dbg_index(&index2);
+            log::info!("Intersecting {} and {}", index1.display(), index2.display());
+            let (result, result_lcs) = intersect::intersect_compact_colex_kmers(c1, c2, colors, merge_shared_colors, low_ram_mode, sample_distance, n_threads);
+            write_index(writer, &result, &result_lcs, orientation);
         },
         Subcommands::Subset { index, outfile, colors, colors_file, complement, keep_all_colors, sample_distance, n_threads, low_ram_mode } => {
             let mut names = colors;
@@ -1258,8 +1234,12 @@ fn main() -> std::process::ExitCode {
                 log::error!("No colors given: use --colors or --colors-file");
                 std::process::exit(1);
             }
-            match load_index_variant(&index, true) { // Select support is required
-                IndexVariant::SparseDenseIndex(coloring) => {
+            {
+                {
+                    let writer = create_index_writer(&outfile);
+                    let index_dir = open_index(&index, &DBG_COMPONENTS);
+                    let orientation = index_dir.metadata().both_orientations;
+                    let coloring = or_exit(index_dir.load_dbg_index());
                     let color_names = coloring.get_color_names();
                     // Sets of the names, so that matching them takes time linear in the number of
                     // names: with lists, keeping 108,930 of the 121,034 colors of an index took 46 s
@@ -1271,25 +1251,22 @@ fn main() -> std::process::ExitCode {
                     let kept_names: std::collections::HashSet<&str> = names.iter().map(|name| name.as_str()).collect();
                     let kept_colors: Vec<bool> = color_names.iter().map(|name| kept_names.contains(name.as_str()) != complement).collect();
                     log::info!("Taking the subset of {} for {} of its {} colors{}", index.display(), kept_colors.iter().filter(|&&kept| kept).count(), kept_colors.len(), if keep_all_colors { ", keeping all colors of its k-mers" } else { "" });
-                    let mut out = BufWriter::new(File::create(&outfile).unwrap());
-                    let result = subset::subset_compact_colex_kmers(coloring, &kept_colors, keep_all_colors, low_ram_mode, sample_distance, n_threads);
-                    log::info!("Serializing subset to {}", outfile.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
-                },
+                    let (result, result_lcs) = subset::subset_compact_colex_kmers(coloring, &kept_colors, keep_all_colors, low_ram_mode, sample_distance, n_threads);
+                    write_index(writer, &result, &result_lcs, orientation);
+                }
             }
         },
         Subcommands::Difference { index1, index2, outfile, sample_distance, n_threads, low_ram_mode } => {
-            let mut out = BufWriter::new(File::create(&outfile).unwrap());
-            let colors1 = load_index_variant(&index1, true); // Select support is required
-            let colors2 = load_index_variant(&index2, false);
-            match (colors1, colors2) {
-                (IndexVariant::SparseDenseIndex(c1), IndexVariant::SparseDenseIndex(c2)) => {
-                    log::info!("Subtracting {} from {}", index2.display(), index1.display());
-                    let result = difference::difference_compact_colex_kmers(c1, c2, low_ram_mode, sample_distance, n_threads);
-                    log::info!("Serializing difference to {}", outfile.display());
-                    write_index_variant(&IndexVariant::SparseDenseIndex(result), &mut out);
-                },
-            }
+            let writer = create_index_writer(&outfile);
+            let index_dir1 = open_index(&index1, &DBG_COMPONENTS);
+            // Only the SBWT of index2 is needed: the result has the colors of index1
+            let index_dir2 = open_index(&index2, &[Component::Sbwt]);
+            let orientation = combined_orientation(index_dir1.metadata().both_orientations, index_dir2.metadata().both_orientations);
+            let c1 = or_exit(index_dir1.load_dbg_index());
+            let sbwt2 = or_exit(index_dir2.load_sbwt(false));
+            log::info!("Subtracting {} from {}", index2.display(), index1.display());
+            let (result, result_lcs) = difference::difference_compact_colex_kmers(c1, sbwt2, low_ram_mode, sample_distance, n_threads);
+            write_index(writer, &result, &result_lcs, orientation);
         },
         Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
@@ -1312,18 +1289,20 @@ fn main() -> std::process::ExitCode {
                 return ExitCode::FAILURE;
             }
 
-            let mut out = BufWriter::new(File::create(&out_path).unwrap());
+            let writer = create_index_writer(&out_path);
 
             let unitig_dump = BufReader::new(File::open(&unitig_filename).unwrap());
             let color_dump = BufReader::new(File::open(&color_sets_filename).unwrap());
             let metadata_dump = BufReader::new(File::open(&metadata_filename).unwrap());
 
-            let index = CompactColexKmers::<SparseDenseStorage>::new_from_colored_unitig_dump(
-                sbwt, lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
-            log::info!("Serializing sparse-dense index to {}", out_path.display());
-            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+            let coloring = Coloring::<SparseDenseStorage>::new_from_colored_unitig_dump(
+                &sbwt, &lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
+            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
+            // The import colors both orientations of every unitig
+            write_index(writer, &index, &lcs, Some(true));
         },
         Subcommands::ImportSbwt { sbwt_path, lcs_path, output, sample_distance, n_threads, color_name } => {
+            let writer = create_index_writer(&output);
             log::info!("Loading SBWT from {}", sbwt_path.display());
             let mut sbwt_in = BufReader::new(File::open(&sbwt_path).unwrap());
             // TODO: support other SBWT variants, see get_sbwt_and_lcs
@@ -1344,30 +1323,22 @@ fn main() -> std::process::ExitCode {
             };
 
             log::info!("Building single-colored Themisto 2 index");
-            let index = CompactColexKmers::<SparseDenseStorage>::new_single_colored(sbwt, lcs, sample_distance, n_threads, color_name);
-
-            let mut out = BufWriter::new(File::create(&output).unwrap());
-            log::info!("Serializing Themisto 2 index to {}", output.display());
-            write_index_variant(&IndexVariant::SparseDenseIndex(index), &mut out);
+            let coloring = Coloring::<SparseDenseStorage>::new_single_colored(&sbwt, &lcs, sample_distance, n_threads, color_name);
+            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
+            // Whether the SBWT has both orientations of its k-mers is not known
+            write_index(writer, &index, &lcs, None);
         },
         Subcommands::Export { index: index_path, color_dump_prefix, n_threads, gfa, colors_to_stdout, no_unitigs, no_color_sets } => {
-            log::info!("Loading index");
-            let index = load_index_variant(&index_path, true); // Select support is required for export
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => {
-                    export_index(idx, &color_dump_prefix, colors_to_stdout, gfa, no_unitigs, no_color_sets, n_threads)
-                },
-            };
+            let index = load_dbg_index(&index_path); // Select support is required for export
+            export_index(index, &color_dump_prefix, colors_to_stdout, gfa, no_unitigs, no_color_sets, n_threads);
         },
         Subcommands::Stats { index: index_path, n_threads } => {
-            let index = load_index_variant(&index_path, true); // Select support required for DBG
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => print_stats(&idx, n_threads),
-            };
+            let index_dir = open_index(&index_path, &DBG_COMPONENTS);
+            let index = or_exit(index_dir.load_dbg_index());
+            print_stats(&index, &index_dir, n_threads);
         }
         Subcommands::Report { index: index_path, input, output } => {
-            log::info!("Loading color names from index");
-            let color_names = load_index_color_names_only(&index_path);
+            let color_names = or_exit(open_index(&index_path, &[Component::ColorNames]).load_color_names());
             log::info!("Processing pseudoalignment file");
             match (input, output) {
                 (Some(in_path), Some(out_path)) => report(BufReader::new(File::open(in_path).unwrap()), BufWriter::new(File::create(out_path).unwrap()), &color_names),
@@ -1381,19 +1352,19 @@ fn main() -> std::process::ExitCode {
         },
         Subcommands::FinimizerStats { index: index_path, n_threads} => {
             // Hidden subcommand, might be deleted at any moment
-            log::info!("Loading index");
-            let index = load_index_variant(&index_path, true); // Select support is required for verify
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Finimizer),
-            };
+            let index_dir = open_index(&index_path, &[Component::Sbwt, Component::Lcs, Component::ColorNames, Component::ColorSampling, Component::ColorStorage]);
+            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for verify
+            let lcs = or_exit(index_dir.load_lcs());
+            let coloring = or_exit(index_dir.load_coloring());
+            finimizers::minimizer_stats(&ColoredKmers::new(&sbwt, &coloring), &lcs, n_threads, finimizers::MinimizerType::Finimizer);
         },
         Subcommands::MinimizerStats { index: index_path, n_threads, m} => {
             // Hidden subcommand, might be deleted at any moment
-            log::info!("Loading index");
-            let index = load_index_variant(&index_path, true); // Select support is required for verify
-            match index {
-                IndexVariant::SparseDenseIndex(idx) => finimizers::minimizer_stats(&idx, n_threads, finimizers::MinimizerType::Minimizer(m)),
-            };
+            let index_dir = open_index(&index_path, &[Component::Sbwt, Component::Lcs, Component::ColorNames, Component::ColorSampling, Component::ColorStorage]);
+            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for verify
+            let lcs = or_exit(index_dir.load_lcs());
+            let coloring = or_exit(index_dir.load_coloring());
+            finimizers::minimizer_stats(&ColoredKmers::new(&sbwt, &coloring), &lcs, n_threads, finimizers::MinimizerType::Minimizer(m));
         },
     }
 

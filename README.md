@@ -35,15 +35,15 @@ The executable will be stored at `./target/release/themisto2`.
 For small datasets less than a few gigabytes in size, you can easily construct the index with a single command. You can try it with the included example data (run from the repository root):
 
 ```
-themisto2 build --file-colors example/fof.txt -o index.thm2 --temp-dir temp -k 5 -t 4
+themisto2 build --file-colors example/fof.txt -o my_index --temp-dir temp -k 5 -t 4
 ```
 
-Here `example/fof.txt` is a file with one fasta/fastq filename per line (each file represents one color), `index.thm2` is the output index, `temp` is a directory for temporary files, and `-k 5` sets the k-mer length. The first file in the input list is assigned to color id 0, the next file to color id 1, and so on.
+Here `example/fof.txt` is a file with one fasta/fastq filename per line (each file represents one color), `my_index` is the output index directory (see [Index directory](#index-directory)), `temp` is a directory for temporary files, and `-k 5` sets the k-mer length. The first file in the input list is assigned to color id 0, the next file to color id 1, and so on.
 
 Once the index is built, you can pseudoalign queries against it:
 
 ```
-themisto2 threshold-pseudoalign --threshold 0.7 --denominator all --min-hits 1 -i index.thm2 -q example/C1.fna -t 4
+themisto2 threshold-pseudoalign --threshold 0.7 --denominator all --min-hits 1 -i my_index -q example/C1.fna -t 4
 ```
 
 This outputs to the standard output, for each query sequence, the set of colors whose who have at least 70% of the k-mers of the query:
@@ -84,10 +84,27 @@ This uses 32 threads and 64 GiB memory (the memory usage may be larger if the fi
 Build the Themisto 2 index using the SBWT and LCS array.
 
 ```
-themisto2 build --file-colors input_file_list.txt -s unitigs-k31.sbwt -l unitigs-k31.lcs -o index.thm2 -k 31 -t 32
+themisto2 build --file-colors input_file_list.txt -s unitigs-k31.sbwt -l unitigs-k31.lcs -o my_index -k 31 -t 32
 ```
 
 This will use 32 threads.
+
+# Index directory
+
+A Themisto 2 index is a directory with one file per component. Each subcommand loads only the components it needs, so the sizes of these files tell how much memory a subcommand takes:
+
+| File | Contents | Loaded by |
+|---|---|---|
+| `metadata.json` | Format version, k, number of k-mers and colors, whether both orientations of the k-mers are included | every subcommand |
+| `kmers.sbwt` | The SBWT of the k-mers, in the format of [sbwt-rs-cli](https://github.com/jnalanko/sbwt-rs-cli) | all but `dump-color-names` and `report` |
+| `kmers.lcs` | The LCS array of the SBWT | `finimizer-stats`, `minimizer-stats` |
+| `kmers.sufgroups` | The (k-1)-suffix group marks of the SBWT | pseudoalignment, `print-color-sets`, `export`, `stats`, set operations |
+| `kmers.dummymarks` | The marks of the dummy k-mers of the SBWT | `export`, `stats`, set operations |
+| `colors.names` | The color names, one per line | everything that uses colors, including `dump-color-names` and `report` |
+| `colors.sampling` | The color set ids of the sampled k-mers | everything that uses color sets |
+| `colors.storage` | The distinct color sets | everything that uses color sets |
+
+Every component except `metadata.json` is optional, and a subcommand that needs a missing component exits with an error that names it. For example, an index without `kmers.lcs` can still be used for pseudoalignment. Indexes in the single-file `.thm2` format of earlier versions are not supported: rebuild them.
 
 # Rust API
 
@@ -103,8 +120,8 @@ For example, the following prints every maximal unitig segment where all k-mers 
 ```rust
 use themisto2::{ColoredDbg, ColorSetView};
 
-let index = themisto2::load_index("index.thm2".as_ref(), true).unwrap(); // true: select support for the DBG
-let dbg = ColoredDbg::new(&index, 4);
+let index = themisto2::IndexDir::open("my_index".as_ref()).unwrap().load_dbg_index().unwrap();
+let dbg = ColoredDbg::new(&index);
 dbg.par_for_each_colored_unitig(|u| {
     let colors: Vec<usize> = u.color_set.iter().collect();
     println!("{}\t{:?}", String::from_utf8_lossy(u.seq), colors);

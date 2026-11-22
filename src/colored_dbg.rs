@@ -11,10 +11,10 @@
 use std::ops::Range;
 
 use sbwt::dbg::Dbg;
-use sbwt::{SubsetMatrix, SubsetSeq};
+use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::ops::BitVec;
 
-use crate::colex_colored_kmers::CompactColexKmers;
+use crate::colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex};
 use crate::sparse_dense_storage::{SparseDenseColorSetView, SparseDenseStorage};
 
 pub use sbwt::dbg::Node;
@@ -55,22 +55,29 @@ pub struct ColoredUnitig<'u, 'a> {
 
 /// Colored de Bruijn graph operations on a borrowed Themisto 2 index.
 pub struct ColoredDbg<'a> {
-    index: &'a CompactColexKmers<SparseDenseStorage>,
+    index: ColoredKmers<'a, SparseDenseStorage>,
     dbg: Dbg<'a, SubsetMatrix>,
 }
 
 impl<'a> ColoredDbg<'a> {
 
-    /// Initializes the graph structure. Takes 2 bits of space per SBWT set on top of the index.
-    /// Panics if the index was loaded without select support
-    /// (see [CompactColexKmers::load]).
-    pub fn new(index: &'a CompactColexKmers<SparseDenseStorage>, n_threads: usize) -> Self {
-        assert!(index.sbwt().sbwt().has_select_support(), "ColoredDbg requires an index loaded with select support");
-        let dbg = Dbg::new(index.sbwt(), Some(index.lcs()), n_threads);
-        Self{index, dbg}
+    /// The graph of `index`. Copies its suffix group and dummy marks, 2 bits per SBWT position.
+    /// To avoid the copy, use [ColoredDbg::from_parts].
+    /// Panics if the SBWT of the index has no select support.
+    pub fn new(index: &'a DbgIndex<SparseDenseStorage>) -> Self {
+        Self::from_parts(&index.sbwt, &index.coloring, index.sufgroups.clone(), index.dummy_marks.clone())
     }
 
-    pub fn index(&self) -> &'a CompactColexKmers<SparseDenseStorage> {
+    /// The graph of the SBWT `sbwt` with the coloring `coloring`, the (k-1)-suffix group marks
+    /// `sufgroups` and the dummy node marks `dummy_marks` of `sbwt`, as loaded from a Themisto 2 index.
+    /// Panics if `sbwt` has no select support.
+    pub fn from_parts(sbwt: &'a SbwtIndex<SubsetMatrix>, coloring: &'a Coloring<SparseDenseStorage>, sufgroups: bitvec::vec::BitVec, dummy_marks: bitvec::vec::BitVec) -> Self {
+        assert!(sbwt.sbwt().has_select_support(), "ColoredDbg requires an SBWT with select support");
+        let dbg = Dbg::from_marks(sbwt, sufgroups, dummy_marks);
+        Self{index: ColoredKmers::new(sbwt, coloring), dbg}
+    }
+
+    pub fn index(&self) -> ColoredKmers<'a, SparseDenseStorage> {
         self.index
     }
 
@@ -243,10 +250,10 @@ mod tests {
         ]
     }
 
-    fn build(seqs: &[(&[u8], usize)], k: usize) -> CompactColexKmers<SparseDenseStorage> {
+    fn build(seqs: &[(&[u8], usize)], k: usize) -> DbgIndex<SparseDenseStorage> {
         let both_strands: Vec<(Vec<u8>, usize)> = seqs.iter().flat_map(|(s, c)| [(s.to_vec(), *c), (rc(s), *c)]).collect();
         let refs: Vec<(&[u8], usize)> = both_strands.iter().map(|(s, c)| (s.as_slice(), *c)).collect();
-        CompactColexKmers::new_from_small_input(&refs, k, 3, 2)
+        DbgIndex::new_from_small_input(&refs, k, 3, 2)
     }
 
     #[test]
@@ -254,7 +261,7 @@ mod tests {
         let k = 5;
         let seqs = test_input();
         let index = build(&seqs, k);
-        let g = ColoredDbg::new(&index, 2);
+        let g = ColoredDbg::new(&index);
         let truth = true_colors(&seqs, k);
 
         assert_eq!(g.n_nodes(), truth.len());
@@ -288,7 +295,7 @@ mod tests {
         let k = 5;
         let seqs = test_input();
         let index = build(&seqs, k);
-        let g = ColoredDbg::new(&index, 2);
+        let g = ColoredDbg::new(&index);
         let truth = true_colors(&seqs, k);
 
         let seen = Mutex::new(Vec::<Vec<u8>>::new());
@@ -334,7 +341,7 @@ mod tests {
         let k = 4;
         let seqs: Vec<(&[u8], usize)> = vec![(b"AACCGAACCGAACCG", 0), (b"AACCG", 1)];
         let index = build(&seqs, k);
-        let g = ColoredDbg::new(&index, 1);
+        let g = ColoredDbg::new(&index);
         let truth = true_colors(&seqs, k);
 
         let n_unitigs = Mutex::new(0);

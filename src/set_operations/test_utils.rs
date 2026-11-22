@@ -7,7 +7,7 @@ use rustc_hash::FxHasher;
 use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::Rank;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, io::RewindableSeqStreamGenerator, sparse_dense_storage::SparseDenseStorage, util::VecVecRewindableGen};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, Coloring, DbgIndex, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, io::RewindableSeqStreamGenerator, sparse_dense_storage::SparseDenseStorage, util::VecVecRewindableGen};
 
 // A sample distance larger than any unitig in the tests, so that only the structurally
 // required key k-mers get marked. Any k-mer that a set operation forgets to mark then results
@@ -106,9 +106,9 @@ fn build_sbwt(k: usize, seqs: &[Vec<u8>]) -> (SbwtIndex<SubsetMatrix>, LcsArray)
     (sbwt, lcs.unwrap())
 }
 
-/// Builds a CompactColexKmers where color i is named names[i] and consists of the sequences
+/// Builds a DbgIndex where color i is named names[i] and consists of the sequences
 /// s with (i, s) in seqs.
-pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, Vec<u8>)], sample_distance: usize, n_threads: usize) -> CompactColexKmers<SparseDenseStorage> {
+pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, Vec<u8>)], sample_distance: usize, n_threads: usize) -> DbgIndex<SparseDenseStorage> {
     let mut dbs: Vec<SeqDB> = names.iter().map(|_| SeqDB::new()).collect();
     for (color, seq) in seqs {
         dbs[*color].push_seq(seq);
@@ -131,5 +131,6 @@ pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, V
         color_set_ids: CompactIntVec::from_vec(sampled_ids),
     };
 
-    CompactColexKmers::new(sbwt, lcs, colex_map, storage, Some(names))
+    let coloring = Coloring::new(colex_map, storage, Some(names));
+    DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads)
 }

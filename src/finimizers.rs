@@ -4,7 +4,7 @@ use rayon::{iter::{IntoParallelIterator, ParallelIterator}};
 use sbwt::{LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix, SubsetSeq, dbg::Dbg};
 use simple_sds_sbwt::{ops::{BitVec, Rank}, raw_vector::AccessRaw};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::ColoredKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, set_of_sets_construction::SetElement, sparse_dense_storage::SparseDenseStorage};
 
 
 // Returns (len, colex, position in sfs slice)
@@ -135,7 +135,7 @@ fn find_kmer_class_of_minimizer<'b>(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArr
 
 
 // Returns (n_correct, n_wrong, mean jaccard index)
-fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, class: &[usize]) -> (usize, usize, f64) {
+fn evaluate_equivalence_class<CSS: ColorSetStorage + Sync>(index: &ColoredKmers<'_, CSS>, class: &[usize]) -> (usize, usize, f64) {
     let storage = index.get_set_storage();
     let mut finimizer_colors = storage.get_empty_set();
     for &colex in class {
@@ -230,9 +230,8 @@ impl Stats {
 }
 
 
-pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
+pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &ColoredKmers<'_, CSS>, lcs: &LcsArray, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
-    let lcs = index.lcs();
     let k = sbwt.k();
 
     log::info!("Initializing DBG");
@@ -357,9 +356,8 @@ pub fn generic_minimizer_stats_rewrite<CSS: ColorSetStorage + Sync, F: for<'a> F
 }
 
 #[allow(dead_code)] // Old code but could be useful
-pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_fn: F) {
+pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u8]) -> (usize, usize) + Sync + Send> (index: &ColoredKmers<'_, CSS>, lcs: &LcsArray, n_threads: usize, minimizer_fn: F) {
     let sbwt = index.sbwt();
-    let lcs = index.lcs();
 
     // Data for the critical section
     struct CriticalSectionData {
@@ -457,19 +455,18 @@ pub fn generic_minimizer_stats<CSS: ColorSetStorage + Sync, F: for<'a> Fn(&'a [u
     }
 }
 
-// Requires select support
-pub fn minimizer_stats<CSS: ColorSetStorage + Sync>(index: &CompactColexKmers<CSS>, n_threads: usize, minimizer_type: MinimizerType) {
+/// `lcs` is the LCS array of the SBWT of `index`. Requires select support.
+pub fn minimizer_stats<CSS: ColorSetStorage + Sync>(index: &ColoredKmers<'_, CSS>, lcs: &LcsArray, n_threads: usize, minimizer_type: MinimizerType) {
     let sbwt = index.sbwt();
-    let lcs = index.lcs();
     let si = StreamingIndex::new(sbwt, lcs);
     match minimizer_type {
         MinimizerType::Finimizer => {
             let finimizer_fn = create_finimizer_function(si);
-            generic_minimizer_stats_rewrite(index, n_threads, finimizer_fn);
+            generic_minimizer_stats_rewrite(index, lcs, n_threads, finimizer_fn);
         },
         MinimizerType::Minimizer(m) => {
             let minimizer_fn = create_minimizer_function(m);
-            generic_minimizer_stats_rewrite(index, n_threads, minimizer_fn);
+            generic_minimizer_stats_rewrite(index, lcs, n_threads, minimizer_fn);
         },
     }
 }

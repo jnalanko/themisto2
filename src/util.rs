@@ -214,3 +214,43 @@ mod tests {
         assert_eq!(bv_clone.count_ones(), sds.count_ones());
     }
 }
+/// Writes `bits` in the format read by [read_bitvec]: the number of bits as a little-endian u64,
+/// then the bits in little-endian u64 words, lowest bit first.
+pub fn write_bitvec(bits: &bitvec::vec::BitVec, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    out.write_all(&(bits.len() as u64).to_le_bytes())?;
+    let n_words = bits.len().div_ceil(64);
+    for word in bits.as_raw_slice()[..n_words].iter() {
+        out.write_all(&(*word as u64).to_le_bytes())?;
+    }
+    Ok(())
+}
+
+/// Reads a bit vector written by [write_bitvec].
+pub fn read_bitvec(input: &mut impl std::io::Read) -> std::io::Result<bitvec::vec::BitVec> {
+    let mut buf = [0_u8; 8];
+    input.read_exact(&mut buf)?;
+    let len = u64::from_le_bytes(buf) as usize;
+    let n_words = len.div_ceil(64);
+    let mut words = Vec::<usize>::with_capacity(n_words);
+    for _ in 0..n_words {
+        input.read_exact(&mut buf)?;
+        words.push(u64::from_le_bytes(buf) as usize);
+    }
+    let mut bits = bitvec::vec::BitVec::from_vec(words);
+    bits.truncate(len);
+    Ok(bits)
+}
+
+#[cfg(test)]
+mod bitvec_io_tests {
+    #[test]
+    fn bitvec_roundtrip() {
+        for len in [0_usize, 1, 63, 64, 65, 200] {
+            let bits: bitvec::vec::BitVec = (0..len).map(|i| i % 3 == 0 || i % 7 == 1).collect();
+            let mut buf = Vec::new();
+            super::write_bitvec(&bits, &mut buf).unwrap();
+            assert_eq!(buf.len(), 8 + 8 * len.div_ceil(64));
+            assert_eq!(super::read_bitvec(&mut buf.as_slice()).unwrap(), bits);
+        }
+    }
+}

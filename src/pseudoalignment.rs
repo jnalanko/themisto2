@@ -3,7 +3,7 @@ use std::{io::Write, sync::atomic::{AtomicUsize, Ordering::Relaxed}};
 use crossbeam::channel::{RecvTimeoutError};
 use jseqio::{record::Record, seq_db::SeqDB};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, PseudoalignmentMetricProcessor, create_metric_processor}};
+use crate::{colex_colored_kmers::Coloring, kmer_lookup::KmerLookupIndex, coloring_interface::{ColorSetOwned, ColorSetStorage, ColorSetView}, pseudoalignment_metrics::{Metric, PseudoalignmentMetricProcessor, create_metric_processor}};
 
 struct SortedVec {
     v: Vec<usize>
@@ -33,9 +33,55 @@ fn push_decimal(out: &mut Vec<u8>, n: usize) {
     out.extend_from_slice(&tmp[i..]);
 }
 
+/// The components of a Themisto 2 index that pseudoalignment needs: the SBWT, its (k-1)-suffix
+/// group marks (for the k-mer lookup) and the coloring.
+pub struct PseudoalignmentIndex<'a, CSS: ColorSetStorage> {
+    lookup: KmerLookupIndex<'a>,
+    coloring: &'a Coloring<CSS>,
+}
+
+impl<'a, CSS: ColorSetStorage> PseudoalignmentIndex<'a, CSS> {
+
+    pub fn new(sbwt: &'a sbwt::SbwtIndex<sbwt::SubsetMatrix>, sufgroups: &'a bitvec::vec::BitVec, coloring: &'a Coloring<CSS>) -> Self {
+        assert_eq!(simple_sds_sbwt::ops::BitVec::len(&coloring.get_map().sampling), sbwt.n_sets(), "The coloring does not belong to the SBWT");
+        Self { lookup: KmerLookupIndex::new(sbwt, sufgroups), coloring }
+    }
+
+    pub fn get_k(&self) -> usize {
+        self.lookup.k()
+    }
+
+    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'a> {
+        self.coloring.set_id_to_set(id)
+    }
+
+    pub fn get_set_storage(&self) -> &'a CSS {
+        self.coloring.get_set_storage()
+    }
+
+    pub fn get_color_names(&self) -> &'a Vec<String> {
+        self.coloring.get_color_names()
+    }
+
+    /// Pushes the color set id of every k-mer of `seq` to `buffer`, or None if the k-mer is not in
+    /// the index. Does not clear the buffer.
+    pub fn push_color_set_ids_to_buffer(&self, seq: &[u8], buffer: &mut Vec<Option<usize>>) {
+        let mut colex_ranks = Vec::<Option<usize>>::with_capacity(seq.len());
+        self.lookup.push_colex_ranks(seq, &mut colex_ranks);
+        self.coloring.push_color_set_ids_for_colex_ranks(&colex_ranks, self.lookup.sbwt(), buffer);
+    }
+
+    /// The color set of every k-mer of `seq`, or None if the k-mer is not in the index.
+    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'a>>> {
+        let mut set_ids = Vec::<Option<usize>>::new();
+        self.push_color_set_ids_to_buffer(seq, &mut set_ids);
+        set_ids.iter().map(|id| id.map(|id| self.set_id_to_set(id))).collect()
+    }
+}
+
 pub trait Pseudoaligner<CSS: ColorSetStorage> {
     // The &mut self is to allow internal state containing reused buffers
-    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>);
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &PseudoalignmentIndex<'_, CSS>, out: &mut Vec<usize>);
 }
 
 pub struct IntersectionPseudoaligner {
@@ -86,7 +132,7 @@ impl ThresholdPseudoaligner {
 }
 
 impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for ThresholdPseudoaligner {
-    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &PseudoalignmentIndex<'_, CSS>, out: &mut Vec<usize>) {
         let mut n_relevant = 0_usize;
         let mut n_all = 0_usize;
 
@@ -147,7 +193,7 @@ impl IntersectionPseudoaligner {
 }
 
 impl<CSS: ColorSetStorage> Pseudoaligner<CSS> for IntersectionPseudoaligner {
-    fn push_compatibility_set(&mut self, seq: &[u8], index: &CompactColexKmers<CSS>, out: &mut Vec<usize>) {
+    fn push_compatibility_set(&mut self, seq: &[u8], index: &PseudoalignmentIndex<'_, CSS>, out: &mut Vec<usize>) {
         let mut intersection = index.get_set_storage().get_full_set();
         let mut n_hits = 0_usize;
 
@@ -200,7 +246,7 @@ impl QueryBatch {
     }
 
     // Returns formatted bytes, and the batch id.
-    fn process<CSS: ColorSetStorage>(self, index: &CompactColexKmers<CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>], output_settings: OutputSettings) -> (Vec<u8>, usize) {
+    fn process<CSS: ColorSetStorage>(self, index: &PseudoalignmentIndex<'_, CSS>, aligner: &mut Box<dyn Pseudoaligner<CSS> + Send>, n_bases_processed: &AtomicUsize, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>], output_settings: OutputSettings) -> (Vec<u8>, usize) {
         let mut result = QueryResult::new();
         let mut compat_set_buf = Vec::<usize>::new();
         for rec in self.seqs.iter() {
@@ -229,7 +275,7 @@ impl QueryBatch {
         (bytes_out, self.batch_id)
     }
 
-    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &SortedVec, index: &CompactColexKmers<CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
+    fn compute_metrics<CSS: ColorSetStorage>(&self, seq: &[u8], compatible_colors: &SortedVec, index: &PseudoalignmentIndex<'_, CSS>, metrics: &mut [Box<dyn PseudoalignmentMetricProcessor<CSS>>]) -> Vec<usize> {
         let mut ans_concats = Vec::<usize>::new();
 
         if metrics.len() > 0 {
@@ -454,7 +500,7 @@ fn output_thread(results_recv: crossbeam::channel::Receiver<(Vec<u8>, usize)>, m
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &CompactColexKmers<CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_settings: OutputSettings) {
+pub fn run_pseudoalignment<CSS: ColorSetStorage + Send + Sync>(index: &PseudoalignmentIndex<'_, CSS>, mut reader: jseqio::reader::DynamicFastXReader, output: impl Write + Send, create_new_aligner: impl Fn() -> Box<dyn Pseudoaligner<CSS> + Send> + 'static, metrics: &[Metric], n_aligners: usize, sort_output: bool, output_settings: OutputSettings) {
 
     let batch_size = 10_000_usize;
     let (work_send, work_recv) = crossbeam::channel::bounded::<QueryBatch>(n_aligners);

@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use sbwt::{dbg::{Dbg, Node}, SubsetMatrix};
+use sbwt::{dbg::{Dbg, Node}, LcsArray, SubsetMatrix};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, unitig_export::break_to_colored_subunitigs};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::DbgIndex, coloring_interface::{ColorSetStorage, ColorSetView}, unitig_export::break_to_colored_subunitigs};
 use crate::set_operations::{color_sets::ColorCombination, key_kmers::SubunitigBoundaries, pipeline::colored_result};
 
 type Bits = bitvec::vec::BitVec<u64, bitvec::order::Lsb0>;
@@ -25,7 +25,7 @@ const KEPT_COLORS_FINGERPRINT_SEED: u64 = 2741;
 ///
 /// The SBWT of the index needs select support.
 #[allow(clippy::too_many_arguments)]
-pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: CompactColexKmers<CSS>, kept_colors: &[bool], keep_all_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: DbgIndex<CSS>, kept_colors: &[bool], keep_all_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
     assert_eq!(kept_colors.len(), coloring.get_color_names().len());
     let mut result_color_names = Vec::<String>::new();
     let color_to_result: Vec<Option<usize>> = kept_colors.iter().zip(coloring.get_color_names()).map(|(&kept, name)| {
@@ -35,9 +35,8 @@ pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: 
         })
     }).collect();
 
-    // The only use of the LCS array of the index: the DBG takes the (k-1)-suffix groups from it
     log::info!("Initializing DBG for the index");
-    let dbg = crate::set_operations::input_dbg(&coloring, n_threads);
+    let dbg = crate::set_operations::input_dbg(&coloring);
     log::info!("Marking the k-mers with the kept colors");
     let (keep, boundaries) = kmers_with_colors(&coloring, &dbg, kept_colors, keep_all_colors, n_threads);
     log::info!("Keeping {} of {} k-mers", keep.count_ones(), coloring.sbwt().n_kmers());
@@ -48,7 +47,7 @@ pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: 
     let precalc_len = coloring.sbwt().get_lookup_table().prefix_length;
     // Temporarily destructure the coloring to put the SBWT into an Arc for sbwt::filter, as in
     // pipeline::set_operation
-    let (sbwt, lcs, map, sets, color_names) = coloring.into_parts();
+    let (sbwt, sufgroups, dummy_marks, colors) = coloring.into_parts();
     let sbwt = Arc::new(sbwt);
     let (result_sbwt, result_merge_plan, removed) = sbwt::filter_with_removed_positions(sbwt.clone(), keep, Some(group_starts), precalc_len, optimize_peak_ram, n_threads)
         .unwrap_or_else(|_| panic!("The SBWT of the index has no select support"));
@@ -56,7 +55,7 @@ pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: 
     // colors, and the starts of its (k-1)-suffix groups, for the groups of the result
     let sbwt::ThreeWayInterleaving { s1, s2, is_leader, .. } = result_merge_plan;
     // sbwt::filter has dropped its clone by now (see the unwraps in pipeline::set_operation)
-    let coloring = CompactColexKmers::<CSS>::new(Arc::try_unwrap(sbwt).unwrap(), lcs, map, sets, Some(&color_names));
+    let coloring = DbgIndex::<CSS>::new(Arc::try_unwrap(sbwt).unwrap(), sufgroups, dummy_marks, colors);
 
     // With all colors, they keep their ids
     let colors = ColorCombination::FromFirst { color1_to_result: (!keep_all_colors).then_some(&color_to_result[..]) };
@@ -82,7 +81,7 @@ fn to_u64_words(bits: &bitvec::vec::BitVec) -> Bits {
 /// they count as one there: the boundary between them is left out, and needs no key k-mers. With
 /// `keep_all_colors`, the result keeps the whole color sets, so this holds only for the same color
 /// set.
-pub(crate) fn kmers_with_colors<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactColexKmers<CSS>, dbg: &Dbg<'_, SubsetMatrix>, kept_colors: &[bool], keep_all_colors: bool, n_threads: usize) -> (Bits, SubunitigBoundaries) {
+pub(crate) fn kmers_with_colors<CSS: ColorSetStorage + Send + Sync>(coloring: &DbgIndex<CSS>, dbg: &Dbg<'_, SubsetMatrix>, kept_colors: &[bool], keep_all_colors: bool, n_threads: usize) -> (Bits, SubunitigBoundaries) {
     let sets = coloring.get_set_storage();
     assert_eq!(kept_colors.len(), sets.n_colors());
     // The colors of each color set that are in the result, as a 128-bit fingerprint: the XOR of a
@@ -195,7 +194,7 @@ mod tests {
         let coloring = build_named_coloring(k, &names, &seqs, sample_distance, 3);
         let kept_colors: Vec<bool> = names.iter().map(|name| kept.contains(&name.as_str())).collect();
 
-        let dbg = sbwt::dbg::Dbg::new(coloring.sbwt(), Some(coloring.lcs()), 3);
+        let dbg = coloring.dbg();
         let (marks, boundaries) = super::kmers_with_colors(&coloring, &dbg, &kept_colors, false, 3);
         // Every run of kept colored subunitigs with the same kept colors has a first and a last
         // k-mer, which are kept
@@ -218,7 +217,7 @@ mod tests {
         let seqs = assign_color_ids(&mut names, colors);
         let coloring = build_named_coloring(k, &names, &seqs, input_sample_distance, 3);
         let kept_colors: Vec<bool> = names.iter().map(|name| kept.contains(&name.as_str())).collect();
-        let result = super::subset_compact_colex_kmers(coloring, &kept_colors, false, true, sample_distance, 3);
+        let result = super::subset_compact_colex_kmers(coloring, &kept_colors, false, true, sample_distance, 3).0;
         let case = format!("k = {k}, kept {kept:?}, sample distances {input_sample_distance} and {sample_distance}");
 
         let mut expected_names = Vec::<String>::new();
@@ -253,7 +252,7 @@ mod tests {
         let seqs = assign_color_ids(&mut names, colors);
         let kept_colors: Vec<bool> = names.iter().map(|name| kept.contains(&name.as_str())).collect();
         let build = || build_named_coloring(k, &names, &seqs, sample_distance, 3);
-        let result = super::subset_compact_colex_kmers(build(), &kept_colors, true, true, sample_distance, 3);
+        let result = super::subset_compact_colex_kmers(build(), &kept_colors, true, true, sample_distance, 3).0;
         let case = format!("k = {k}, kept {kept:?}, sample distance {sample_distance}");
         assert_eq!(result.get_color_names(), &names, "{case}");
         if !kept_colors.contains(&true) {
@@ -261,8 +260,8 @@ mod tests {
             return;
         }
 
-        let subset = super::subset_compact_colex_kmers(build(), &kept_colors, false, true, sample_distance, 3);
-        let expected = crate::set_operations::intersect::intersect_compact_colex_kmers(build(), subset, crate::set_operations::intersect::IntersectColors::Union, true, true, sample_distance, 3);
+        let subset = super::subset_compact_colex_kmers(build(), &kept_colors, false, true, sample_distance, 3).0;
+        let expected = crate::set_operations::intersect::intersect_compact_colex_kmers(build(), subset, crate::set_operations::intersect::IntersectColors::Union, true, true, sample_distance, 3).0;
         assert_eq!(expected.get_color_names(), &names, "{case}");
         assert_eq!(result.sbwt().n_kmers(), expected.sbwt().n_kmers(), "{case}");
         assert_eq!(result.sbwt().n_sets(), expected.sbwt().n_sets(), "{case}");
@@ -280,7 +279,7 @@ mod tests {
         // the last of the run before it, or the last k-mer of another unitig)
         if sample_distance == NO_SAMPLING {
             use simple_sds_sbwt::ops::BitVec;
-            let dbg = sbwt::dbg::Dbg::new(result.sbwt(), Some(result.lcs()), 3);
+            let dbg = result.dbg();
             let key = crate::atomic_bitmap::AtomicBitmap::new(result.sbwt().n_sets());
             dbg.iter_unitigs_with_callback(|nodes| {
                 let sets: Vec<Vec<usize>> = nodes.iter().map(|v| result.colex_to_set(v.id).iter().collect()).collect();
@@ -372,7 +371,7 @@ mod tests {
                     let seqs = assign_color_ids(&mut names, colors);
                     let coloring = build_named_coloring(k, &names, &seqs, sample_distance, 3);
                     let kept_colors: Vec<bool> = names.iter().map(|name| name == "A").collect();
-                    let result = super::subset_compact_colex_kmers(coloring, &kept_colors, false, true, sample_distance, 3);
+                    let result = super::subset_compact_colex_kmers(coloring, &kept_colors, false, true, sample_distance, 3).0;
 
                     let mut expected_names = Vec::<String>::new();
                     let expected_seqs = assign_color_ids(&mut expected_names, &colors[..1]);

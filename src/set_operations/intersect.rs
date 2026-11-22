@@ -1,5 +1,6 @@
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
-use crate::set_operations::{color_sets::ColorCombination, colors::{intersected_color_mapping, merged_color_mapping}, pipeline::{set_operation, SbwtOperation}};
+use sbwt::LcsArray;
+use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use crate::set_operations::{color_sets::ColorCombination, colors::{intersected_color_mapping, merged_color_mapping}, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
 /// How the color set of a k-mer of the intersection is computed from its color sets in the two
 /// input indexes.
@@ -20,7 +21,7 @@ pub enum IntersectColors {
 ///
 /// Both SBWTs need select support.
 #[allow(clippy::too_many_arguments)]
-pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, colors: IntersectColors, merge_shared_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, coloring2: DbgIndex<CSS>, colors: IntersectColors, merge_shared_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
     let fail = |e: String| -> ! {
         log::error!("{}", e);
         panic!("{}", e);
@@ -30,12 +31,12 @@ pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(colorin
         IntersectColors::Union => {
             let (color2_to_result, result_color_names) = merged_color_mapping(names1, names2, merge_shared_colors).unwrap_or_else(|e| fail(e));
             let colors = ColorCombination::Union { color2_to_result: &color2_to_result };
-            set_operation(coloring1, coloring2, SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+            set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
         },
         IntersectColors::Intersect => {
             let (color1_to_result, color2_to_result, result_color_names) = intersected_color_mapping(names1, names2).unwrap_or_else(|e| fail(e));
             let colors = ColorCombination::Intersection { color1_to_result: &color1_to_result, color2_to_result: &color2_to_result };
-            set_operation(coloring1, coloring2, SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+            set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
         },
     }
 }
@@ -101,7 +102,7 @@ mod tests {
             expected.push((kmer, set));
         }
 
-        let result = super::intersect_compact_colex_kmers(ccc1, ccc2, colors, merge_shared_colors, true, sample_distance, n_threads);
+        let result = super::intersect_compact_colex_kmers(ccc1, ccc2, colors, merge_shared_colors, true, sample_distance, n_threads).0;
         assert_eq!(result.get_color_names(), &expected_names);
         assert_eq!(result.get_set_storage().n_colors(), expected_names.len());
         assert_eq!(result.sbwt().n_kmers(), expected.len());

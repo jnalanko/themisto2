@@ -3,7 +3,7 @@
 use sbwt::{dbg::{Dbg, Node}, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::{ops::{BitVec, Select}, sparse_vector::{SparseBuilder, SparseVector}};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage, unitig_export::break_to_colored_subunitigs};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage, unitig_export::break_to_colored_subunitigs};
 
 pub(crate) fn mark_kmer(colex: usize, marks: &AtomicBitmap) {
     marks.set(colex, true);
@@ -91,7 +91,7 @@ pub(crate) fn mark_key_kmers_from_boundaries(boundaries: &SubunitigBoundaries, t
 ///
 /// With visited_marks, also marks there every k-mer of the result that is a k-mer of `coloring`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &CompactColexKmers<CSS>, to_result: impl Fn(usize) -> Option<usize> + Sync, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: Option<&AtomicBitmap>, n_threads: usize) {
+pub(crate) fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &DbgIndex<CSS>, to_result: impl Fn(usize) -> Option<usize> + Sync, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: Option<&AtomicBitmap>, n_threads: usize) {
 
     // Only the coverage check searches the result
     let result_si = visited_marks.map(|_| StreamingIndex::new(result_sbwt, result_lcs));
@@ -100,7 +100,7 @@ pub(crate) fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &
     assert_eq!(k, coloring.get_k());
 
     log::info!("Initializing DBG");
-    let dbg = crate::set_operations::input_dbg(coloring, n_threads);
+    let dbg = crate::set_operations::input_dbg(coloring);
 
     log::info!("Iterating unitigs");
     let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);

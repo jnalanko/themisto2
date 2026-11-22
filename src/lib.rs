@@ -3,8 +3,8 @@
 //! ```no_run
 //! use themisto2::{ColoredDbg, ColorSetView};
 //!
-//! let index = themisto2::load_index("index.thm2".as_ref(), true).unwrap(); // true: select support for the DBG
-//! let dbg = ColoredDbg::new(&index, 4);
+//! let index = themisto2::IndexDir::open("my_index".as_ref()).unwrap().load_dbg_index().unwrap();
+//! let dbg = ColoredDbg::new(&index);
 //! dbg.par_for_each_colored_unitig(|u| {
 //!     let colors: Vec<usize> = u.color_set.iter().collect();
 //!     println!("{}\t{:?}", String::from_utf8_lossy(u.seq), colors);
@@ -20,14 +20,17 @@
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
 // Public API
-pub use colex_colored_kmers::{CompactColexKmers, IndexStats};
+pub use colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex, IndexStats};
 pub use coloring_interface::{ColorSetStorage, ColorSetView};
 pub use sparse_dense_storage::SparseDenseStorage;
 pub use colored_dbg::{ColoredDbg, ColorSet, ColorRun, ColoredUnitig, Node, Unitig};
-pub use index_file::{Index, load_index, read_index, load_color_names, write_index};
+pub use index_dir::{Component, IndexDir, IndexWriter, Metadata};
+pub use kmer_lookup::KmerLookupIndex;
+pub use pseudoalignment::PseudoalignmentIndex;
 
 pub mod colored_dbg;
-pub mod index_file;
+pub mod index_dir;
+pub mod kmer_lookup;
 pub mod set_operations;
 
 // Internals. Public so that the themisto2 binary can use them, but hidden from the docs.

@@ -18,16 +18,102 @@ use crate::index_import;
 use crate::io::RewindableSeqStreamGenerator;
 use crate::iterators::VecVecUsizeIteratorGenerator;
 
-/// This is the main data structure in this file: a set of compressed color sets, and a mapping
-/// from SBWT colex ranks to color sets such that we can look up the color set of a k-mer by its
-/// colex rank in the SBWT. 
-pub struct CompactColexKmers<CSS: coloring_interface::ColorSetStorage> {
-    sbwt: SbwtIndex<SubsetMatrix>, 
+/// The colors of the k-mers of an SBWT: the distinct color sets, a mapping from colex ranks of
+/// the SBWT to color set ids, and the names of the colors. The SBWT itself is not stored here:
+/// looking up the color set of a k-mer needs the SBWT, which is given as an argument.
+pub struct Coloring<CSS: coloring_interface::ColorSetStorage> {
+    pub(crate) sets: CSS, // Distinct color sets
+    pub(crate) map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
+    pub(crate) color_names: Vec<String>, // User-provided names for the colors (e.g. accession numbers)
+}
 
-    lcs: LcsArray,
-    sets: CSS, // Distinct color sets
-    map: ColexToColorSetMap, // A mapping from the colex rank of a k-mer in the SBWT into a color set id in `sets`
-    color_names: Vec<String>, // User-provided names for the colors (e.g. accession numbers)
+impl<CSS: ColorSetStorage> Coloring<CSS> {
+
+    /// If `color_names` is None, the colors are named color_0, color_1, ...
+    pub fn new(map: ColexToColorSetMap, sets: CSS, color_names: Option<&[String]>) -> Self {
+        let color_names = if let Some(names) = color_names {
+            assert!(names.len() == sets.n_colors());
+            names.to_vec()
+        } else {
+            (0..sets.n_colors()).map(|x| format!("color_{}", x)).collect::<Vec<String>>()
+        };
+        Self { sets, map, color_names }
+    }
+
+    pub fn into_parts(self) -> (ColexToColorSetMap, CSS, Vec<String>) {
+        (self.map, self.sets, self.color_names)
+    }
+
+    pub fn colex_to_set_id(&self, colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> usize {
+        self.map.colex_to_color_set_id(colex, sbwt)
+    }
+
+    pub fn set_id_to_set<'a>(&'a self, id: usize) -> CSS::SetView<'a> {
+        self.sets.get_set_view(id)
+    }
+
+    pub fn colex_to_set<'a>(&'a self, colex: usize, sbwt: &SbwtIndex<SubsetMatrix>) -> CSS::SetView<'a> {
+        self.sets.get_set_view(self.colex_to_set_id(colex, sbwt))
+    }
+
+    pub fn get_map(&self) -> &ColexToColorSetMap {
+        &self.map
+    }
+
+    pub fn get_set_storage(&self) -> &CSS {
+        &self.sets
+    }
+
+    pub fn get_color_names(&self) -> &Vec<String> {
+        &self.color_names
+    }
+
+    pub fn n_colors(&self) -> usize {
+        self.sets.n_colors()
+    }
+
+    /// Takes the colex ranks of consecutive k-mers of a sequence (None for absent k-mers), and
+    /// pushes the color set id of each k-mer to `buffer` (None for absent k-mers). Does not
+    /// clear the buffer.
+    pub fn push_color_set_ids_for_colex_ranks(&self, colex_ranks: &[Option<usize>], sbwt: &SbwtIndex<SubsetMatrix>, buffer: &mut Vec<Option<usize>>) {
+        // Look up set ids right-to-left, reusing the set id of the next k-mer whenever possible
+        let old_buf_len = buffer.len();
+        buffer.resize(old_buf_len + colex_ranks.len(), None); // Make space for results
+        let set_ids_output = &mut buffer[old_buf_len..];
+        for i in (0..colex_ranks.len()).rev() {
+            match colex_ranks[i] {
+                Some(colex) => {
+                    if self.map.sampling.get(colex) || i+1 == set_ids_output.len() || set_ids_output[i+1].is_none() {
+                        // Sampled, or can not copy the color set id from position i+1
+                        set_ids_output[i] = Some(self.map.colex_to_color_set_id(colex, sbwt));
+                    } else {
+                        // Not sampled -> same set as the next k-mer
+                        set_ids_output[i] = set_ids_output[i+1];
+                    }
+                },
+                None => set_ids_output[i] = None,
+            }
+        }
+    }
+
+    /// Writes the color names, one per line.
+    pub fn serialize_color_names(color_names: &[String], out: &mut impl std::io::Write) -> std::io::Result<()> {
+        for name in color_names {
+            assert!(!name.contains('\n'), "Color name contains a newline: {:?}", name);
+            out.write_all(name.as_bytes())?;
+            out.write_all(b"\n")?;
+        }
+        Ok(())
+    }
+
+    /// Reads color names written by [Coloring::serialize_color_names].
+    pub fn load_color_names(input: impl std::io::BufRead) -> std::io::Result<Vec<String>> {
+        let mut names = Vec::new();
+        for line in input.lines() {
+            names.push(line?);
+        }
+        Ok(names)
+    }
 }
 
 /// A data structure that stores the color set ids for a subset of sampled k-mers in the SBWT such that
@@ -357,24 +443,202 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + Sync 
     drop(out);
 }
 
-impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
+/// A borrowed view of an SBWT and the coloring of its k-mers, for looking up color sets by colex rank.
+pub struct ColoredKmers<'a, CSS: ColorSetStorage> {
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
+    coloring: &'a Coloring<CSS>,
+}
 
-    pub fn new(sbwt: SbwtIndex<SubsetMatrix>, lcs: LcsArray, colex_map: ColexToColorSetMap, color_sets: CSS, color_names: Option<&[String]>)
-    -> CompactColexKmers<CSS> {
-        let color_names = if let Some(names) = color_names {
-            assert!(names.len() == color_sets.n_colors());
-            names.to_vec()
-        } else {
-            // Assign default color names
-            (0..color_sets.n_colors()).map(|x| format!("color_{}", x)).collect::<Vec<String>>()
-        };
-        Self {sbwt, lcs, sets: color_sets, map: colex_map, color_names}
+// Not derived: deriving would require CSS: Copy
+impl<CSS: ColorSetStorage> Clone for ColoredKmers<'_, CSS> {
+    fn clone(&self) -> Self { *self }
+}
+impl<CSS: ColorSetStorage> Copy for ColoredKmers<'_, CSS> {}
+
+impl<'a, CSS: ColorSetStorage> ColoredKmers<'a, CSS> {
+
+    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, coloring: &'a Coloring<CSS>) -> Self {
+        assert_eq!(coloring.map.sampling.len(), sbwt.n_sets(), "The coloring does not belong to the SBWT");
+        Self { sbwt, coloring }
     }
 
-    /// Easy but inefficient constructor for tests
-    /// colored_seqs has pairs (seq, color)
+    pub fn sbwt(&self) -> &'a SbwtIndex<SubsetMatrix> {
+        self.sbwt
+    }
+
+    pub fn coloring(&self) -> &'a Coloring<CSS> {
+        self.coloring
+    }
+
+    pub fn get_k(&self) -> usize {
+        self.sbwt.k()
+    }
+
+    pub fn colex_to_set_id(&self, colex: usize) -> usize {
+        self.coloring.colex_to_set_id(colex, self.sbwt)
+    }
+
+    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'a> {
+        self.coloring.set_id_to_set(id)
+    }
+
+    pub fn colex_to_set(&self, colex: usize) -> CSS::SetView<'a> {
+        self.coloring.colex_to_set(colex, self.sbwt)
+    }
+
+    pub fn get_map(&self) -> &'a ColexToColorSetMap {
+        &self.coloring.map
+    }
+
+    pub fn get_set_storage(&self) -> &'a CSS {
+        &self.coloring.sets
+    }
+
+    pub fn get_color_names(&self) -> &'a Vec<String> {
+        &self.coloring.color_names
+    }
+
+    /// `dbg` must be the de Bruijn graph of the SBWT of this view.
+    pub fn compute_index_stats(&self, dbg: &Dbg<'_, SubsetMatrix>, n_threads: usize) -> IndexStats where CSS: Sync {
+        let sets = self.get_set_storage();
+        let map = self.get_map();
+        log::info!("Computing size of distinct color sets");
+        let total_size_of_distinct_color_sets: usize = (0..sets.n_sets()).map(|i| sets.get_set_view(i).len()).sum();
+
+        let total_kmer_color_set_size = AtomicUsize::new(0);
+        let n_unitigs = AtomicUsize::new(0);
+        let total_unitig_length = AtomicUsize::new(0);
+        let min_unitig_length = AtomicUsize::new(usize::MAX);
+        let max_unitig_length = AtomicUsize::new(0);
+
+        let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
+        dbg.iter_unitigs_with_callback(|nodes|{
+            let mut cur_color_set_len: Option<usize> = None;
+            for v in nodes.iter().rev() {
+                if map.sampling.get(v.id) { 
+                    let id = self.colex_to_set_id(v.id);
+                    cur_color_set_len = Some(self.set_id_to_set(id).len());
+                } else {
+                    // Same set as previous
+                    assert!(cur_color_set_len.is_some()); // End of unitig should always be sampled
+                }
+                total_kmer_color_set_size.fetch_add(cur_color_set_len.unwrap(), Release);
+            }
+
+            let unitig_length = nodes.len()+self.sbwt.k()-1;
+            total_unitig_length.fetch_add(unitig_length, Release);
+            min_unitig_length.fetch_min(unitig_length, Release);
+            max_unitig_length.fetch_max(unitig_length, Release);
+            n_unitigs.fetch_add(1, Release);
+
+            bar.inc(nodes.len() as u64);
+        }, n_threads);
+        bar.finish();
+
+        let total_kmer_color_set_size = total_kmer_color_set_size.load(Acquire);
+        let n_sampled_kmers = map.sampling.count_ones();
+
+        IndexStats {
+            n_colors: sets.n_colors(),
+            n_kmers: self.sbwt.n_kmers(),
+            n_sbwt_sets: self.sbwt.n_sets(),
+            n_distinct_color_sets: sets.n_sets(),
+            n_sampled_kmers,
+            total_size_of_distinct_color_sets,
+            total_kmer_color_set_size,
+            n_unitigs: n_unitigs.load(Acquire),
+            total_unitig_length: total_unitig_length.load(Acquire),
+            max_unitig_length: max_unitig_length.load(Acquire),
+            min_unitig_length: min_unitig_length.load(Acquire),
+        }
+    }
+}
+
+/// The components of a Themisto 2 index that de Bruijn graph operations on its colored k-mers
+/// need: the SBWT (with select support), its (k-1)-suffix group marks and dummy node marks, and the
+/// coloring. The LCS array is not part of it. Set operations take and return these.
+pub struct DbgIndex<CSS: ColorSetStorage> {
+    pub sbwt: SbwtIndex<SubsetMatrix>,
+    /// One bit per SBWT position, set for the first k-mer of each (k-1)-suffix group (see [Dbg::k_minus_1_marks])
+    pub sufgroups: bitvec::vec::BitVec,
+    /// One bit per SBWT position, set for dummy k-mers (see [Dbg::dummy_marks])
+    pub dummy_marks: bitvec::vec::BitVec,
+    pub coloring: Coloring<CSS>,
+}
+
+impl<CSS: ColorSetStorage> DbgIndex<CSS> {
+
+    pub fn new(sbwt: SbwtIndex<SubsetMatrix>, sufgroups: bitvec::vec::BitVec, dummy_marks: bitvec::vec::BitVec, coloring: Coloring<CSS>) -> Self {
+        assert_eq!(sufgroups.len(), sbwt.n_sets());
+        assert_eq!(dummy_marks.len(), sbwt.n_sets());
+        assert_eq!(coloring.map.sampling.len(), sbwt.n_sets());
+        Self { sbwt, sufgroups, dummy_marks, coloring }
+    }
+
+    /// Computes the suffix group marks from `lcs` and the dummy marks from the SBWT, which needs
+    /// select support.
+    pub fn from_lcs(sbwt: SbwtIndex<SubsetMatrix>, lcs: &LcsArray, coloring: Coloring<CSS>, n_threads: usize) -> Self {
+        let (sufgroups, dummy_marks) = {
+            let dbg = Dbg::new(&sbwt, Some(lcs), n_threads);
+            (dbg.k_minus_1_marks().clone(), dbg.dummy_marks().clone())
+        };
+        Self::new(sbwt, sufgroups, dummy_marks, coloring)
+    }
+
+    pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, bitvec::vec::BitVec, bitvec::vec::BitVec, Coloring<CSS>) {
+        (self.sbwt, self.sufgroups, self.dummy_marks, self.coloring)
+    }
+
+    /// The de Bruijn graph of the SBWT. [Dbg] owns its marks, so this clones the marks (2 bits per
+    /// SBWT position), which is still much cheaper than computing them again.
+    pub fn dbg(&self) -> Dbg<'_, SubsetMatrix> {
+        Dbg::from_marks(&self.sbwt, self.sufgroups.clone(), self.dummy_marks.clone())
+    }
+
+    pub fn colored_kmers(&self) -> ColoredKmers<'_, CSS> {
+        ColoredKmers::new(&self.sbwt, &self.coloring)
+    }
+
+    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
+        &self.sbwt
+    }
+
+    pub fn get_k(&self) -> usize {
+        self.sbwt.k()
+    }
+
+    pub fn colex_to_set_id(&self, colex: usize) -> usize {
+        self.coloring.colex_to_set_id(colex, &self.sbwt)
+    }
+
+    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'_> {
+        self.coloring.set_id_to_set(id)
+    }
+
+    pub fn colex_to_set(&self, colex: usize) -> CSS::SetView<'_> {
+        self.coloring.colex_to_set(colex, &self.sbwt)
+    }
+
+    pub fn get_map(&self) -> &ColexToColorSetMap {
+        &self.coloring.map
+    }
+
+    pub fn get_set_storage(&self) -> &CSS {
+        &self.coloring.sets
+    }
+
+    pub fn get_color_names(&self) -> &Vec<String> {
+        &self.coloring.color_names
+    }
+
+    pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {
+        self.colored_kmers().compute_index_stats(&self.dbg(), n_threads)
+    }
+
+    /// Easy but inefficient constructor for tests. colored_seqs has pairs (seq, color).
+    /// Also returns the LCS array of the SBWT.
     #[cfg(test)]
-    pub fn new_from_small_input(colored_seqs: &[(&[u8], usize)], k: usize, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+    pub fn new_from_small_input_with_lcs(colored_seqs: &[(&[u8], usize)], k: usize, sample_distance: usize, n_threads: usize) -> (Self, LcsArray) {
         use std::collections::HashMap;
         use sbwt::StreamingIndex;
         
@@ -432,30 +696,23 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
         let color_set_iter = VecVecUsizeIteratorGenerator::new(distinct_sets_in_order);
         let css = CSS::new(color_set_iter, n_colors);
-        Self::new(sbwt, lcs, map, *css, None)
-
+        let coloring = Coloring::new(map, *css, None);
+        (Self::from_lcs(sbwt, &lcs, coloring, n_threads), lcs)
     }
 
-    pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, LcsArray, ColexToColorSetMap, CSS, Vec<String>) {
-        (self.sbwt, self.lcs, self.map, self.sets, self.color_names)
+    /// Like [DbgIndex::new_from_small_input_with_lcs], without the LCS array.
+    #[cfg(test)]
+    pub fn new_from_small_input(colored_seqs: &[(&[u8], usize)], k: usize, sample_distance: usize, n_threads: usize) -> Self {
+        Self::new_from_small_input_with_lcs(colored_seqs, k, sample_distance, n_threads).0
     }
+}
 
-    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
-        &self.sbwt
-    }
+impl<CSS: ColorSetStorage> Coloring<CSS> {
 
-    pub fn lcs(&self) -> &LcsArray {
-        &self.lcs
-    }
-
-    #[allow(dead_code)]
-    pub fn get_map(&self) -> &ColexToColorSetMap {
-        &self.map
-    }
-
+    /// Builds the coloring of `sbwt` from a colored unitig dump. The colors are named 0, 1, ...
     pub fn new_from_colored_unitig_dump(
-        sbwt: SbwtIndex<SubsetMatrix>, 
-        lcs: LcsArray, 
+        sbwt: &SbwtIndex<SubsetMatrix>, 
+        lcs: &LcsArray, 
         sample_distance: usize,
         n_threads: usize,
         metadata_dump: impl std::io::BufRead, 
@@ -482,7 +739,7 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
 
             for _ in 0..n_threads {
                 let worker_in_clone = worker_in.clone();
-                let index = sbwt::StreamingIndex::new(&sbwt, &lcs);
+                let index = sbwt::StreamingIndex::new(sbwt, lcs);
                 worker_handles.push(scope.spawn(move || {
                     let mut our_colex_to_color_set_id: Vec<(usize, usize)> = vec![]; // (colex, coled_set_id)
                     while let Ok(batch) = worker_in_clone.recv(){
@@ -531,11 +788,11 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         };
 
         let color_names: Vec<String> = (0..distinct_css.n_colors()).map(|x| x.to_string()).collect();
-        Self {sbwt, lcs, sets: distinct_css, map: colex_map, color_names}
+        Self::new(colex_map, distinct_css, Some(&color_names))
     }
 
-    #[allow(dead_code)] // Might still be useful in the future
-    pub fn new_single_colored(sbwt: SbwtIndex<SubsetMatrix>, lcs: LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
+    /// A coloring where every k-mer has the single color `color_name`.
+    pub fn new_single_colored(sbwt: &SbwtIndex<SubsetMatrix>, lcs: &LcsArray, sample_distance: usize, n_threads: usize, color_name: String) -> Self {
         let n_colors = 1;
         let int_bitwidth = 1;
 
@@ -544,286 +801,15 @@ impl<CSS: ColorSetStorage> CompactColexKmers<CSS> {
         let sets = CSS::new(vv, n_colors);
 
         log::info!("Sampling nodes");
-        let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, &sbwt, Some(&lcs), |_colex| 0, n_threads);
+        let mut unitig_samples = ColexToColorSetMap::pick_sampled_kmers(sample_distance, sbwt, Some(lcs), |_colex| 0, n_threads);
         unitig_samples.enable_rank();
         log::info!("Storing color set ids for sampled nodes");
-        //let color_set_ids = IntVector::with_len(unitig_samples.count_ones(), int_bitwidth, 0).unwrap();
         let color_set_ids = CompactIntVec::new(unitig_samples.count_ones(), int_bitwidth);
         let colex_map = ColexToColorSetMap{
             sampling: unitig_samples,
             color_set_ids,
         };
-        Self {sbwt, lcs, sets: *sets, map: colex_map, color_names: vec![color_name]}
-    }
-
-    pub fn colex_to_set_id(&self, colex: usize) -> usize {
-        self.map.colex_to_color_set_id(colex, &self.sbwt)
-    }
-
-    pub fn set_id_to_set<'a>(&'a self, id: usize) -> CSS::SetView<'a> {
-        self.sets.get_set_view(id)
-    }
-
-    pub fn colex_to_set<'a>(&'a self, colex: usize) -> CSS::SetView<'a> {
-        self.sets.get_set_view(self.colex_to_set_id(colex))
-    }
-
-    fn serialization_magic_string() -> &'static [u8; 4] {
-        b"CCKM" // Compact Colex Kmers
-    }
-
-    fn serialization_version() -> u64 {
-        2_u64
-    }
-
-    pub fn serialize(&self, out: &mut impl std::io::Write) {
-        out.write_all(Self::serialization_magic_string()).unwrap();
-        out.write_all(&Self::serialization_version().to_le_bytes()).unwrap();
-
-        // Color names are written first (right after magic + version) so that
-        // they can be loaded without having to read the rest of the index.
-        let n_names = self.color_names.len() as u64;
-        out.write_all(&n_names.to_le_bytes()).unwrap();
-        for name in self.color_names.iter() {
-            let name_bytes = name.as_bytes();
-            let name_len = name_bytes.len() as u64;
-            out.write_all(&name_len.to_le_bytes()).unwrap();
-            out.write_all(name_bytes).unwrap();
-        }
-
-        self.sbwt.serialize(out).unwrap();
-        self.lcs.serialize(out).unwrap();
-        self.sets.serialize(out);
-        self.map.serialize(out);
-    }
-
-    /// Reads and validates the magic string and serialization version from `input`.
-    fn check_magic_and_version(input: &mut impl std::io::Read) {
-        let mut magic_string = [0_u8; 4];
-        input.read_exact(&mut magic_string).unwrap();
-        if magic_string != *Self::serialization_magic_string() {
-            panic!("Error loading CompactColexKmers: expected bytes {:?} but found {:?}", Self::serialization_magic_string(), magic_string);
-        }
-        let mut version_bytes = [0_u8; 8];
-        input.read_exact(&mut version_bytes).unwrap();
-        let version = u64::from_le_bytes(version_bytes);
-        if version != Self::serialization_version() {
-            panic!("Error loading CompactColexKmers: expected version {} but found {}", Self::serialization_version(), version);
-        }
-    }
-
-    fn load_color_names_internal(input: &mut impl std::io::Read) -> Vec<String> {
-        let mut n_names_bytes = [0_u8; 8];
-        input.read_exact(&mut n_names_bytes).unwrap();
-        let n_names = u64::from_le_bytes(n_names_bytes) as usize;
-        let mut color_names = Vec::<String>::with_capacity(n_names);
-        for _ in 0..n_names {
-            let mut name_len_bytes = [0_u8; 8];
-            input.read_exact(&mut name_len_bytes).unwrap();
-            let name_len = u64::from_le_bytes(name_len_bytes) as usize;
-            let mut name_bytes = vec![0_u8; name_len];
-            input.read_exact(&mut name_bytes).unwrap();
-            let name = String::from_utf8(name_bytes).unwrap();
-            color_names.push(name);
-        }
-        color_names
-    }
-
-    /// Loads only the color names from a serialized index, skipping the rest of
-    /// the on-disk structure. The remaining bytes of `input` are not consumed.
-    pub fn load_color_names_only(input: &mut impl std::io::Read) -> Vec<String> {
-        Self::check_magic_and_version(input);
-        Self::load_color_names_internal(input)
-    }
-
-    /// Load the index from the serialization format.
-    /// If this struct is going to be merged with [crate::coloring::merge_colorings], it will
-    /// need select support on the sbwt. We need to build it already during loading because
-    /// once the sbwt is put on to the heap into an Arc, it cannot be modified anymore.
-    /// Unless we make it an Arc<Refcell<...>>, but that might have overhead because then
-    /// it will do run-time borrow checking on every access if I understand correctly.
-    pub fn load(input: &mut impl std::io::Read, enable_select: bool) -> Self {
-        Self::check_magic_and_version(input);
-        let color_names = Self::load_color_names_internal(input);
-
-        log::info!("Loading the SBWT");
-        let mut sbwt = SbwtIndex::<SubsetMatrix>::load(input).unwrap();
-        if enable_select {
-            log::info!("Building select support");
-            sbwt.build_select();
-        }
-        log::info!("Loading the LCS array");
-        let lcs = LcsArray::load(input).unwrap();
-        log::info!("Loading color sets");
-        let sets = CSS::load(input);
-        log::info!("Loading color set mapping");
-        let map = ColexToColorSetMap::load(input);
-        assert_eq!(map.sampling.len(), sbwt.n_sets());
-        assert_eq!(color_names.len(), sets.n_colors());
-
-        log::info!("Index loaded");
-        CompactColexKmers{sbwt, lcs, sets, map, color_names}
-    }
-
-    pub fn lookup_kmer_color_sets(&self, seq: &[u8]) -> Vec<Option<CSS::SetView<'_>>> {
-        let mut set_ids = Vec::<Option<usize>>::new();
-        self.push_color_set_ids_to_buffer(seq, &mut set_ids);
-
-        let mut sets = Vec::<Option::<CSS::SetView<'_>>>::with_capacity(set_ids.len());
-        for (idx, id) in set_ids.iter().enumerate() {
-            if idx == 0 || (set_ids[idx] != set_ids[idx-1]) {
-                // If the kmer existed, its color set different than the previous
-                match id {
-                    Some(id) => {
-                        // k-mer exists -> fetch color set
-                        sets.push(Some(self.set_id_to_set(*id)))
-                    },
-                    None => {
-                        // Absent k-mer
-                        sets.push(None)
-                    }
-                }
-            } else {
-                // Same set as previous (possibly None)
-                sets.push(sets.last().unwrap().clone())
-            }
-        }
-        sets
-    }
-
-    // Does not clear the buffer
-    pub fn push_color_set_ids_to_buffer(&self, seq: &[u8], buffer: &mut Vec<Option<usize>>) {
-        let k = self.sbwt.k();
-        if seq.len() < k {
-            return;
-        }
-
-        #[derive(Eq, PartialEq, Debug)]
-        enum ColorId { // Contains colex rank in the value, if exists
-            Sampled(usize),
-            SameAsNext(usize),
-            AbsentKmer
-        }
-
-        let mut colex_positions = Vec::<ColorId>::with_capacity(seq.len()-k+1);
-
-        let color_id = |colex: Option<usize>| match colex {
-            Some(colex) if self.map.sampling.get(colex) => ColorId::Sampled(colex),
-            Some(colex) => ColorId::SameAsNext(colex),
-            None => ColorId::AbsentKmer,
-        };
-
-        // Pass 1: Compute colex ranks and whether the k-mers are sampled
-        for (len, range) in sbwt::StreamingIndex::new(&self.sbwt, &self.lcs).matching_statistics_iter(seq).skip(k-1) {
-            assert!(len < k || range.len() == 1);
-            colex_positions.push(color_id((len == k).then_some(range.start)));
-        }
-
-        // Pass 2: look up set ids right-to-left, reusing set ids for the next k-mer whenever possible
-        let old_buf_len = buffer.len();
-        buffer.resize(old_buf_len + colex_positions.len(), None); // Make space for results
-        let set_ids_output = &mut buffer[old_buf_len..];
-        for i in (0..colex_positions.len()).rev() {
-            match colex_positions[i] {
-                ColorId::Sampled(colex) => {
-                    let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
-                    set_ids_output[i] = Some(set_id);
-                },
-                ColorId::SameAsNext(colex) => {
-                    if i+1 == set_ids_output.len() || set_ids_output[i+1].is_none() {
-                        // Can not copy color set id from position i+1
-                        let set_id = self.map.colex_to_color_set_id(colex, &self.sbwt);
-                        set_ids_output[i] = Some(set_id);
-                    } else {
-                        set_ids_output[i] = set_ids_output[i+1];
-                    }
-                },
-                ColorId::AbsentKmer => {
-                    set_ids_output[i] = None;
-                },
-            }
-        }
-
-        // Debug verification:
-        /*
-        for (i, kmer) in seq.windows(k).enumerate() {
-            match self.sbwt.search(kmer) {
-                Some(colex) => {
-                    assert!(set_ids_output[i] == Some(self.map.colex_to_color_set_id(colex.start, &self.sbwt))); 
-                },
-                None => {
-                    assert!(set_ids_output[i].is_none());    
-                },
-            }
-        }
-        */
-    }
-
-    pub fn get_k(&self) -> usize {
-        self.sbwt.k()
-    }
-
-    pub fn get_set_storage(&self) -> &CSS {
-        &self.sets
-    }
-
-    #[allow(dead_code)]
-    pub fn get_color_names(&self) -> &Vec<String> {
-        &self.color_names
-    }
-
-    pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {
-        log::info!("Computing size of distinct color sets");
-        let total_size_of_distinct_color_sets: usize = (0..self.sets.n_sets()).map(|i| self.sets.get_set_view(i).len()).sum();
-
-        log::info!("Initializing de Bruijn graph");
-        let dbg = Dbg::new(&self.sbwt, Some(&self.lcs), n_threads);
-        let total_kmer_color_set_size = AtomicUsize::new(0);
-        let n_unitigs = AtomicUsize::new(0);
-        let total_unitig_length = AtomicUsize::new(0);
-        let min_unitig_length = AtomicUsize::new(usize::MAX);
-        let max_unitig_length = AtomicUsize::new(0);
-
-        let bar = indicatif::ProgressBar::new(self.sbwt.n_kmers() as u64);
-        dbg.iter_unitigs_with_callback(|nodes|{
-            let mut cur_color_set_len: Option<usize> = None;
-            for v in nodes.iter().rev() {
-                if self.map.sampling.get(v.id) { 
-                    let id = self.colex_to_set_id(v.id);
-                    cur_color_set_len = Some(self.set_id_to_set(id).len());
-                } else {
-                    // Same set as previous
-                    assert!(cur_color_set_len.is_some()); // End of unitig should always be sampled
-                }
-                total_kmer_color_set_size.fetch_add(cur_color_set_len.unwrap(), Release);
-            }
-
-            let unitig_length = nodes.len()+self.sbwt().k()-1;
-            total_unitig_length.fetch_add(unitig_length, Release);
-            min_unitig_length.fetch_min(unitig_length, Release);
-            max_unitig_length.fetch_max(unitig_length, Release);
-            n_unitigs.fetch_add(1, Release);
-
-            bar.inc(nodes.len() as u64);
-        }, n_threads);
-        bar.finish();
-
-        let total_kmer_color_set_size = total_kmer_color_set_size.load(Acquire);
-        let n_sampled_kmers = self.map.sampling.count_ones();
-
-        IndexStats {
-            n_colors: self.sets.n_colors(),
-            n_kmers: self.sbwt.n_kmers(),
-            n_sbwt_sets: self.sbwt.n_sets(),
-            n_distinct_color_sets: self.sets.n_sets(),
-            n_sampled_kmers,
-            total_size_of_distinct_color_sets,
-            total_kmer_color_set_size,
-            n_unitigs: n_unitigs.load(Acquire),
-            total_unitig_length: total_unitig_length.load(Acquire),
-            max_unitig_length: max_unitig_length.load(Acquire),
-            min_unitig_length: min_unitig_length.load(Acquire),
-        }
+        Self::new(colex_map, *sets, Some(&[color_name]))
     }
 }
 

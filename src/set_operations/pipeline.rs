@@ -7,7 +7,7 @@ use std::{cmp::max, sync::Arc};
 use sbwt::{dbg::Dbg, LcsArray, SbwtIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, CompactColexKmers}, coloring_interface::ColorSetStorage, util::u64_bitvec_to_simple_sds};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::{ColexToColorSetMap, Coloring, DbgIndex}, coloring_interface::ColorSetStorage, util::u64_bitvec_to_simple_sds};
 use crate::set_operations::{color_sets::{ColorCombination, ElementGeneratorFromInterleaving}, key_kmers::{mark_key_kmers_for, mark_key_kmers_from_boundaries, mark_structural_key_kmers, SubunitigBoundaries}, result_positions::InputToResult};
 use crate::set_of_sets_construction::{build_color_set_storage, find_kmers_that_cover_all_distinct_sets_from_generator_that_does_not_give_duplicates};
 
@@ -37,32 +37,44 @@ impl SbwtOperation {
 
 type Bits = bitvec::vec::BitVec<u64, bitvec::order::Lsb0>;
 
+/// The second input of a set operation: the SBWT, and for all operations other than the
+/// difference, the rest of the index too. No k-mer of a difference is in the second input, and its
+/// colors are those of the first input, so the difference needs only the SBWT of the second input.
+#[allow(clippy::large_enum_variant)] // Constructed once per set operation and moved right away
+pub(crate) enum SecondInput<CSS: ColorSetStorage> {
+    Index(DbgIndex<CSS>),
+    SbwtOnly(SbwtIndex<SubsetMatrix>),
+}
+
 /// Computes the result of `operation` on the k-mers of coloring1 and coloring2. The color set of
 /// each k-mer of the result combines its color sets in the inputs as given by `colors`, and the
-/// result has the colors `result_color_names`.
+/// result has the colors `result_color_names`. Returns the result and the LCS array of its SBWT.
 ///
 /// For the intersection and the difference, the SBWT of coloring1 needs select support.
+/// coloring2 is [SecondInput::SbwtOnly] exactly for the difference.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, operation: SbwtOperation, colors: ColorCombination, result_color_names: &[String], optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
-
-    log::info!("Computing the sbwt merge plan");
-    let interleaving = sbwt::MergeInterleaving::new(coloring1.sbwt(), coloring2.sbwt(), optimize_peak_ram, n_threads);
-    assert_eq!(interleaving.s1.len(), interleaving.s2.len());
-
-    let precalc_len = max(coloring1.sbwt().get_lookup_table().prefix_length, coloring2.sbwt().get_lookup_table().prefix_length);
+pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, coloring2: SecondInput<CSS>, operation: SbwtOperation, colors: ColorCombination, result_color_names: &[String], optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
+    let is_difference = matches!(operation, SbwtOperation::Difference);
     // Temporarily destructure the colorings into parts in order to be able to put the SBWTs into
     // Arcs for the set operations of sbwt, which take Arcs by design (see the comment at sbwt::merge).
-    let (sbwt1, lcs1, map1, sets1, color_names_1) = coloring1.into_parts();
-    let (sbwt2, lcs2, map2, sets2, color_names_2) = coloring2.into_parts();
-    // No k-mer of a difference is in coloring2, and its colors are those of coloring1, so the
-    // difference needs only the SBWT of coloring2, for the set operation
-    let is_difference = matches!(operation, SbwtOperation::Difference);
-    let colors2 = if is_difference {
-        drop((lcs2, map2, sets2, color_names_2));
-        None
-    } else {
-        Some((lcs2, map2, sets2, color_names_2))
+    let (sbwt1, sufgroups1, dummy_marks1, colors1) = coloring1.into_parts();
+    let (sbwt2, colors2) = match coloring2 {
+        SecondInput::Index(coloring2) => {
+            assert!(!is_difference, "The difference needs only the SBWT of the second input");
+            let (sbwt2, sufgroups2, dummy_marks2, colors2) = coloring2.into_parts();
+            (sbwt2, Some((sufgroups2, dummy_marks2, colors2)))
+        },
+        SecondInput::SbwtOnly(sbwt2) => {
+            assert!(is_difference, "Only the difference can do without the colors of the second input");
+            (sbwt2, None)
+        },
     };
+
+    log::info!("Computing the sbwt merge plan");
+    let interleaving = sbwt::MergeInterleaving::new(&sbwt1, &sbwt2, optimize_peak_ram, n_threads);
+    assert_eq!(interleaving.s1.len(), interleaving.s2.len());
+
+    let precalc_len = max(sbwt1.get_lookup_table().prefix_length, sbwt2.get_lookup_table().prefix_length);
     let sbwt1 = Arc::new(sbwt1);
     let sbwt2 = Arc::new(sbwt2);
     let interleaving = Arc::new(interleaving);
@@ -107,9 +119,9 @@ pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: Compa
     // The unwraps are ok because sbwt's set operations currently drop all their clones of the Arcs before returning
     let sbwt1 = Arc::try_unwrap(sbwt1).unwrap();
     let sbwt2 = Arc::try_unwrap(sbwt2).unwrap();
-    let coloring1 = CompactColexKmers::<CSS>::new(sbwt1, lcs1, map1, sets1, Some(&color_names_1));
+    let coloring1 = DbgIndex::<CSS>::new(sbwt1, sufgroups1, dummy_marks1, colors1);
     let coloring2 = match colors2 {
-        Some((lcs2, map2, sets2, color_names_2)) => Some(CompactColexKmers::<CSS>::new(sbwt2, lcs2, map2, sets2, Some(&color_names_2))),
+        Some((sufgroups2, dummy_marks2, colors2)) => Some(DbgIndex::<CSS>::new(sbwt2, sufgroups2, dummy_marks2, colors2)),
         None => {
             drop(sbwt2);
             None
@@ -133,7 +145,7 @@ pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: Compa
 /// `check_visited` (see mark_key_kmers) needs that walk, so it can't be combined with `boundaries1`.
 /// `result_name` is how the result is called in the log.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn colored_result<CSS: ColorSetStorage + Send + Sync>(coloring1: &CompactColexKmers<CSS>, boundaries1: Option<SubunitigBoundaries>, coloring2: Option<&CompactColexKmers<CSS>>, mut result_sbwt: SbwtIndex<SubsetMatrix>, s1: &Bits, s2: &Bits, is_leader: Bits, removed: Option<&Bits>, result_name: &str, colors: ColorCombination, result_color_names: &[String], sample_distance: usize, check_visited: bool, n_threads: usize) -> CompactColexKmers<CSS> {
+pub(crate) fn colored_result<CSS: ColorSetStorage + Send + Sync>(coloring1: &DbgIndex<CSS>, boundaries1: Option<SubunitigBoundaries>, coloring2: Option<&DbgIndex<CSS>>, mut result_sbwt: SbwtIndex<SubsetMatrix>, s1: &Bits, s2: &Bits, is_leader: Bits, removed: Option<&Bits>, result_name: &str, colors: ColorCombination, result_color_names: &[String], sample_distance: usize, check_visited: bool, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
     // First, so that the merge plan's group starts are freed before anything else is built
     log::info!("Deriving the (k-1)-suffix groups of the {} SBWT from the merge plan", result_name);
     let k_minus_1_marks = sbwt::result_k_minus_1_marks(&is_leader, removed, n_threads);
@@ -151,6 +163,8 @@ pub(crate) fn colored_result<CSS: ColorSetStorage + Send + Sync>(coloring1: &Com
         assert_eq!(&k_minus_1_marks, Dbg::new(&result_sbwt, Some(&result_lcs), n_threads).k_minus_1_marks(), "the groups of the {} from the merge plan", result_name);
     }
     let result_dbg = Dbg::new_with_k_minus_1_marks(&result_sbwt, k_minus_1_marks);
+    // Kept for the result index, so that its DBG does not need to be built again
+    let (result_sufgroups, result_dummy_marks) = (result_dbg.k_minus_1_marks().clone(), result_dbg.dummy_marks().clone());
 
     log::info!("=== Phase 1/3: marking key k-mers ===");
     let key_kmer_marks = mark_key_kmers(coloring1, boundaries1.as_ref(), coloring2, s1, s2, removed, &result_sbwt, &result_lcs, &result_dbg, sample_distance, check_visited, n_threads);
@@ -192,7 +206,8 @@ pub(crate) fn colored_result<CSS: ColorSetStorage + Send + Sync>(coloring1: &Com
         color_set_ids: key_kmer_idx_to_set_id,
     };
 
-    CompactColexKmers::<CSS>::new(result_sbwt, result_lcs, colex_map, css, Some(result_color_names))
+    let coloring = Coloring::new(colex_map, css, Some(result_color_names));
+    (DbgIndex::<CSS>::new(result_sbwt, result_sufgroups, result_dummy_marks, coloring), result_lcs)
 }
 
 /// Marks the key k-mers of the result: the structural key k-mers of the result, and the k-mers of
@@ -211,7 +226,7 @@ pub(crate) fn colored_result<CSS: ColorSetStorage + Send + Sync>(coloring1: &Com
 /// extra streaming-index pass over the result and is not needed for marking key k-mers, only for
 /// catching bugs during development.
 #[allow(clippy::too_many_arguments)]
-fn mark_key_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: &CompactColexKmers<CSS>, boundaries1: Option<&SubunitigBoundaries>, coloring2: Option<&CompactColexKmers<CSS>>, s1: &Bits, s2: &Bits, removed: Option<&Bits>, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, sample_distance: usize, check_visited: bool, n_threads: usize) -> bitvec::vec::BitVec {
+fn mark_key_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: &DbgIndex<CSS>, boundaries1: Option<&SubunitigBoundaries>, coloring2: Option<&DbgIndex<CSS>>, s1: &Bits, s2: &Bits, removed: Option<&Bits>, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, sample_distance: usize, check_visited: bool, n_threads: usize) -> bitvec::vec::BitVec {
     let k = result_sbwt.k();
     assert_eq!(k, coloring1.get_k());
     assert!(coloring2.is_none_or(|coloring2| coloring2.get_k() == k));

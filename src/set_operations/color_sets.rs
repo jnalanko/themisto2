@@ -6,7 +6,7 @@ use std::{ops::Range, sync::Arc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use crate::{colex_colored_kmers::DbgIndex, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 /// How the color sets of a k-mer in the two input indexes are combined into its color set in the
 /// result of a set operation.
@@ -37,8 +37,8 @@ pub struct ElementGeneratorFromInterleaving<'a, CSS: ColorSetStorage + Sync + Se
     // The positions of the interleaving that are not in the result. None if nothing was removed,
     // in which case interleaving positions are result colex positions.
     pub removed: Option<&'a bitvec::vec::BitVec<u64, bitvec::order::Lsb0>>,
-    pub coloring1: &'a CompactColexKmers<CSS>,
-    pub coloring2: Option<&'a CompactColexKmers<CSS>>, // Needed unless the colors are ColorCombination::FromFirst
+    pub coloring1: &'a DbgIndex<CSS>,
+    pub coloring2: Option<&'a DbgIndex<CSS>>, // Needed unless the colors are ColorCombination::FromFirst
     pub result_key_kmer_marks: &'a bitvec::vec::BitVec, // Only reporting set elements for these
     pub filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, // With rank support
     pub colors: ColorCombination<'a>,

@@ -1,5 +1,6 @@
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
-use crate::set_operations::{color_sets::ColorCombination, colors::merged_color_mapping, pipeline::{set_operation, SbwtOperation}};
+use sbwt::LcsArray;
+use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use crate::set_operations::{color_sets::ColorCombination, colors::merged_color_mapping, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
 /// Merges two colored indexes: the result has the k-mers of both indexes, and the color set of
 /// each k-mer is the union of its color sets in the two indexes. If merge_shared_colors is true,
@@ -7,13 +8,13 @@ use crate::set_operations::{color_sets::ColorCombination, colors::merged_color_m
 ///
 /// If keep_redundant_dummies is true, the dummy nodes that become redundant in the SBWT merge are
 /// kept. The result has the same k-mers and colors, but possibly more dummy nodes.
-pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: CompactColexKmers<CSS>, coloring2: CompactColexKmers<CSS>, merge_shared_colors: bool, optimize_peak_ram: bool, keep_redundant_dummies: bool, sample_distance: usize, n_threads: usize) -> CompactColexKmers<CSS> {
+pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, coloring2: DbgIndex<CSS>, merge_shared_colors: bool, optimize_peak_ram: bool, keep_redundant_dummies: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
     let (color2_to_merged, merged_color_names) = merged_color_mapping(coloring1.get_color_names(), coloring2.get_color_names(), merge_shared_colors).unwrap_or_else(|e| {
         log::error!("{}", e);
         panic!("{}", e);
     });
     let colors = ColorCombination::Union { color2_to_result: &color2_to_merged };
-    set_operation(coloring1, coloring2, SbwtOperation::Merge { keep_redundant_dummies }, colors, &merged_color_names, optimize_peak_ram, sample_distance, n_threads)
+    set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Merge { keep_redundant_dummies }, colors, &merged_color_names, optimize_peak_ram, sample_distance, n_threads)
 }
 
 #[cfg(test)]
@@ -62,7 +63,7 @@ mod tests {
             let ccc1 = build_named_coloring(k, &names1, &input_seqs_1, input_sample_distance, n_threads);
             let ccc2 = build_named_coloring(k, &names2, &input_seqs_2, input_sample_distance, n_threads);
 
-            let ccc_merged = super::merge_compact_colex_kmers(ccc1, ccc2, merge_shared_colors, true, keep_redundant_dummies, merge_sample_distance, n_threads);
+            let ccc_merged = super::merge_compact_colex_kmers(ccc1, ccc2, merge_shared_colors, true, keep_redundant_dummies, merge_sample_distance, n_threads).0;
             assert_eq!(ccc_merged.get_color_names(), &expected_names);
             assert_eq!(ccc_merged.get_set_storage().n_colors(), expected_names.len());
             let sbwt_merged = &ccc_merged.sbwt();

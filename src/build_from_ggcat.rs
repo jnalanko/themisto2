@@ -9,7 +9,7 @@
 //!     `ColorSetStorage::new` on a CSS thread.
 //!   * A worker pool consumes batched `(unitig, color_set_id)` pairs and
 //!     accumulates `(colex, color_set_id)` pairs against the SBWT, mirroring
-//!     `CompactColexKmers::new_from_colored_unitig_dump`.
+//!     `Coloring::new_from_colored_unitig_dump`.
 
 use std::path::Path;
 
@@ -22,7 +22,7 @@ use simple_sds_sbwt::ops::{BitVec, Rank};
 use simple_sds_sbwt::raw_vector::AccessRaw;
 
 use crate::colex_colored_kmers::{
-    ColexToColorSetMap, CompactColexKmers, UnitigImportSeqBatch,
+    ColexToColorSetMap, Coloring, UnitigImportSeqBatch,
 };
 use crate::coloring_interface::ColorSetStorage;
 use crate::int_vec::CompactIntVec;
@@ -128,7 +128,7 @@ pub fn build_index_from_ggcat<CSS: ColorSetStorage + Send + Sync + 'static>(
     k: usize,
     sample_distance: usize,
     n_threads: usize,
-) -> CompactColexKmers<CSS> {
+) -> (SbwtIndex<SubsetMatrix>, LcsArray, Coloring<CSS>) {
     assert!(sample_distance > 0);
 
     log::info!("Initializing GGCAT instance");
@@ -297,5 +297,5 @@ pub fn build_index_from_ggcat<CSS: ColorSetStorage + Send + Sync + 'static>(
         color_set_ids: stored_color_set_ids,
     };
 
-    CompactColexKmers::<CSS>::new(sbwt, lcs, colex_map, css, Some(&color_names))
+    (sbwt, lcs, Coloring::new(colex_map, css, Some(&color_names)))
 }

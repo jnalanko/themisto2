@@ -1,10 +1,10 @@
 use std::{cmp::min, iter::Map};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
+use crate::{pseudoalignment::PseudoalignmentIndex, coloring_interface::{ColorSetStorage, ColorSetView}, util::for_each_run};
 
 pub trait PseudoalignmentMetricProcessor<CSS: ColorSetStorage> {
     /// Returns pairs (color, metric value) for those colors that were found
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)>;
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &PseudoalignmentIndex<'_, CSS>) -> Vec<(usize, usize)>;
 
     fn metric_id(&self) -> Metric;
 }
@@ -73,7 +73,7 @@ impl HitCountProcessor {
 }
 
 impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for HitCountProcessor {
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)> {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &PseudoalignmentIndex<'_, CSS>) -> Vec<(usize, usize)> {
         self.hits.reset();
         for_each_run(color_set_ids, |run_range| {
             let run_len = run_range.len(); 
@@ -117,7 +117,7 @@ impl BasesCoveredProcessor {
 }
 
 impl<CSS: ColorSetStorage> PseudoalignmentMetricProcessor<CSS> for BasesCoveredProcessor {
-    fn process(&mut self, color_set_ids: &[Option<usize>], index: &CompactColexKmers<CSS>) -> Vec<(usize, usize)> {
+    fn process(&mut self, color_set_ids: &[Option<usize>], index: &PseudoalignmentIndex<'_, CSS>) -> Vec<(usize, usize)> {
 
         self.bases_covered.reset();
         self.end_of_last_covered_kmer.reset();
@@ -181,7 +181,8 @@ mod tests {
 
         let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
         
-        let index = colex_colored_kmers::CompactColexKmers::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+        let built = colex_colored_kmers::DbgIndex::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&built.sbwt, &built.sufgroups, &built.coloring);
 
         let query = s0;
         let mut cset_ids = Vec::new();
@@ -213,7 +214,8 @@ mod tests {
 
         let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
         
-        let index = colex_colored_kmers::CompactColexKmers::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+        let built = colex_colored_kmers::DbgIndex::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
+        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&built.sbwt, &built.sufgroups, &built.coloring);
 
         let query = s0;
         let mut cset_ids = Vec::new();

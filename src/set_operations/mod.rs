@@ -15,10 +15,9 @@ mod test_utils;
 
 use sbwt::{dbg::Dbg, SubsetMatrix};
 
-use crate::{colex_colored_kmers::CompactColexKmers, coloring_interface::ColorSetStorage};
+use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
 
-/// The DBG of the SBWT of `coloring`, an input of a set operation, with its (k-1)-suffix groups
-/// from its LCS array.
-pub(crate) fn input_dbg<'a, CSS: ColorSetStorage>(coloring: &'a CompactColexKmers<CSS>, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
-    Dbg::new(coloring.sbwt(), Some(coloring.lcs()), n_threads)
+/// The DBG of the SBWT of `coloring`, an input of a set operation, from its stored marks.
+pub(crate) fn input_dbg<CSS: ColorSetStorage>(coloring: &DbgIndex<CSS>) -> Dbg<'_, SubsetMatrix> {
+    coloring.dbg()
 }
