@@ -20,11 +20,11 @@ use std::io::{BufReader, BufWriter, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use sbwt::sbwt_index_variant::SbwtIndexVariant;
-use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
+use sbwt::{dbg::Dbg, LcsArray, SbwtIndex, SubsetMatrix};
 use serde::{Deserialize, Serialize};
 use simple_sds_sbwt::ops::BitVec;
 
-use crate::colex_colored_kmers::{ColexToColorSetMap, Coloring, DbgIndex};
+use crate::colex_colored_kmers::{ColexToColorSetMap, Coloring};
 use crate::coloring_interface::ColorSetStorage;
 use crate::sparse_dense_storage::SparseDenseStorage;
 
@@ -242,15 +242,15 @@ impl IndexDir {
         Ok(Coloring::new(map, sets, Some(&names)))
     }
 
-    /// Loads the components that de Bruijn graph operations and set operations need: the SBWT with
-    /// select support, the suffix group marks, the dummy marks and the coloring.
-    pub fn load_dbg_index(&self) -> std::io::Result<DbgIndex<SparseDenseStorage>> {
-        self.require(&[Component::Sbwt, Component::Sufgroups, Component::DummyMarks, Component::ColorNames, Component::ColorSampling, Component::ColorStorage])?;
-        let sbwt = self.load_sbwt(true)?;
+    /// Loads the de Bruijn graph of `sbwt`, the SBWT of this index, from the suffix group marks and
+    /// the dummy marks. De Bruijn graph operations need select support in `sbwt` (see
+    /// [IndexDir::load_sbwt]). [Dbg::into_marks] takes the graph apart, for when `sbwt` has to be
+    /// moved.
+    pub fn load_dbg<'a>(&self, sbwt: &'a SbwtIndex<SubsetMatrix>) -> std::io::Result<Dbg<'a, SubsetMatrix>> {
+        self.require(&[Component::Sufgroups, Component::DummyMarks])?;
         let sufgroups = self.load_sufgroups()?;
         let dummy_marks = self.load_dummy_marks()?;
-        let coloring = self.load_coloring()?;
-        Ok(DbgIndex::new(sbwt, sufgroups, dummy_marks, coloring))
+        Ok(Dbg::from_marks(sbwt, sufgroups, dummy_marks))
     }
 
     /// Returns an error naming the first of `components` that the index does not have. Call
@@ -332,14 +332,15 @@ impl IndexWriter {
         self.write_component(Component::ColorStorage, |out| { coloring.get_set_storage().serialize(out); Ok(()) })
     }
 
-    /// Writes every component of `index`, the LCS array `lcs` of its SBWT, and the metadata.
-    pub fn write_all<CSS: ColorSetStorage>(self, index: &DbgIndex<CSS>, lcs: &LcsArray, both_orientations: Option<bool>) -> std::io::Result<()> {
-        self.write_sbwt(&index.sbwt)?;
+    /// Writes every component of the index with the de Bruijn graph `dbg` (its SBWT and marks),
+    /// the coloring `coloring` and the LCS array `lcs` of its SBWT, and the metadata.
+    pub fn write_all<CSS: ColorSetStorage>(self, dbg: &Dbg<'_, SubsetMatrix>, coloring: &Coloring<CSS>, lcs: &LcsArray, both_orientations: Option<bool>) -> std::io::Result<()> {
+        self.write_sbwt(dbg.sbwt())?;
         self.write_lcs(lcs)?;
-        self.write_sufgroups(&index.sufgroups)?;
-        self.write_dummy_marks(&index.dummy_marks)?;
-        self.write_coloring(&index.coloring)?;
-        self.finish(&Metadata::new(&index.sbwt, &index.coloring, both_orientations))
+        self.write_sufgroups(dbg.k_minus_1_marks())?;
+        self.write_dummy_marks(dbg.dummy_marks())?;
+        self.write_coloring(coloring)?;
+        self.finish(&Metadata::new(dbg.sbwt(), coloring, both_orientations))
     }
 
     /// Writes the metadata, which completes the index.
@@ -356,6 +357,7 @@ impl IndexWriter {
 mod tests {
     use super::*;
     use crate::ColorSetView;
+    use crate::colex_colored_kmers::new_from_small_input_with_lcs;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("themisto2_index_dir_test_{}_{}", name, std::process::id()));
@@ -366,10 +368,11 @@ mod tests {
     #[test]
     fn write_and_read_roundtrip() {
         let seqs: Vec<(&[u8], usize)> = vec![(b"ACGTTGCATGCAAGTCCGATAG", 0), (b"TGCATGCAAGTCCGTTTTTT", 1)];
-        let (index, lcs) = DbgIndex::<SparseDenseStorage>::new_from_small_input_with_lcs(&seqs, 5, 3, 1);
+        let (sbwt, (sufgroups, dummy_marks), coloring, lcs) = new_from_small_input_with_lcs::<SparseDenseStorage>(&seqs, 5, 3, 1);
+        let dbg = Dbg::from_marks(&sbwt, sufgroups, dummy_marks);
 
         let dir = temp_dir("roundtrip");
-        IndexWriter::create(&dir).unwrap().write_all(&index, &lcs, Some(true)).unwrap();
+        IndexWriter::create(&dir).unwrap().write_all(&dbg, &coloring, &lcs, Some(true)).unwrap();
         assert!(IndexWriter::create(&dir).is_err(), "Writing into a non-empty directory must fail");
 
         let opened = IndexDir::open(&dir).unwrap();
@@ -377,17 +380,19 @@ mod tests {
         assert_eq!(opened.metadata().n_colors, 2);
         assert_eq!(opened.metadata().both_orientations, Some(true));
         assert!(opened.component_sizes().iter().all(|(_, size)| size.is_some()));
-        assert_eq!(&opened.load_color_names().unwrap(), index.get_color_names());
+        assert_eq!(&opened.load_color_names().unwrap(), coloring.get_color_names());
         assert_eq!(opened.load_lcs().unwrap(), lcs);
 
-        let loaded = opened.load_dbg_index().unwrap();
-        assert_eq!(loaded.sufgroups, index.sufgroups);
-        assert_eq!(loaded.dummy_marks, index.dummy_marks);
-        assert!(sbwt::SubsetSeq::has_select_support(loaded.sbwt.sbwt()));
-        for colex in 0..loaded.sbwt.n_sets() {
-            if loaded.dummy_marks[colex] { continue; }
-            let a: Vec<usize> = index.colex_to_set(colex).iter().collect();
-            let b: Vec<usize> = loaded.colex_to_set(colex).iter().collect();
+        let loaded_sbwt = opened.load_sbwt(true).unwrap();
+        assert!(sbwt::SubsetSeq::has_select_support(loaded_sbwt.sbwt()));
+        let loaded_dbg = opened.load_dbg(&loaded_sbwt).unwrap();
+        assert_eq!(loaded_dbg.k_minus_1_marks(), dbg.k_minus_1_marks());
+        assert_eq!(loaded_dbg.dummy_marks(), dbg.dummy_marks());
+        let loaded_coloring = opened.load_coloring().unwrap();
+        for colex in 0..loaded_sbwt.n_sets() {
+            if loaded_dbg.is_dummy_colex_position(colex) { continue; }
+            let a: Vec<usize> = coloring.colex_to_set(colex, &sbwt).iter().collect();
+            let b: Vec<usize> = loaded_coloring.colex_to_set(colex, &loaded_sbwt).iter().collect();
             assert_eq!(a, b);
         }
         std::fs::remove_dir_all(&dir).unwrap();
@@ -396,17 +401,17 @@ mod tests {
     #[test]
     fn missing_component_is_an_error() {
         let seqs: Vec<(&[u8], usize)> = vec![(b"ACGTTGCATGCAAGTCCGATAG", 0)];
-        let (index, lcs) = DbgIndex::<SparseDenseStorage>::new_from_small_input_with_lcs(&seqs, 5, 3, 1);
+        let (sbwt, (sufgroups, dummy_marks), coloring, lcs) = new_from_small_input_with_lcs::<SparseDenseStorage>(&seqs, 5, 3, 1);
         let dir = temp_dir("missing");
-        IndexWriter::create(&dir).unwrap().write_all(&index, &lcs, Some(true)).unwrap();
+        IndexWriter::create(&dir).unwrap().write_all(&Dbg::from_marks(&sbwt, sufgroups, dummy_marks), &coloring, &lcs, Some(true)).unwrap();
         std::fs::remove_file(dir.join(Component::Sufgroups.file_name())).unwrap();
 
         let opened = IndexDir::open(&dir).unwrap();
         let err = opened.load_sufgroups().err().unwrap();
         assert_eq!(err.kind(), ErrorKind::NotFound);
         assert!(err.to_string().contains("kmers.sufgroups"), "{}", err);
-        assert!(opened.load_dbg_index().is_err());
-        assert!(opened.load_sbwt(false).is_ok());
+        let loaded_sbwt = opened.load_sbwt(false).unwrap();
+        assert!(opened.load_dbg(&loaded_sbwt).is_err());
 
         assert!(IndexDir::open(&dir.join("nonexistent")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();

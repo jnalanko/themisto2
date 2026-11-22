@@ -6,7 +6,9 @@ use std::{ops::Range, sync::Arc};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simple_sds_sbwt::ops::{BitVec, Rank};
 
-use crate::{colex_colored_kmers::DbgIndex, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
+use sbwt::{SbwtIndex, SubsetMatrix};
+
+use crate::{colex_colored_kmers::Coloring, coloring_interface::{ColorSetStorage, ColorSetView}, set_of_sets_construction::{ParallelElementGenerator, SetElement}};
 
 /// How the color sets of a k-mer in the two input indexes are combined into its color set in the
 /// result of a set operation.
@@ -27,7 +29,7 @@ pub enum ColorCombination<'a> {
 }
 
 /// Generates the color set elements of the key k-mers of the result of a set operation on the
-/// SBWTs of coloring1 and coloring2. The result consists of the positions of an interleaving of the
+/// SBWTs of the two inputs. The result consists of the positions of an interleaving of the
 /// two SBWTs that were not removed, in order (see sbwt::merge_with_removed_positions and
 /// sbwt::intersect_with_removed_positions): the j-th position that was not removed is result colex
 /// position j.
@@ -37,12 +39,21 @@ pub struct ElementGeneratorFromInterleaving<'a, CSS: ColorSetStorage + Sync + Se
     // The positions of the interleaving that are not in the result. None if nothing was removed,
     // in which case interleaving positions are result colex positions.
     pub removed: Option<&'a bitvec::vec::BitVec<u64, bitvec::order::Lsb0>>,
-    pub coloring1: &'a DbgIndex<CSS>,
-    pub coloring2: Option<&'a DbgIndex<CSS>>, // Needed unless the colors are ColorCombination::FromFirst
+    pub sbwt1: &'a SbwtIndex<SubsetMatrix>,
+    pub coloring1: &'a Coloring<CSS>,
+    pub input2: Option<(&'a SbwtIndex<SubsetMatrix>, &'a Coloring<CSS>)>, // The SBWT and the coloring of the second input. Needed unless the colors are ColorCombination::FromFirst
     pub result_key_kmer_marks: &'a bitvec::vec::BitVec, // Only reporting set elements for these
     pub filter: Option<Arc<simple_sds_sbwt::bit_vector::BitVector>>, // With rank support
     pub colors: ColorCombination<'a>,
     pub n_result_colors: usize,
+}
+
+impl<'a, CSS: ColorSetStorage + Sync + Send> ElementGeneratorFromInterleaving<'a, CSS> {
+    /// The color set of the k-mer at colex position `colex` of the second input.
+    fn set2(&self, colex: usize) -> CSS::SetView<'a> {
+        let (sbwt2, coloring2) = self.input2.unwrap();
+        coloring2.colex_to_set(colex, sbwt2)
+    }
 }
 
 struct ThreadInput {
@@ -81,7 +92,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
         assert_eq!(n_result_nodes, self.result_key_kmer_marks.len());
 
         let n_colors1 = self.coloring1.get_set_storage().n_colors();
-        let n_colors2 = self.coloring2.map(|coloring2| coloring2.get_set_storage().n_colors());
+        let n_colors2 = self.input2.map(|(_, coloring2)| coloring2.get_set_storage().n_colors());
         // The colors of the result that come from coloring1 and may also come from coloring2, so
         // that they must be reported only once (union) or only if they come from both (intersection).
         let mut is_shared = bitvec::bitvec![0; self.n_result_colors];
@@ -124,7 +135,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
                                     // A shared color may be in both sets. It must be reported only once.
                                     let dedup = has_shared_colors && in_1 && in_2;
                                     if in_1 {
-                                        for color in self.coloring1.colex_to_set(s1_colex).iter() {
+                                        for color in self.coloring1.colex_to_set(s1_colex, self.sbwt1).iter() {
                                             callback(SetElement{set_id: new_set_id, color});
                                             if dedup && is_shared[color] {
                                                 in_set1.set(color, true);
@@ -133,7 +144,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
                                         }
                                     }
                                     if in_2 {
-                                        for color in self.coloring2.unwrap().colex_to_set(s2_colex).iter() {
+                                        for color in self.set2(s2_colex).iter() {
                                             let color = color2_to_result[color];
                                             if !(dedup && in_set1[color]) {
                                                 callback(SetElement{set_id: new_set_id, color});
@@ -143,11 +154,11 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
                                 },
                                 ColorCombination::Intersection { color1_to_result, color2_to_result } => {
                                     assert!(in_1 && in_2, "a key k-mer of an intersection is not in both inputs");
-                                    for color in self.coloring1.colex_to_set(s1_colex).iter().filter_map(|c| color1_to_result[c]) {
+                                    for color in self.coloring1.colex_to_set(s1_colex, self.sbwt1).iter().filter_map(|c| color1_to_result[c]) {
                                         in_set1.set(color, true);
                                         in_set1_list.push(color);
                                     }
-                                    for color in self.coloring2.unwrap().colex_to_set(s2_colex).iter().filter_map(|c| color2_to_result[c]) {
+                                    for color in self.set2(s2_colex).iter().filter_map(|c| color2_to_result[c]) {
                                         if in_set1[color] {
                                             callback(SetElement{set_id: new_set_id, color});
                                         }
@@ -155,7 +166,7 @@ impl<'a, CSS: ColorSetStorage + Sync + Send> ParallelElementGenerator for Elemen
                                 },
                                 ColorCombination::FromFirst { color1_to_result } => {
                                     assert!(in_1, "a key k-mer of the result is not in the first input");
-                                    let set1 = self.coloring1.colex_to_set(s1_colex);
+                                    let set1 = self.coloring1.colex_to_set(s1_colex, self.sbwt1);
                                     match color1_to_result {
                                         None => for color in set1.iter() {
                                             callback(SetElement{set_id: new_set_id, color});

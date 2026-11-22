@@ -181,8 +181,8 @@ mod tests {
 
         let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
         
-        let built = colex_colored_kmers::DbgIndex::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
-        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&built.sbwt, &built.sufgroups, &built.coloring);
+        let (sbwt, (sufgroups, _), coloring) = colex_colored_kmers::new_from_small_input::<SparseDenseStorage>(&colored_seqs, k, sample_distance, n_threads);
+        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&sbwt, &sufgroups, &coloring);
 
         let query = s0;
         let mut cset_ids = Vec::new();
@@ -214,8 +214,8 @@ mod tests {
 
         let colored_seqs: Vec<(&[u8], usize)> = vec![(s0,0), (s1,1), (s2,2), (s3,3)];
         
-        let built = colex_colored_kmers::DbgIndex::<SparseDenseStorage>::new_from_small_input(&colored_seqs, k, sample_distance, n_threads);
-        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&built.sbwt, &built.sufgroups, &built.coloring);
+        let (sbwt, (sufgroups, _), coloring) = colex_colored_kmers::new_from_small_input::<SparseDenseStorage>(&colored_seqs, k, sample_distance, n_threads);
+        let index = crate::pseudoalignment::PseudoalignmentIndex::new(&sbwt, &sufgroups, &coloring);
 
         let query = s0;
         let mut cset_ids = Vec::new();

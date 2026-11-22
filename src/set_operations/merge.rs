@@ -1,5 +1,5 @@
-use sbwt::LcsArray;
-use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
+use crate::{colex_colored_kmers::{Coloring, DbgMarks}, coloring_interface::ColorSetStorage};
 use crate::set_operations::{color_sets::ColorCombination, colors::merged_color_mapping, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
 /// Merges two colored indexes: the result has the k-mers of both indexes, and the color set of
@@ -8,13 +8,17 @@ use crate::set_operations::{color_sets::ColorCombination, colors::merged_color_m
 ///
 /// If keep_redundant_dummies is true, the dummy nodes that become redundant in the SBWT merge are
 /// kept. The result has the same k-mers and colors, but possibly more dummy nodes.
-pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, coloring2: DbgIndex<CSS>, merge_shared_colors: bool, optimize_peak_ram: bool, keep_redundant_dummies: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
+///
+/// Each index is given as its SBWT, the marks of its DBG and its coloring. Returns these for the
+/// result, and the LCS array of its SBWT.
+#[allow(clippy::too_many_arguments)]
+pub fn merge_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(sbwt1: SbwtIndex<SubsetMatrix>, marks1: DbgMarks, coloring1: &Coloring<CSS>, sbwt2: SbwtIndex<SubsetMatrix>, marks2: DbgMarks, coloring2: &Coloring<CSS>, merge_shared_colors: bool, optimize_peak_ram: bool, keep_redundant_dummies: bool, sample_distance: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<CSS>, LcsArray) {
     let (color2_to_merged, merged_color_names) = merged_color_mapping(coloring1.get_color_names(), coloring2.get_color_names(), merge_shared_colors).unwrap_or_else(|e| {
         log::error!("{}", e);
         panic!("{}", e);
     });
     let colors = ColorCombination::Union { color2_to_result: &color2_to_merged };
-    set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Merge { keep_redundant_dummies }, colors, &merged_color_names, optimize_peak_ram, sample_distance, n_threads)
+    set_operation(sbwt1, marks1, coloring1, SecondInput::Index(sbwt2, marks2, coloring2), SbwtOperation::Merge { keep_redundant_dummies }, colors, &merged_color_names, optimize_peak_ram, sample_distance, n_threads)
 }
 
 #[cfg(test)]
@@ -57,34 +61,33 @@ mod tests {
         };
         let expected_seqs = [input_seqs_1.clone(), expected_seqs_2].concat();
 
-        let ccc_both = build_named_coloring(k, &expected_names, &expected_seqs, input_sample_distance, n_threads);
+        let (sbwt_both, _, coloring_both) = build_named_coloring(k, &expected_names, &expected_seqs, input_sample_distance, n_threads);
 
         for keep_redundant_dummies in [false, true] {
-            let ccc1 = build_named_coloring(k, &names1, &input_seqs_1, input_sample_distance, n_threads);
-            let ccc2 = build_named_coloring(k, &names2, &input_seqs_2, input_sample_distance, n_threads);
+            let (sbwt1, marks1, coloring1) = build_named_coloring(k, &names1, &input_seqs_1, input_sample_distance, n_threads);
+            let (sbwt2, marks2, coloring2) = build_named_coloring(k, &names2, &input_seqs_2, input_sample_distance, n_threads);
 
-            let ccc_merged = super::merge_compact_colex_kmers(ccc1, ccc2, merge_shared_colors, true, keep_redundant_dummies, merge_sample_distance, n_threads).0;
-            assert_eq!(ccc_merged.get_color_names(), &expected_names);
-            assert_eq!(ccc_merged.get_set_storage().n_colors(), expected_names.len());
-            let sbwt_merged = &ccc_merged.sbwt();
+            let (sbwt_merged, _, coloring_merged, _) = super::merge_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, marks2, &coloring2, merge_shared_colors, true, keep_redundant_dummies, merge_sample_distance, n_threads);
+            assert_eq!(coloring_merged.get_color_names(), &expected_names);
+            assert_eq!(coloring_merged.get_set_storage().n_colors(), expected_names.len());
 
-            assert_eq!(sbwt_merged.n_kmers(), ccc_both.sbwt().n_kmers());
+            assert_eq!(sbwt_merged.n_kmers(), sbwt_both.n_kmers());
             if keep_redundant_dummies {
-                assert!(sbwt_merged.n_sets() >= ccc_both.sbwt().n_sets());
+                assert!(sbwt_merged.n_sets() >= sbwt_both.n_sets());
             } else {
                 // With the redundant dummies removed, we get the same nodes as when building from scratch
-                assert_eq!(sbwt_merged.n_sets(), ccc_both.sbwt().n_sets());
+                assert_eq!(sbwt_merged.n_sets(), sbwt_both.n_sets());
             }
 
-            for colex in 0..ccc_both.sbwt().n_sets() {
-                let kmer = ccc_both.sbwt().access_kmer(colex);
+            for colex in 0..sbwt_both.n_sets() {
+                let kmer = sbwt_both.access_kmer(colex);
 
                 if kmer.iter().all(|c| *c != b'$') { // Not a dummy k-mer
-                    let true_colors: Vec<usize> = ccc_both.colex_to_set(colex).iter().collect();
+                    let true_colors: Vec<usize> = coloring_both.colex_to_set(colex, &sbwt_both).iter().collect();
                     let range = sbwt_merged.search(&kmer).unwrap();
                     assert_eq!(range.len(), 1);
                     let colex_merged = range.start;
-                    let merged_colors: Vec<usize> = ccc_merged.colex_to_set(colex_merged).iter().collect();
+                    let merged_colors: Vec<usize> = coloring_merged.colex_to_set(colex_merged, &sbwt_merged).iter().collect();
 
                     assert_eq!(true_colors, merged_colors, "k = {}, k-mer {}, keep_redundant_dummies = {}", k, String::from_utf8_lossy(&kmer), keep_redundant_dummies);
                 }

@@ -1,16 +1,18 @@
 use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
-use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use crate::{colex_colored_kmers::{Coloring, DbgMarks}, coloring_interface::ColorSetStorage};
 use crate::set_operations::{color_sets::ColorCombination, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
-/// Subtracts the k-mers of the SBWT `sbwt2` from the first colored index: the result has the k-mers
+/// Subtracts the k-mers of the SBWT `sbwt2` from the first colored index, with the SBWT `sbwt1`,
+/// the DBG marks `marks1` and the coloring `coloring1`: the result has the k-mers
 /// of the first index that are not in `sbwt2`. Only the SBWT of the second index is needed. No k-mer of the result is in the second index, so each k-mer keeps
 /// its color set of the first index, and the result has the colors of the first index, with the
 /// same ids (also colors that no k-mer of the result has anymore).
 ///
-/// The SBWT of the first index needs select support.
-pub fn difference_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, sbwt2: SbwtIndex<SubsetMatrix>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
+/// sbwt1 needs select support. Returns the SBWT, the DBG marks and the coloring of the result, and
+/// the LCS array of its SBWT.
+pub fn difference_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(sbwt1: SbwtIndex<SubsetMatrix>, marks1: DbgMarks, coloring1: &Coloring<CSS>, sbwt2: SbwtIndex<SubsetMatrix>, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<CSS>, LcsArray) {
     let result_color_names = coloring1.get_color_names().to_vec();
-    set_operation(coloring1, SecondInput::SbwtOnly(sbwt2), SbwtOperation::Difference, ColorCombination::FromFirst { color1_to_result: None }, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+    set_operation(sbwt1, marks1, coloring1, SecondInput::SbwtOnly(sbwt2), SbwtOperation::Difference, ColorCombination::FromFirst { color1_to_result: None }, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
 }
 
 #[cfg(test)]
@@ -27,27 +29,27 @@ mod tests {
         let seqs1 = assign_color_ids(&mut names1, colors1);
         let seqs2 = assign_color_ids(&mut names2, colors2);
 
-        let ccc1 = build_named_coloring(k, &names1, &seqs1, input_sample_distance, n_threads);
-        let ccc2 = build_named_coloring(k, &names2, &seqs2, input_sample_distance, n_threads);
+        let (sbwt1, marks1, coloring1) = build_named_coloring(k, &names1, &seqs1, input_sample_distance, n_threads);
+        let (sbwt2, _, _) = build_named_coloring(k, &names2, &seqs2, input_sample_distance, n_threads);
 
         // The expected k-mers with their expected color sets
         let mut expected = Vec::<(Vec<u8>, Vec<usize>)>::new();
-        for colex1 in 0..ccc1.sbwt().n_sets() {
-            let kmer = ccc1.sbwt().access_kmer(colex1);
+        for colex1 in 0..sbwt1.n_sets() {
+            let kmer = sbwt1.access_kmer(colex1);
             if kmer.contains(&b'$') { continue; } // Dummy
-            if ccc2.sbwt().search(&kmer).is_some_and(|range| !range.is_empty()) { continue; }
-            expected.push((kmer, ccc1.colex_to_set(colex1).iter().collect()));
+            if sbwt2.search(&kmer).is_some_and(|range| !range.is_empty()) { continue; }
+            expected.push((kmer, coloring1.colex_to_set(colex1, &sbwt1).iter().collect()));
         }
 
-        let result = super::difference_compact_colex_kmers(ccc1, ccc2.sbwt, true, sample_distance, n_threads).0;
-        assert_eq!(result.get_color_names(), &names1);
-        assert_eq!(result.get_set_storage().n_colors(), names1.len());
-        assert_eq!(result.sbwt().n_kmers(), expected.len());
+        let (result_sbwt, _, result_coloring, _) = super::difference_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, true, sample_distance, n_threads);
+        assert_eq!(result_coloring.get_color_names(), &names1);
+        assert_eq!(result_coloring.get_set_storage().n_colors(), names1.len());
+        assert_eq!(result_sbwt.n_kmers(), expected.len());
 
         for (kmer, expected_set) in expected {
-            let range = result.sbwt().search(&kmer).unwrap();
+            let range = result_sbwt.search(&kmer).unwrap();
             assert_eq!(range.len(), 1);
-            let set: Vec<usize> = result.colex_to_set(range.start).iter().collect();
+            let set: Vec<usize> = result_coloring.colex_to_set(range.start, &result_sbwt).iter().collect();
             assert_eq!(set, expected_set, "k = {}, k-mer {}", k, String::from_utf8_lossy(&kmer));
         }
     }

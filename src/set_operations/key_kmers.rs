@@ -3,7 +3,7 @@
 use sbwt::{dbg::{Dbg, Node}, LcsArray, SbwtIndex, StreamingIndex, SubsetMatrix};
 use simple_sds_sbwt::{ops::{BitVec, Select}, sparse_vector::{SparseBuilder, SparseVector}};
 
-use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage, unitig_export::break_to_colored_subunitigs};
+use crate::{atomic_bitmap::AtomicBitmap, colex_colored_kmers::Coloring, coloring_interface::ColorSetStorage, unitig_export::break_to_colored_subunitigs};
 
 pub(crate) fn mark_kmer(colex: usize, marks: &AtomicBitmap) {
     marks.set(colex, true);
@@ -84,29 +84,27 @@ pub(crate) fn mark_key_kmers_from_boundaries(boundaries: &SubunitigBoundaries, t
     });
 }
 
-/// Marks the key k-mers of the result of a set operation that the colored subunitigs of `coloring`
-/// (one of the inputs) require: the last k-mer of each colored subunitig, and the in-neighbors in
+/// Marks the key k-mers of the result of a set operation that the colored subunitigs of one of the
+/// inputs, with the DBG `dbg` and the coloring `coloring`, require: the last k-mer of each colored subunitig, and the in-neighbors in
 /// the DBG of the result of the first k-mer of each colored subunitig. `to_result` maps a colex
-/// position of `coloring` to its colex position in the result, or None if the k-mer is not there.
+/// position of the input to its colex position in the result, or None if the k-mer is not there.
 ///
-/// With visited_marks, also marks there every k-mer of the result that is a k-mer of `coloring`.
+/// With visited_marks, also marks there every k-mer of the result that is a k-mer of the input.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(coloring: &DbgIndex<CSS>, to_result: impl Fn(usize) -> Option<usize> + Sync, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: Option<&AtomicBitmap>, n_threads: usize) {
+pub(crate) fn mark_key_kmers_for<CSS: ColorSetStorage + Send + Sync>(dbg: &Dbg<'_, SubsetMatrix>, coloring: &Coloring<CSS>, to_result: impl Fn(usize) -> Option<usize> + Sync, result_sbwt: &SbwtIndex<SubsetMatrix>, result_lcs: &LcsArray, result_dbg: &Dbg<'_, SubsetMatrix>, key_kmer_marks: &AtomicBitmap, visited_marks: Option<&AtomicBitmap>, n_threads: usize) {
 
     // Only the coverage check searches the result
     let result_si = visited_marks.map(|_| StreamingIndex::new(result_sbwt, result_lcs));
 
     let k = result_sbwt.k();
-    assert_eq!(k, coloring.get_k());
-
-    log::info!("Initializing DBG");
-    let dbg = crate::set_operations::input_dbg(coloring);
+    let sbwt = dbg.sbwt();
+    assert_eq!(k, sbwt.k());
 
     log::info!("Iterating unitigs");
-    let bar = indicatif::ProgressBar::new(coloring.sbwt().n_kmers() as u64);
+    let bar = indicatif::ProgressBar::new(sbwt.n_kmers() as u64);
     dbg.iter_unitigs_with_callback(|nodes|{
         let unitig_colex_ranks = nodes.iter().map(|v| v.id).collect::<Vec<usize>>(); // TODO: avoid this allocation
-        let (_, subunitig_ranges) = break_to_colored_subunitigs(&unitig_colex_ranks, &[], coloring.get_map(), coloring.sbwt());
+        let (_, subunitig_ranges) = break_to_colored_subunitigs(&unitig_colex_ranks, &[], coloring.get_map(), sbwt);
 
         for subunitig_range in subunitig_ranges {
             // (s,e) = (start of first k-mer, start of the k-mer after the last k-mer)

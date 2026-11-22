@@ -7,7 +7,7 @@ use rustc_hash::FxHasher;
 use sbwt::{BitPackedKmerSortingMem, LcsArray, SbwtIndex, SubsetMatrix};
 use simple_sds_sbwt::ops::Rank;
 
-use crate::{colex_colored_kmers::{ColexToColorSetMap, Coloring, DbgIndex, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, io::RewindableSeqStreamGenerator, sparse_dense_storage::SparseDenseStorage, util::VecVecRewindableGen};
+use crate::{colex_colored_kmers::{ColexToColorSetMap, Coloring, DbgMarks, mark_key_kmers}, coloring_interface::{ColorSetStorage, ColorSetView}, int_vec::CompactIntVec, io::RewindableSeqStreamGenerator, sparse_dense_storage::SparseDenseStorage, util::VecVecRewindableGen};
 
 // A sample distance larger than any unitig in the tests, so that only the structurally
 // required key k-mers get marked. Any k-mer that a set operation forgets to mark then results
@@ -106,9 +106,9 @@ fn build_sbwt(k: usize, seqs: &[Vec<u8>]) -> (SbwtIndex<SubsetMatrix>, LcsArray)
     (sbwt, lcs.unwrap())
 }
 
-/// Builds a DbgIndex where color i is named names[i] and consists of the sequences
-/// s with (i, s) in seqs.
-pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, Vec<u8>)], sample_distance: usize, n_threads: usize) -> DbgIndex<SparseDenseStorage> {
+/// Builds an index where color i is named names[i] and consists of the sequences s with (i, s) in
+/// seqs: its SBWT, the marks of its DBG and its coloring.
+pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, Vec<u8>)], sample_distance: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<SparseDenseStorage>) {
     let mut dbs: Vec<SeqDB> = names.iter().map(|_| SeqDB::new()).collect();
     for (color, seq) in seqs {
         dbs[*color].push_seq(seq);
@@ -120,6 +120,7 @@ pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, V
     let mut gen: Box<dyn RewindableSeqStreamGenerator + Sync + Send> = Box::new(VecVecRewindableGen::new(all_seqs));
     let dbg = sbwt::dbg::Dbg::new(&sbwt, Some(&lcs), n_threads);
     let key_kmers = mark_key_kmers(&sbwt, &dbg, sample_distance, &mut gen, n_threads, 1, false);
+    let marks = dbg.into_marks();
     let sampled_ids: Vec<usize> = colex_to_id.iter().enumerate().filter(|(i, _)| key_kmers[*i]).map(|(_,x)| *x).collect();
     assert!(key_kmers.count_ones() == sampled_ids.len());
 
@@ -132,5 +133,5 @@ pub(crate) fn build_named_coloring(k: usize, names: &[String], seqs: &[(usize, V
     };
 
     let coloring = Coloring::new(colex_map, storage, Some(names));
-    DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads)
+    (sbwt, marks, coloring)
 }

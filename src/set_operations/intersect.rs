@@ -1,5 +1,5 @@
-use sbwt::LcsArray;
-use crate::{colex_colored_kmers::DbgIndex, coloring_interface::ColorSetStorage};
+use sbwt::{LcsArray, SbwtIndex, SubsetMatrix};
+use crate::{colex_colored_kmers::{Coloring, DbgMarks}, coloring_interface::ColorSetStorage};
 use crate::set_operations::{color_sets::ColorCombination, colors::{intersected_color_mapping, merged_color_mapping}, pipeline::{set_operation, SbwtOperation, SecondInput}};
 
 /// How the color set of a k-mer of the intersection is computed from its color sets in the two
@@ -19,9 +19,11 @@ pub enum IntersectColors {
 /// merge::merge_compact_colex_kmers. With the intersection, colors are always matched by name, and
 /// a k-mer whose color sets do not intersect has an empty color set.
 ///
-/// Both SBWTs need select support.
+/// Each index is given as its SBWT, the marks of its DBG and its coloring. Both SBWTs need select
+/// support. Returns the SBWT, the DBG marks and the coloring of the result, and the LCS array of
+/// its SBWT.
 #[allow(clippy::too_many_arguments)]
-pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring1: DbgIndex<CSS>, coloring2: DbgIndex<CSS>, colors: IntersectColors, merge_shared_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (DbgIndex<CSS>, LcsArray) {
+pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(sbwt1: SbwtIndex<SubsetMatrix>, marks1: DbgMarks, coloring1: &Coloring<CSS>, sbwt2: SbwtIndex<SubsetMatrix>, marks2: DbgMarks, coloring2: &Coloring<CSS>, colors: IntersectColors, merge_shared_colors: bool, optimize_peak_ram: bool, sample_distance: usize, n_threads: usize) -> (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<CSS>, LcsArray) {
     let fail = |e: String| -> ! {
         log::error!("{}", e);
         panic!("{}", e);
@@ -31,12 +33,12 @@ pub fn intersect_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(colorin
         IntersectColors::Union => {
             let (color2_to_result, result_color_names) = merged_color_mapping(names1, names2, merge_shared_colors).unwrap_or_else(|e| fail(e));
             let colors = ColorCombination::Union { color2_to_result: &color2_to_result };
-            set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+            set_operation(sbwt1, marks1, coloring1, SecondInput::Index(sbwt2, marks2, coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
         },
         IntersectColors::Intersect => {
             let (color1_to_result, color2_to_result, result_color_names) = intersected_color_mapping(names1, names2).unwrap_or_else(|e| fail(e));
             let colors = ColorCombination::Intersection { color1_to_result: &color1_to_result, color2_to_result: &color2_to_result };
-            set_operation(coloring1, SecondInput::Index(coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
+            set_operation(sbwt1, marks1, coloring1, SecondInput::Index(sbwt2, marks2, coloring2), SbwtOperation::Intersect, colors, &result_color_names, optimize_peak_ram, sample_distance, n_threads)
         },
     }
 }
@@ -80,19 +82,19 @@ mod tests {
             },
         };
 
-        let ccc1 = build_named_coloring(k, &names1, &seqs1, input_sample_distance, n_threads);
-        let ccc2 = build_named_coloring(k, &names2, &seqs2, input_sample_distance, n_threads);
+        let (sbwt1, marks1, coloring1) = build_named_coloring(k, &names1, &seqs1, input_sample_distance, n_threads);
+        let (sbwt2, marks2, coloring2) = build_named_coloring(k, &names2, &seqs2, input_sample_distance, n_threads);
 
         // The expected k-mers with their expected color sets, from searching the k-mers of ccc1 in ccc2
         let mut expected = Vec::<(Vec<u8>, Vec<usize>)>::new();
-        for colex1 in 0..ccc1.sbwt().n_sets() {
-            let kmer = ccc1.sbwt().access_kmer(colex1);
+        for colex1 in 0..sbwt1.n_sets() {
+            let kmer = sbwt1.access_kmer(colex1);
             if kmer.contains(&b'$') { continue; } // Dummy
-            let Some(range2) = ccc2.sbwt().search(&kmer) else { continue; };
+            let Some(range2) = sbwt2.search(&kmer) else { continue; };
             if range2.is_empty() { continue; }
             assert_eq!(range2.len(), 1);
-            let set1: Vec<usize> = ccc1.colex_to_set(colex1).iter().filter_map(|c| color1_to_result[c]).collect();
-            let set2: Vec<usize> = ccc2.colex_to_set(range2.start).iter().filter_map(|c| color2_to_result[c]).collect();
+            let set1: Vec<usize> = coloring1.colex_to_set(colex1, &sbwt1).iter().filter_map(|c| color1_to_result[c]).collect();
+            let set2: Vec<usize> = coloring2.colex_to_set(range2.start, &sbwt2).iter().filter_map(|c| color2_to_result[c]).collect();
             let mut set: Vec<usize> = match colors {
                 IntersectColors::Union => [set1, set2].concat(),
                 IntersectColors::Intersect => set1.into_iter().filter(|c| set2.contains(c)).collect(),
@@ -102,15 +104,15 @@ mod tests {
             expected.push((kmer, set));
         }
 
-        let result = super::intersect_compact_colex_kmers(ccc1, ccc2, colors, merge_shared_colors, true, sample_distance, n_threads).0;
-        assert_eq!(result.get_color_names(), &expected_names);
-        assert_eq!(result.get_set_storage().n_colors(), expected_names.len());
-        assert_eq!(result.sbwt().n_kmers(), expected.len());
+        let (result_sbwt, _, result_coloring, _) = super::intersect_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, marks2, &coloring2, colors, merge_shared_colors, true, sample_distance, n_threads);
+        assert_eq!(result_coloring.get_color_names(), &expected_names);
+        assert_eq!(result_coloring.get_set_storage().n_colors(), expected_names.len());
+        assert_eq!(result_sbwt.n_kmers(), expected.len());
 
         for (kmer, expected_set) in expected {
-            let range = result.sbwt().search(&kmer).unwrap();
+            let range = result_sbwt.search(&kmer).unwrap();
             assert_eq!(range.len(), 1);
-            let mut set: Vec<usize> = result.colex_to_set(range.start).iter().collect();
+            let mut set: Vec<usize> = result_coloring.colex_to_set(range.start, &result_sbwt).iter().collect();
             set.sort_unstable();
             assert_eq!(set, expected_set, "k = {}, k-mer {}, colors = {:?}, merge_shared_colors = {}", k, String::from_utf8_lossy(&kmer), colors, merge_shared_colors);
         }

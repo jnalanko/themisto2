@@ -2,7 +2,7 @@
 
 use std::{cmp::min, fs::File, io::{BufRead, BufReader, BufWriter, Stdout, Write}, ops::Range, path::{Path, PathBuf}, process::ExitCode, str::FromStr, time::Instant};
 use clap::{Parser, Subcommand};
-use colex_colored_kmers::{Coloring, DbgIndex};
+use colex_colored_kmers::{Coloring, DbgMarks, IndexStats};
 use coloring_interface::{ColorSetStorage, ColorSetView};
 use io::RewindableSeqStreamGenerator;
 use parallel_ms_iteration::{DeduplicatingColorElementGenerator};
@@ -492,10 +492,10 @@ fn assign_seq_colors(seq_names: Vec<String>, by_name: bool) -> Result<(Vec<usize
     Ok((record_colors, color_names))
 }
 
-// Returns the index and the LCS array of its SBWT if BuildMode is InMemory, otherwise serializes
-// the color sets as a set of files to disk.
+// Returns the SBWT, the coloring and the LCS array of the SBWT if BuildMode is InMemory, otherwise
+// serializes the color sets as a set of files to disk.
 #[allow(clippy::too_many_arguments)]
-fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode, n_parser_threads: usize) -> Option<(DbgIndex<CSS>, LcsArray)>{
+fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatrix>, lcs: LcsArray, input_mode: ColoredSeqInput, color_names: &[String], n_threads: usize, sample_distance: usize, from_unitigs: bool, build_mode: BuildMode, n_parser_threads: usize) -> Option<(SbwtIndex<SubsetMatrix>, Coloring<CSS>, LcsArray)>{
 
     log::info!("Building distinct color set structure");
     let n_colors = u32::try_from(color_names.len()).unwrap_or_else( |_| {
@@ -556,9 +556,7 @@ fn build_coloring<CSS: ColorSetStorage + Send>(sbwt: sbwt::SbwtIndex<SubsetMatri
             };
 
             let coloring = Coloring::new(colex_map, css, Some(color_names));
-            log::info!("Marking the suffix groups and dummy k-mers");
-            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
-            Some((index, lcs))
+            Some((sbwt, coloring, lcs))
         },
         BuildMode::ToDisk(out_prefix, n_pieces) => {
             assert!(n_pieces != 0);
@@ -622,8 +620,18 @@ fn load_for_pseudoalignment(path: &Path) -> (SbwtIndex<SubsetMatrix>, bitvec::ve
     (or_exit(index.load_sbwt(false)), or_exit(index.load_sufgroups()), or_exit(index.load_coloring()))
 }
 
-fn load_dbg_index(path: &Path) -> DbgIndex<SparseDenseStorage> {
-    or_exit(open_index(path, &DBG_COMPONENTS).load_dbg_index())
+/// The components of the index `index` that set operations take: the SBWT with select support, the
+/// marks of its DBG, and the coloring. The index must have DBG_COMPONENTS.
+fn load_set_operation_input(index: &IndexDir) -> (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<SparseDenseStorage>) {
+    let sbwt = or_exit(index.load_sbwt(true));
+    let marks = or_exit(index.load_dbg(&sbwt)).into_marks();
+    (sbwt, marks, or_exit(index.load_coloring()))
+}
+
+/// The DBG of `sbwt`, which needs select support, with its marks computed from its LCS array `lcs`.
+fn dbg_from_lcs<'a>(sbwt: &'a SbwtIndex<SubsetMatrix>, lcs: &LcsArray, n_threads: usize) -> Dbg<'a, SubsetMatrix> {
+    log::info!("Marking the suffix groups and dummy k-mers");
+    Dbg::new(sbwt, Some(lcs), n_threads)
 }
 
 /// Creates the output directory of an index. Called before the index is built, so that an
@@ -632,9 +640,16 @@ fn create_index_writer(path: &Path) -> IndexWriter {
     or_exit(IndexWriter::create(path))
 }
 
-fn write_index(writer: IndexWriter, index: &DbgIndex<SparseDenseStorage>, lcs: &LcsArray, both_orientations: Option<bool>) {
+fn write_index(writer: IndexWriter, dbg: &Dbg<'_, SubsetMatrix>, coloring: &Coloring<SparseDenseStorage>, lcs: &LcsArray, both_orientations: Option<bool>) {
     log::info!("Writing the Themisto 2 index to {}", writer.path().display());
-    or_exit(writer.write_all(index, lcs, both_orientations));
+    or_exit(writer.write_all(dbg, coloring, lcs, both_orientations));
+}
+
+/// Writes the result of a set operation: its SBWT, the marks of its DBG, its coloring and the LCS
+/// array of its SBWT.
+fn write_set_operation_result(writer: IndexWriter, result: (SbwtIndex<SubsetMatrix>, DbgMarks, Coloring<SparseDenseStorage>, LcsArray), both_orientations: Option<bool>) {
+    let (sbwt, (sufgroups, dummy_marks), coloring, lcs) = result;
+    write_index(writer, &Dbg::from_marks(&sbwt, sufgroups, dummy_marks), &coloring, &lcs, both_orientations);
 }
 
 /// The orientation of the result of a set operation on indexes with orientations `a` and `b`:
@@ -659,7 +674,7 @@ fn print_color_names(names: &[String], out: Output) {
     }
 }
 
-fn print_stats(index: &DbgIndex<SparseDenseStorage>, index_dir: &IndexDir, n_threads: usize) {
+fn print_stats(dbg: &Dbg<'_, SubsetMatrix>, coloring: &Coloring<SparseDenseStorage>, index_dir: &IndexDir, n_threads: usize) {
     // Compute quick-to-access statistics first
 
     let stdout = std::io::stdout();
@@ -672,21 +687,21 @@ fn print_stats(index: &DbgIndex<SparseDenseStorage>, index_dir: &IndexDir, n_thr
         };
     }
 
-    printstat!("n_kmers\t{}", index.sbwt().n_kmers());
-    printstat!("n_colors\t{}", index.get_set_storage().n_colors());
-    printstat!("sbwt_length\t{}", index.sbwt().n_sets());
-    printstat!("n_sampled_positions\t{}", index.get_map().sampling.count_ones());
+    printstat!("n_kmers\t{}", dbg.sbwt().n_kmers());
+    printstat!("n_colors\t{}", coloring.get_set_storage().n_colors());
+    printstat!("sbwt_length\t{}", dbg.sbwt().n_sets());
+    printstat!("n_sampled_positions\t{}", coloring.get_map().sampling.count_ones());
 
-    let n_color_sets = index.get_set_storage().n_sets();
+    let n_color_sets = coloring.get_set_storage().n_sets();
     printstat!("n_distinct_color_sets\t{}", n_color_sets);
     log::info!("Counting sparse and dense color sets");
-    let n_dense_color_sets = index.get_set_storage().get_dense_marks().count_ones();
+    let n_dense_color_sets = coloring.get_set_storage().get_dense_marks().count_ones();
     let n_sparse_color_sets = n_color_sets - n_dense_color_sets;
     printstat!("n_sparse_color_sets\t{}", n_sparse_color_sets);
     printstat!("n_dense_color_sets\t{}", n_dense_color_sets);
 
     log::info!("Computing mean distinct color set size");
-    let total_distinct_size: usize = (0..n_color_sets).map(|i| index.get_set_storage().get_set_view(i).len()).sum();
+    let total_distinct_size: usize = (0..n_color_sets).map(|i| coloring.get_set_storage().get_set_view(i).len()).sum();
     printstat!("mean_distinct_color_set_size\t{:.6}", total_distinct_size as f64 / n_color_sets as f64);
 
     // The sizes of the files of the components. NA for components that the index does not have.
@@ -705,7 +720,7 @@ fn print_stats(index: &DbgIndex<SparseDenseStorage>, index_dir: &IndexDir, n_thr
 
     // DBG traversal. Slow: computes unitig and k-mer color set stats
     log::info!("Computing unitig and k-mer color set stats (DBG traversal)");
-    let stats = index.compute_index_stats(n_threads);
+    let stats = IndexStats::compute(dbg, coloring, n_threads);
     printstat!("n_unitigs\t{}", stats.n_unitigs);
     printstat!("mean_unitig_length\t{:.6}", stats.mean_unitig_length());
     printstat!("mean_kmer_color_set_size\t{:.6}", stats.mean_kmer_color_set_size());
@@ -836,10 +851,11 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
                 let writer = create_index_writer(&outpath);
                 let orientation1 = open_index(&pair[0], &DBG_COMPONENTS).metadata().both_orientations;
                 let orientation2 = open_index(&pair[1], &DBG_COMPONENTS).metadata().both_orientations;
-                let c1 = load_dbg_index(&pair[0]);
-                let c2 = load_dbg_index(&pair[1]);
-                let (merged, merged_lcs) = merge::merge_compact_colex_kmers(c1, c2, merge_shared_colors, low_ram_mode, keep_dummies, sample_distance, n_threads);
-                write_index(writer, &merged, &merged_lcs, combined_orientation(orientation1, orientation2));
+                let (sbwt1, marks1, coloring1) = load_set_operation_input(&open_index(&pair[0], &DBG_COMPONENTS));
+                let (sbwt2, marks2, coloring2) = load_set_operation_input(&open_index(&pair[1], &DBG_COMPONENTS));
+                let merged = merge::merge_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, marks2, &coloring2, merge_shared_colors, low_ram_mode, keep_dummies, sample_distance, n_threads);
+                drop((coloring1, coloring2));
+                write_set_operation_result(writer, merged, combined_orientation(orientation1, orientation2));
                 next_files.push(outpath);
             } else {
                 next_files.push(pair[0].clone());
@@ -851,7 +867,8 @@ fn run_merge_tree(infiles: &[PathBuf], temp_dir: &Path, outfile: &Path, n_thread
 
 // Dispatch with monomorphized output streams
 fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
-    index: DbgIndex<CSS>, 
+    dbg: &Dbg<'_, SubsetMatrix>,
+    coloring: &Coloring<CSS>,
     unitigs_out: Option<impl Write + Sync + Send>,
     metadata_out: impl Write + Sync + Send,
     colors_out: Option<impl Write + Sync + Send>,
@@ -859,26 +876,22 @@ fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
     n_threads: usize
 ) {
 
-    // Destructure the index, so that the DBG can take over the marks without copying them
-    let (sbwt, sufgroups, dummy_marks, coloring) = index.into_parts();
-    let (map, sets, _color_names) = coloring.into_parts();
+    let (sbwt, map, sets) = (dbg.sbwt(), coloring.get_map(), coloring.get_set_storage());
 
     if let Some(mut colors_out) = colors_out {
         log::info!("Exporting color sets");
-        unitig_export::write_color_sets(&mut colors_out, &sets);
+        unitig_export::write_color_sets(&mut colors_out, sets);
     } else {
         log::info!("Skipped exporting color sets");
     }
 
-    let dbg = Dbg::from_marks(&sbwt, sufgroups, dummy_marks);
-
     let n_unitigs: Option<usize> = if let Some(unitigs_out) = unitigs_out {
         if unitigs_as_gfa {
             log::info!("Exporting unitigs (format: GFA)");
-            Some(unitig_export::export_gfa(&sbwt, &dbg, &map, unitigs_out, n_threads))
+            Some(unitig_export::export_gfa(sbwt, dbg, map, unitigs_out, n_threads))
         } else {
             log::info!("Exporting unitigs (format: fasta)");
-            Some(unitig_export::export_colored_unitigs(&sbwt, &dbg, &map, unitigs_out, n_threads))
+            Some(unitig_export::export_colored_unitigs(sbwt, dbg, map, unitigs_out, n_threads))
         }
     } else { 
         log::info!("Skipped exporting unitigs");
@@ -886,12 +899,14 @@ fn export_index_dispatch<CSS: ColorSetStorage + Sync + Send>(
     };
 
     log::info!("Exporting metadata");
-    unitig_export::write_metadata(metadata_out, n_unitigs, &sets, sbwt.k());
+    unitig_export::write_metadata(metadata_out, n_unitigs, sets, sbwt.k());
 
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_index<CSS: ColorSetStorage + Sync + Send>(
-    index: DbgIndex<CSS>, 
+    dbg: &Dbg<'_, SubsetMatrix>,
+    coloring: &Coloring<CSS>,
     out_prefix: &Path,
     colors_to_stdout: bool,
     unitigs_as_gfa: bool,
@@ -930,7 +945,7 @@ fn export_index<CSS: ColorSetStorage + Sync + Send>(
             Some(BufWriter::new(std::io::stdout()))
         };
 
-        export_index_dispatch(index, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
+        export_index_dispatch(dbg, coloring, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
     } else {
 
         let colors_out: Option<BufWriter<File>> = if no_color_sets {
@@ -939,7 +954,7 @@ fn export_index<CSS: ColorSetStorage + Sync + Send>(
             Some(BufWriter::new(File::create(colors_filename).unwrap()))
         };
 
-        export_index_dispatch(index, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
+        export_index_dispatch(dbg, coloring, unitigs_out, metadata_out, colors_out, unitigs_as_gfa, n_threads);
     }
 }
 
@@ -1124,9 +1139,10 @@ fn main() -> std::process::ExitCode {
                     let writer = create_index_writer(&output);
                     let (sbwt, lcs) = get_sbwt_and_lcs(&sbwt_path, &lcs_path, &temp_dir, input_stream, k, n_threads);
                     let index = build_coloring::<SparseDenseStorage>(sbwt, lcs, input_mode, &color_names, n_threads, sample_distance, from_unitigs, BuildMode::InMemory, n_parser_threads);
-                    let (index, lcs) = index.unwrap(); // Ok because we passed in InMemory
+                    let (sbwt, coloring, lcs) = index.unwrap(); // Ok because we passed in InMemory
+                    let dbg = dbg_from_lcs(&sbwt, &lcs, n_threads);
                     // The build adds the reverse complements of the input and colors both orientations
-                    write_index(writer, &index, &lcs, Some(true));
+                    write_index(writer, &dbg, &coloring, &lcs, Some(true));
                 },
                 Some(n_pieces) => {
                     // Check that the output file can be created
@@ -1195,11 +1211,12 @@ fn main() -> std::process::ExitCode {
             }
             let writer = create_index_writer(&outfile);
             let orientation = combined_orientation(open_index(&index1, &DBG_COMPONENTS).metadata().both_orientations, open_index(&index2, &DBG_COMPONENTS).metadata().both_orientations);
-            let c1 = load_dbg_index(&index1);
-            let c2 = load_dbg_index(&index2);
+            let (sbwt1, marks1, coloring1) = load_set_operation_input(&open_index(&index1, &DBG_COMPONENTS));
+            let (sbwt2, marks2, coloring2) = load_set_operation_input(&open_index(&index2, &DBG_COMPONENTS));
             log::info!("Intersecting {} and {}", index1.display(), index2.display());
-            let (result, result_lcs) = intersect::intersect_compact_colex_kmers(c1, c2, colors, merge_shared_colors, low_ram_mode, sample_distance, n_threads);
-            write_index(writer, &result, &result_lcs, orientation);
+            let result = intersect::intersect_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, marks2, &coloring2, colors, merge_shared_colors, low_ram_mode, sample_distance, n_threads);
+            drop((coloring1, coloring2));
+            write_set_operation_result(writer, result, orientation);
         },
         Subcommands::Subset { index, outfile, colors, colors_file, complement, keep_all_colors, sample_distance, n_threads, low_ram_mode } => {
             let mut names = colors;
@@ -1219,7 +1236,7 @@ fn main() -> std::process::ExitCode {
                     let writer = create_index_writer(&outfile);
                     let index_dir = open_index(&index, &DBG_COMPONENTS);
                     let orientation = index_dir.metadata().both_orientations;
-                    let coloring = or_exit(index_dir.load_dbg_index());
+                    let (sbwt, marks, coloring) = load_set_operation_input(&index_dir);
                     let color_names = coloring.get_color_names();
                     // Sets of the names, so that matching them takes time linear in the number of
                     // names: with lists, keeping 108,930 of the 121,034 colors of an index took 46 s
@@ -1231,8 +1248,9 @@ fn main() -> std::process::ExitCode {
                     let kept_names: std::collections::HashSet<&str> = names.iter().map(|name| name.as_str()).collect();
                     let kept_colors: Vec<bool> = color_names.iter().map(|name| kept_names.contains(name.as_str()) != complement).collect();
                     log::info!("Taking the subset of {} for {} of its {} colors{}", index.display(), kept_colors.iter().filter(|&&kept| kept).count(), kept_colors.len(), if keep_all_colors { ", keeping all colors of its k-mers" } else { "" });
-                    let (result, result_lcs) = subset::subset_compact_colex_kmers(coloring, &kept_colors, keep_all_colors, low_ram_mode, sample_distance, n_threads);
-                    write_index(writer, &result, &result_lcs, orientation);
+                    let result = subset::subset_compact_colex_kmers(sbwt, marks, &coloring, &kept_colors, keep_all_colors, low_ram_mode, sample_distance, n_threads);
+                    drop(coloring);
+                    write_set_operation_result(writer, result, orientation);
                 }
             }
         },
@@ -1242,11 +1260,12 @@ fn main() -> std::process::ExitCode {
             // Only the SBWT of index2 is needed: the result has the colors of index1
             let index_dir2 = open_index(&index2, &[Component::Sbwt]);
             let orientation = combined_orientation(index_dir1.metadata().both_orientations, index_dir2.metadata().both_orientations);
-            let c1 = or_exit(index_dir1.load_dbg_index());
+            let (sbwt1, marks1, coloring1) = load_set_operation_input(&index_dir1);
             let sbwt2 = or_exit(index_dir2.load_sbwt(false));
             log::info!("Subtracting {} from {}", index2.display(), index1.display());
-            let (result, result_lcs) = difference::difference_compact_colex_kmers(c1, sbwt2, low_ram_mode, sample_distance, n_threads);
-            write_index(writer, &result, &result_lcs, orientation);
+            let result = difference::difference_compact_colex_kmers(sbwt1, marks1, &coloring1, sbwt2, low_ram_mode, sample_distance, n_threads);
+            drop(coloring1);
+            write_set_operation_result(writer, result, orientation);
         },
         Subcommands::Import { sbwt_path, lcs_path, color_dump_prefix, out: out_path, n_threads, temp_dir, sample_distance} => {
             let unitig_filename = format!("{}.unitigs.fa", color_dump_prefix.to_str().unwrap());
@@ -1277,9 +1296,9 @@ fn main() -> std::process::ExitCode {
 
             let coloring = Coloring::<SparseDenseStorage>::new_from_colored_unitig_dump(
                 &sbwt, &lcs, sample_distance, n_threads, metadata_dump, unitig_dump, color_dump);
-            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
+            let dbg = dbg_from_lcs(&sbwt, &lcs, n_threads);
             // The import colors both orientations of every unitig
-            write_index(writer, &index, &lcs, Some(true));
+            write_index(writer, &dbg, &coloring, &lcs, Some(true));
         },
         Subcommands::ImportSbwt { sbwt_path, lcs_path, output, sample_distance, n_threads, color_name } => {
             let writer = create_index_writer(&output);
@@ -1304,18 +1323,23 @@ fn main() -> std::process::ExitCode {
 
             log::info!("Building single-colored Themisto 2 index");
             let coloring = Coloring::<SparseDenseStorage>::new_single_colored(&sbwt, &lcs, sample_distance, n_threads, color_name);
-            let index = DbgIndex::from_lcs(sbwt, &lcs, coloring, n_threads);
+            let dbg = dbg_from_lcs(&sbwt, &lcs, n_threads);
             // Whether the SBWT has both orientations of its k-mers is not known
-            write_index(writer, &index, &lcs, None);
+            write_index(writer, &dbg, &coloring, &lcs, None);
         },
         Subcommands::Export { index: index_path, color_dump_prefix, n_threads, gfa, colors_to_stdout, no_unitigs, no_color_sets } => {
-            let index = load_dbg_index(&index_path); // Select support is required for export
-            export_index(index, &color_dump_prefix, colors_to_stdout, gfa, no_unitigs, no_color_sets, n_threads);
+            let index_dir = open_index(&index_path, &DBG_COMPONENTS);
+            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for export
+            let dbg = or_exit(index_dir.load_dbg(&sbwt));
+            let coloring = or_exit(index_dir.load_coloring());
+            export_index(&dbg, &coloring, &color_dump_prefix, colors_to_stdout, gfa, no_unitigs, no_color_sets, n_threads);
         },
         Subcommands::Stats { index: index_path, n_threads } => {
             let index_dir = open_index(&index_path, &DBG_COMPONENTS);
-            let index = or_exit(index_dir.load_dbg_index());
-            print_stats(&index, &index_dir, n_threads);
+            let sbwt = or_exit(index_dir.load_sbwt(true)); // Select support is required for the unitig walk
+            let dbg = or_exit(index_dir.load_dbg(&sbwt));
+            let coloring = or_exit(index_dir.load_coloring());
+            print_stats(&dbg, &coloring, &index_dir, n_threads);
         }
         Subcommands::Report { index: index_path, input, output } => {
             let color_names = or_exit(open_index(&index_path, &[Component::ColorNames]).load_color_names());
