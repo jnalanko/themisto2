@@ -80,6 +80,7 @@ pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: Compa
                 let (result_sbwt, removed) = sbwt::merge_with_removed_positions(sbwt1.clone(), sbwt2.clone(), interleaving.clone(), precalc_len, n_threads);
                 (result_sbwt, Some(removed))
             };
+            // The clone passed to sbwt is gone by now: as for the SBWTs below.
             let sbwt::MergeInterleaving { s1, s2, is_leader, .. } = Arc::try_unwrap(interleaving).unwrap();
             (result_sbwt, s1, s2, is_leader, removed)
         },
@@ -103,6 +104,7 @@ pub(crate) fn set_operation<CSS: ColorSetStorage + Send + Sync>(coloring1: Compa
     };
 
     // Put the coloring structs back together
+    // The unwraps are ok because sbwt's set operations currently drop all their clones of the Arcs before returning
     let sbwt1 = Arc::try_unwrap(sbwt1).unwrap();
     let sbwt2 = Arc::try_unwrap(sbwt2).unwrap();
     let coloring1 = CompactColexKmers::<CSS>::new(sbwt1, lcs1, map1, sets1, Some(&color_names_1));

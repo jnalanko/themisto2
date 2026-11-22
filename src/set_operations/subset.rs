@@ -55,6 +55,7 @@ pub fn subset_compact_colex_kmers<CSS: ColorSetStorage + Send + Sync>(coloring: 
     // Of the merge plan, only the positions of the input (s1) are needed while dummy nodes have no
     // colors, and the starts of its (k-1)-suffix groups, for the groups of the result
     let sbwt::ThreeWayInterleaving { s1, s2, is_leader, .. } = result_merge_plan;
+    // sbwt::filter has dropped its clone by now (see the unwraps in pipeline::set_operation)
     let coloring = CompactColexKmers::<CSS>::new(Arc::try_unwrap(sbwt).unwrap(), lcs, map, sets, Some(&color_names));
 
     // With all colors, they keep their ids
