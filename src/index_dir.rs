@@ -181,7 +181,7 @@ impl IndexDir {
         Ok(())
     }
 
-    /// Loads the SBWT. Select support is needed for de Bruijn graph operations ([crate::ColoredDbg]),
+    /// Loads the SBWT. Select support is needed for de Bruijn graph operations,
     /// set operations and exporting, but not for pseudoalignment.
     pub fn load_sbwt(&self, build_select: bool) -> std::io::Result<SbwtIndex<SubsetMatrix>> {
         let mut input = self.open_component(Component::Sbwt)?;
@@ -383,10 +383,11 @@ mod tests {
         let loaded = opened.load_dbg_index().unwrap();
         assert_eq!(loaded.sufgroups, index.sufgroups);
         assert_eq!(loaded.dummy_marks, index.dummy_marks);
-        let g = crate::ColoredDbg::new(&loaded); // Requires that select support was built
-        for v in g.nodes() {
-            let a: Vec<usize> = index.colex_to_set(v.id).iter().collect();
-            let b: Vec<usize> = loaded.colex_to_set(v.id).iter().collect();
+        assert!(sbwt::SubsetSeq::has_select_support(loaded.sbwt.sbwt()));
+        for colex in 0..loaded.sbwt.n_sets() {
+            if loaded.dummy_marks[colex] { continue; }
+            let a: Vec<usize> = index.colex_to_set(colex).iter().collect();
+            let b: Vec<usize> = loaded.colex_to_set(colex).iter().collect();
             assert_eq!(a, b);
         }
         std::fs::remove_dir_all(&dir).unwrap();

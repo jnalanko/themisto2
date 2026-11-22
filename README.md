@@ -106,29 +106,6 @@ A Themisto 2 index is a directory with one file per component. Each subcommand l
 
 Every component except `metadata.json` is optional, and a subcommand that needs a missing component exits with an error that names it. For example, an index without `kmers.lcs` can still be used for pseudoalignment. Indexes in the single-file `.thm2` format of earlier versions are not supported: rebuild them.
 
-# Rust API
-
-Themisto 2 provides a Rust API for navigating the colored de Bruijn graph that is encoded in the Themisto 2 index. Currently, the API provides k-mer lookup, graph navigation, color sets of k-mers, and parallel iteration over unitigs and their color runs. To use it, add the dependency to your `Cargo.toml`:
-
-```
-[dependencies]
-themisto2 = { git = "https://github.com/jnalanko/themisto2" }
-```
-
-For example, the following prints every maximal unitig segment where all k-mers have the same color set, along with the colors:
-
-```rust
-use themisto2::{ColoredDbg, ColorSetView};
-
-let index = themisto2::IndexDir::open("my_index".as_ref()).unwrap().load_dbg_index().unwrap();
-let dbg = ColoredDbg::new(&index);
-dbg.par_for_each_colored_unitig(|u| {
-    let colors: Vec<usize> = u.color_set.iter().collect();
-    println!("{}\t{:?}", String::from_utf8_lossy(u.seq), colors);
-}, 4);
-```
-
-Run `cargo doc --open` in the repository to browse the full API documentation.
 
 # Citation
 
