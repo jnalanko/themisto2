@@ -443,31 +443,49 @@ fn unitig_import_parser_thread(unitig_dump: impl std::io::BufRead + Send + Sync 
     drop(out);
 }
 
-/// A borrowed view of an SBWT and the coloring of its k-mers, for looking up color sets by colex rank.
-pub struct ColoredKmers<'a, CSS: ColorSetStorage> {
-    sbwt: &'a SbwtIndex<SubsetMatrix>,
-    coloring: &'a Coloring<CSS>,
+/// The components of a Themisto 2 index that de Bruijn graph operations on its colored k-mers
+/// need: the SBWT (with select support), its (k-1)-suffix group marks and dummy node marks, and the
+/// coloring. The LCS array is not part of it. Set operations take and return these.
+pub struct DbgIndex<CSS: ColorSetStorage> {
+    pub sbwt: SbwtIndex<SubsetMatrix>,
+    /// One bit per SBWT position, set for the first k-mer of each (k-1)-suffix group (see [Dbg::k_minus_1_marks])
+    pub sufgroups: bitvec::vec::BitVec,
+    /// One bit per SBWT position, set for dummy k-mers (see [Dbg::dummy_marks])
+    pub dummy_marks: bitvec::vec::BitVec,
+    pub coloring: Coloring<CSS>,
 }
 
-// Not derived: deriving would require CSS: Copy
-impl<CSS: ColorSetStorage> Clone for ColoredKmers<'_, CSS> {
-    fn clone(&self) -> Self { *self }
-}
-impl<CSS: ColorSetStorage> Copy for ColoredKmers<'_, CSS> {}
+impl<CSS: ColorSetStorage> DbgIndex<CSS> {
 
-impl<'a, CSS: ColorSetStorage> ColoredKmers<'a, CSS> {
-
-    pub fn new(sbwt: &'a SbwtIndex<SubsetMatrix>, coloring: &'a Coloring<CSS>) -> Self {
-        assert_eq!(coloring.map.sampling.len(), sbwt.n_sets(), "The coloring does not belong to the SBWT");
-        Self { sbwt, coloring }
+    pub fn new(sbwt: SbwtIndex<SubsetMatrix>, sufgroups: bitvec::vec::BitVec, dummy_marks: bitvec::vec::BitVec, coloring: Coloring<CSS>) -> Self {
+        assert_eq!(sufgroups.len(), sbwt.n_sets());
+        assert_eq!(dummy_marks.len(), sbwt.n_sets());
+        assert_eq!(coloring.map.sampling.len(), sbwt.n_sets());
+        Self { sbwt, sufgroups, dummy_marks, coloring }
     }
 
-    pub fn sbwt(&self) -> &'a SbwtIndex<SubsetMatrix> {
-        self.sbwt
+    /// Computes the suffix group marks from `lcs` and the dummy marks from the SBWT, which needs
+    /// select support.
+    pub fn from_lcs(sbwt: SbwtIndex<SubsetMatrix>, lcs: &LcsArray, coloring: Coloring<CSS>, n_threads: usize) -> Self {
+        let (sufgroups, dummy_marks) = {
+            let dbg = Dbg::new(&sbwt, Some(lcs), n_threads);
+            (dbg.k_minus_1_marks().clone(), dbg.dummy_marks().clone())
+        };
+        Self::new(sbwt, sufgroups, dummy_marks, coloring)
     }
 
-    pub fn coloring(&self) -> &'a Coloring<CSS> {
-        self.coloring
+    pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, bitvec::vec::BitVec, bitvec::vec::BitVec, Coloring<CSS>) {
+        (self.sbwt, self.sufgroups, self.dummy_marks, self.coloring)
+    }
+
+    /// The de Bruijn graph of the SBWT. [Dbg] owns its marks, so this clones the marks (2 bits per
+    /// SBWT position), which is still much cheaper than computing them again.
+    pub fn dbg(&self) -> Dbg<'_, SubsetMatrix> {
+        Dbg::from_marks(&self.sbwt, self.sufgroups.clone(), self.dummy_marks.clone())
+    }
+
+    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
+        &self.sbwt
     }
 
     pub fn get_k(&self) -> usize {
@@ -475,31 +493,31 @@ impl<'a, CSS: ColorSetStorage> ColoredKmers<'a, CSS> {
     }
 
     pub fn colex_to_set_id(&self, colex: usize) -> usize {
-        self.coloring.colex_to_set_id(colex, self.sbwt)
+        self.coloring.colex_to_set_id(colex, &self.sbwt)
     }
 
-    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'a> {
+    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'_> {
         self.coloring.set_id_to_set(id)
     }
 
-    pub fn colex_to_set(&self, colex: usize) -> CSS::SetView<'a> {
-        self.coloring.colex_to_set(colex, self.sbwt)
+    pub fn colex_to_set(&self, colex: usize) -> CSS::SetView<'_> {
+        self.coloring.colex_to_set(colex, &self.sbwt)
     }
 
-    pub fn get_map(&self) -> &'a ColexToColorSetMap {
+    pub fn get_map(&self) -> &ColexToColorSetMap {
         &self.coloring.map
     }
 
-    pub fn get_set_storage(&self) -> &'a CSS {
+    pub fn get_set_storage(&self) -> &CSS {
         &self.coloring.sets
     }
 
-    pub fn get_color_names(&self) -> &'a Vec<String> {
+    pub fn get_color_names(&self) -> &Vec<String> {
         &self.coloring.color_names
     }
 
-    /// `dbg` must be the de Bruijn graph of the SBWT of this view.
-    pub fn compute_index_stats(&self, dbg: &Dbg<'_, SubsetMatrix>, n_threads: usize) -> IndexStats where CSS: Sync {
+    pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {
+        let dbg = self.dbg();
         let sets = self.get_set_storage();
         let map = self.get_map();
         log::info!("Computing size of distinct color sets");
@@ -551,88 +569,6 @@ impl<'a, CSS: ColorSetStorage> ColoredKmers<'a, CSS> {
             max_unitig_length: max_unitig_length.load(Acquire),
             min_unitig_length: min_unitig_length.load(Acquire),
         }
-    }
-}
-
-/// The components of a Themisto 2 index that de Bruijn graph operations on its colored k-mers
-/// need: the SBWT (with select support), its (k-1)-suffix group marks and dummy node marks, and the
-/// coloring. The LCS array is not part of it. Set operations take and return these.
-pub struct DbgIndex<CSS: ColorSetStorage> {
-    pub sbwt: SbwtIndex<SubsetMatrix>,
-    /// One bit per SBWT position, set for the first k-mer of each (k-1)-suffix group (see [Dbg::k_minus_1_marks])
-    pub sufgroups: bitvec::vec::BitVec,
-    /// One bit per SBWT position, set for dummy k-mers (see [Dbg::dummy_marks])
-    pub dummy_marks: bitvec::vec::BitVec,
-    pub coloring: Coloring<CSS>,
-}
-
-impl<CSS: ColorSetStorage> DbgIndex<CSS> {
-
-    pub fn new(sbwt: SbwtIndex<SubsetMatrix>, sufgroups: bitvec::vec::BitVec, dummy_marks: bitvec::vec::BitVec, coloring: Coloring<CSS>) -> Self {
-        assert_eq!(sufgroups.len(), sbwt.n_sets());
-        assert_eq!(dummy_marks.len(), sbwt.n_sets());
-        assert_eq!(coloring.map.sampling.len(), sbwt.n_sets());
-        Self { sbwt, sufgroups, dummy_marks, coloring }
-    }
-
-    /// Computes the suffix group marks from `lcs` and the dummy marks from the SBWT, which needs
-    /// select support.
-    pub fn from_lcs(sbwt: SbwtIndex<SubsetMatrix>, lcs: &LcsArray, coloring: Coloring<CSS>, n_threads: usize) -> Self {
-        let (sufgroups, dummy_marks) = {
-            let dbg = Dbg::new(&sbwt, Some(lcs), n_threads);
-            (dbg.k_minus_1_marks().clone(), dbg.dummy_marks().clone())
-        };
-        Self::new(sbwt, sufgroups, dummy_marks, coloring)
-    }
-
-    pub fn into_parts(self) -> (SbwtIndex<SubsetMatrix>, bitvec::vec::BitVec, bitvec::vec::BitVec, Coloring<CSS>) {
-        (self.sbwt, self.sufgroups, self.dummy_marks, self.coloring)
-    }
-
-    /// The de Bruijn graph of the SBWT. [Dbg] owns its marks, so this clones the marks (2 bits per
-    /// SBWT position), which is still much cheaper than computing them again.
-    pub fn dbg(&self) -> Dbg<'_, SubsetMatrix> {
-        Dbg::from_marks(&self.sbwt, self.sufgroups.clone(), self.dummy_marks.clone())
-    }
-
-    pub fn colored_kmers(&self) -> ColoredKmers<'_, CSS> {
-        ColoredKmers::new(&self.sbwt, &self.coloring)
-    }
-
-    pub fn sbwt(&self) -> &SbwtIndex<SubsetMatrix> {
-        &self.sbwt
-    }
-
-    pub fn get_k(&self) -> usize {
-        self.sbwt.k()
-    }
-
-    pub fn colex_to_set_id(&self, colex: usize) -> usize {
-        self.coloring.colex_to_set_id(colex, &self.sbwt)
-    }
-
-    pub fn set_id_to_set(&self, id: usize) -> CSS::SetView<'_> {
-        self.coloring.set_id_to_set(id)
-    }
-
-    pub fn colex_to_set(&self, colex: usize) -> CSS::SetView<'_> {
-        self.coloring.colex_to_set(colex, &self.sbwt)
-    }
-
-    pub fn get_map(&self) -> &ColexToColorSetMap {
-        &self.coloring.map
-    }
-
-    pub fn get_set_storage(&self) -> &CSS {
-        &self.coloring.sets
-    }
-
-    pub fn get_color_names(&self) -> &Vec<String> {
-        &self.coloring.color_names
-    }
-
-    pub fn compute_index_stats(&self, n_threads: usize) -> IndexStats where CSS: Sync {
-        self.colored_kmers().compute_index_stats(&self.dbg(), n_threads)
     }
 
     /// Easy but inefficient constructor for tests. colored_seqs has pairs (seq, color).

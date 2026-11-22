@@ -20,7 +20,7 @@
 compile_error!("This crate requires a 64-bit usize (target_pointer_width = 64).");
 
 // Public API
-pub use colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex, IndexStats};
+pub use colex_colored_kmers::{Coloring, DbgIndex, IndexStats};
 pub use coloring_interface::{ColorSetStorage, ColorSetView};
 pub use sparse_dense_storage::SparseDenseStorage;
 pub use colored_dbg::{ColoredDbg, ColorSet, ColorRun, ColoredUnitig, Node, Unitig};

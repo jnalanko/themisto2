@@ -14,7 +14,7 @@ use sbwt::dbg::Dbg;
 use sbwt::{SbwtIndex, SubsetMatrix, SubsetSeq};
 use simple_sds_sbwt::ops::BitVec;
 
-use crate::colex_colored_kmers::{Coloring, ColoredKmers, DbgIndex};
+use crate::colex_colored_kmers::{Coloring, DbgIndex};
 use crate::sparse_dense_storage::{SparseDenseColorSetView, SparseDenseStorage};
 
 pub use sbwt::dbg::Node;
@@ -55,7 +55,8 @@ pub struct ColoredUnitig<'u, 'a> {
 
 /// Colored de Bruijn graph operations on a borrowed Themisto 2 index.
 pub struct ColoredDbg<'a> {
-    index: ColoredKmers<'a, SparseDenseStorage>,
+    sbwt: &'a SbwtIndex<SubsetMatrix>,
+    coloring: &'a Coloring<SparseDenseStorage>,
     dbg: Dbg<'a, SubsetMatrix>,
 }
 
@@ -73,33 +74,38 @@ impl<'a> ColoredDbg<'a> {
     /// Panics if `sbwt` has no select support.
     pub fn from_parts(sbwt: &'a SbwtIndex<SubsetMatrix>, coloring: &'a Coloring<SparseDenseStorage>, sufgroups: bitvec::vec::BitVec, dummy_marks: bitvec::vec::BitVec) -> Self {
         assert!(sbwt.sbwt().has_select_support(), "ColoredDbg requires an SBWT with select support");
+        assert_eq!(coloring.get_map().sampling.len(), sbwt.n_sets(), "The coloring does not belong to the SBWT");
         let dbg = Dbg::from_marks(sbwt, sufgroups, dummy_marks);
-        Self{index: ColoredKmers::new(sbwt, coloring), dbg}
+        Self{sbwt, coloring, dbg}
     }
 
-    pub fn index(&self) -> ColoredKmers<'a, SparseDenseStorage> {
-        self.index
+    pub fn sbwt(&self) -> &'a SbwtIndex<SubsetMatrix> {
+        self.sbwt
+    }
+
+    pub fn coloring(&self) -> &'a Coloring<SparseDenseStorage> {
+        self.coloring
     }
 
     pub fn k(&self) -> usize {
-        self.index.get_k()
+        self.sbwt.k()
     }
 
     pub fn n_nodes(&self) -> usize {
-        self.index.sbwt().n_kmers()
+        self.sbwt.n_kmers()
     }
 
     pub fn n_colors(&self) -> usize {
-        self.index.get_color_names().len()
+        self.coloring.n_colors()
     }
 
     pub fn color_names(&self) -> &'a [String] {
-        self.index.get_color_names()
+        self.coloring.get_color_names()
     }
 
     /// Iterates all nodes in colex order.
     pub fn nodes(&self) -> impl Iterator<Item = Node> + '_ {
-        (0..self.index.sbwt().n_sets())
+        (0..self.sbwt.n_sets())
             .filter(|&colex| !self.dbg.is_dummy_colex_position(colex))
             .map(|id| Node{id})
     }
@@ -145,15 +151,15 @@ impl<'a> ColoredDbg<'a> {
     /// Takes time proportional to the distance to the next sampled k-mer.
     /// For many nodes along a path, prefer the unitig iterators.
     pub fn color_set_id(&self, node: Node) -> usize {
-        self.index.colex_to_set_id(node.id)
+        self.coloring.colex_to_set_id(node.id, self.sbwt)
     }
 
     pub fn color_set(&self, node: Node) -> ColorSet<'a> {
-        self.index.colex_to_set(node.id)
+        self.coloring.colex_to_set(node.id, self.sbwt)
     }
 
     pub fn color_set_by_id(&self, color_set_id: usize) -> ColorSet<'a> {
-        self.index.set_id_to_set(color_set_id)
+        self.coloring.set_id_to_set(color_set_id)
     }
 
     /// Calls `callback` on every maximal unitig in parallel, in no particular order.
@@ -188,7 +194,7 @@ impl<'a> ColoredDbg<'a> {
     // so we scan the path backward. If the last node is not sampled (can happen on a cycle),
     // we look its set up by walking forward around the cycle.
     fn color_runs(&self, nodes: &[Node]) -> Vec<ColorRun<'a>> {
-        let sampling = &self.index.get_map().sampling;
+        let sampling = &self.coloring.get_map().sampling;
         let mut runs = Vec::<ColorRun>::new();
         if nodes.is_empty() { return runs }
 
